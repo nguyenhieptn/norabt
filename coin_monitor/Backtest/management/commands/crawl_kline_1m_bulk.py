@@ -31,7 +31,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self.exchange = options.get("exchange", "future")
         self.excepts = options.get("excepts", [])
-        symbols = [
+        has_symbols = [
             "BTCUSDT",
             "ZENUSDT",
             "INJUSDT",
@@ -132,7 +132,7 @@ class Command(BaseCommand):
             "RLCUSDT",
         ]
 
-        # symbols = self.getAllSymbols()
+        symbols = self.getAllSymbols()
         self.total = len(symbols)
         self.done = 0
         # symbols = ['RVNUSDT']
@@ -140,6 +140,8 @@ class Command(BaseCommand):
         threads = list()
         max_threads = 3  # mỗi symbol tốn ~1000 weight mỗi phút
         for symbol in symbols:
+            if symbol in has_symbols:
+                continue
             if symbol in self.excepts:
                 continue
             thread = Thread(target=self.openProc, args=(symbol,))

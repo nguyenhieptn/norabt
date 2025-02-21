@@ -34,7 +34,7 @@ class Command(BaseCommand):
         self.exchange = options.get("exchange", "future")
         self.excepts = options.get("excepts", [])
 
-        symbols = [
+        symbol_has = [
             "BTCUSDT",
             "ZENUSDT",
             "INJUSDT",
@@ -134,7 +134,7 @@ class Command(BaseCommand):
             "VETUSDT",
             "RLCUSDT",
         ]
-        # symbols = self.getAllSymbols()
+        symbols = self.getAllSymbols()
 
         self.total = len(symbols)
         self.done = 0
@@ -143,6 +143,8 @@ class Command(BaseCommand):
         optionReset = f"--reset" if self.reset else ""
         threads = list()
         for symbol in symbols:
+            if symbol in symbol_has:
+                continue
             if symbol in self.excepts:
                 continue
             thread = Thread(
