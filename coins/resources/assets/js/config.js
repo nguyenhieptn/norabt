@@ -1,0 +1,1 @@
+global.SERVER_LOCATION = 'server_68';
