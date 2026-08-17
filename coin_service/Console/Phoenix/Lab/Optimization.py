@@ -130,16 +130,16 @@ class Optimization:
         self.opti.lab_opt_stop_time = None
         self.opti.save()
 
-        blocks = []
-        block = []
-        blockLeng = self.opti.lab_opt_thread 
+        from helper.ResourceGuard import ResourceGuard
+        safe_thread_count = ResourceGuard.get_safe_worker_count(self.opti.lab_opt_thread)
+        blockLeng = safe_thread_count
 
         if self.account.lab_account_sync == 0:
             numberOfCamp = LabCampaignsWrapper().filter({LabCampaignsWrapper.lab_campaign_account: self.opti.lab_opt_account}).count()
             if(numberOfCamp >= 20):
                 blockLeng = 1
             else:
-                blockLeng = int(20/numberOfCamp)
+                blockLeng = min(safe_thread_count, max(1, int(20/numberOfCamp)))
 
         for param in self.paramsList:
             block.append(param)
@@ -150,7 +150,13 @@ class Optimization:
         if(len(block) > 0): blocks.append(block)
         
         for blockParms in blocks:
-            self.opti.lab_opt_log = f"Processing block {str(len(blockParms))} sets of params"
+            # Kiểm tra RAM khả dụng trước khi kích hoạt block mới
+            is_safe, msg = ResourceGuard.is_safe_to_run(min_available_gb=2.5)
+            if not is_safe:
+                sleep(2) # Tạm dừng 2s để bộ nhớ hồi phục
+                ResourceGuard.cleanup_memory()
+
+            self.opti.lab_opt_log = f"Processing block {str(len(blockParms))} sets of params (Max workers: {blockLeng})"
             self.opti.lab_opt_processed = f"{self.totalParam},{self.processed}"
             self.opti.save()
 
@@ -166,6 +172,8 @@ class Optimization:
                 self.processed += 1
                 self.opti.lab_opt_processed = f"{self.totalParam},{self.processed}"
                 self.opti.save()
+
+            ResourceGuard.cleanup_memory()
 
         self.opti.lab_opt_stop_time = int(time())
         self.opti.save()

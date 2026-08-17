@@ -1,7 +1,7 @@
 #!/bin/bash
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export NODE_OPTIONS="--openssl-legacy-provider"
+export NODE_OPTIONS="--max-old-space-size=2048 --openssl-legacy-provider"
 
 echo "======================================================="
 echo "💻 KHỞI CHẠY FRONTEND DEVELOPMENT SERVERS"
