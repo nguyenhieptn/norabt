@@ -11,7 +11,9 @@ from helper.Defaults import *
 
 import plotly.graph_objects as go
 import plotly.express as px
+import re
 import pandas as pd
+import numpy as np
 from plotly.subplots import make_subplots
 
 from models.Wrappers.backtest_wrapper import LabAccountWrapper, LabOrderWrapper, LabResultsWrapper
@@ -40,6 +42,15 @@ class Command(BaseCommand):
         parser.add_argument("-d","--day", nargs='?', default=day, type=str)
         parser.add_argument("-a","--account", nargs='?', default=None, type=int)
         parser.add_argument("-t", "--type", nargs='?', default=1, type=int)
+        # Ve chi bao de soi bang mat. Vi du:
+        #   --indicator keltner9   (dai Keltner kup9_1/klo9_1 + nen)
+        #   --indicator macross    (price_ema9 x price_wma45)
+        #   --indicator atr,rsi    (moi cai mot khung rieng ben duoi)
+        #   --indicator price_ema9,price_wma45,kup9_1,klo9_1   (chi dinh thang ten cot)
+        parser.add_argument("-i", "--indicator", nargs='?', default=None, type=str)
+        parser.add_argument("-f", "--frame", nargs='?', default="1m", type=str)
+        # So ngay lay them phia truoc de du nen tinh chi bao (mac dinh tu tinh theo chu ky)
+        parser.add_argument("--days", nargs='?', default=None, type=int)
 
     
     def handle(self, *args, **options):
@@ -47,6 +58,9 @@ class Command(BaseCommand):
         self.day = options.get('day')
         self.account = options.get('account')
         self.type = options.get('type')
+        self.indicator = options.get('indicator')
+        self.frame = options.get('frame') or '1m'
+        self.extraDays = options.get('days')
 
         accountObj = list(LabAccountWrapper().filter({LabAccountWrapper.lab_account_id: self.account}))
         if(len(accountObj) == 0):
@@ -76,6 +90,9 @@ class Command(BaseCommand):
         date = datetime.strptime(self.day, '%Y_%m_%d').replace(tzinfo=VN_TZ)
         startOfDay = int(date.timestamp())
         endOfDay = startOfDay + 86400
+        # Lay them ngay truoc do de du nen tinh chi bao lookback dai (vd WMA45 tren 4h can ~8 ngay)
+        if getattr(self, 'extraDays', 0) and dataType.startswith('candle'):
+            startOfDay -= int(self.extraDays) * 86400
         if(self.accountObj.lab_account_db == 'backtest_data_1m'):
             startOfDay -= 2 * 86400
             endOfDay += 2 * 86400
@@ -261,9 +278,245 @@ class Command(BaseCommand):
         return self.data[key]
         
     
+
+    # ============================================================
+    # VẼ CHỈ BÁO — để soi bằng mắt xem lệnh vào có đúng tín hiệu không.
+    # Dataset backtest có sẵn ~259 cột (atr, kup*, klo*, price_ema*, price_wma*, rsi*)
+    # nên chỉ cần chọn cột là vẽ được, không phải tính lại.
+    # ============================================================
+
+    # ---- Tinh chi bao khong co san trong dataset (WMA, EMA, RSI-cua-RSI...) ----
+    # Cong thuc lay dung tu helper/Indicator.py de khop voi engine backtest.
+    CALC_PATTERNS = [
+        # ten cot            -> (nguon, ham, chu ky)
+        (r'^price_wma(\d+)$',  ('close', 'wma')),
+        (r'^price_ema(\d+)$',  ('close', 'ema')),
+        (r'^price_sma(\d+)$',  ('close', 'sma')),
+        (r'^rsi_wma(\d+)$',    ('rsi',   'wma')),
+        (r'^rsi_ema(\d+)$',    ('rsi',   'ema')),
+        (r'^rsi_sma(\d+)$',    ('rsi',   'sma')),
+    ]
+
+    @staticmethod
+    def _wma(series, n):
+        """WMA trong so tuyen tinh 1..N — giong helper/Indicator.py::wma"""
+        w = np.arange(1, n + 1)
+        return series.rolling(n).apply(lambda x: np.dot(x, w) / w.sum(), raw=True)
+
+    def computeMissingColumn(self, data, col):
+        """Tinh cot chi bao neu dataset chua co. Tra True neu tinh duoc."""
+        if col in data.columns:
+            return True
+        for pat, (src, fn) in self.CALC_PATTERNS:
+            m = re.match(pat, col)
+            if not m:
+                continue
+            n = int(m.group(1))
+            if src not in data.columns:
+                print(f"  (khong tinh duoc '{col}') thieu cot nguon '{src}'")
+                return False
+            ser = pd.to_numeric(data[src], errors='coerce')
+            if fn == 'wma':
+                data[col] = self._wma(ser, n)
+            elif fn == 'ema':
+                data[col] = ser.ewm(span=n, adjust=False).mean()
+            elif fn == 'sma':
+                data[col] = ser.rolling(n).mean()
+            print(f"  (tu tinh) '{col}' = {fn.upper()}{n} cua '{src}'")
+            return True
+        return False
+
+    def neededLookback(self, cols):
+        """So nen can lay them de chi bao du du lieu (lay chu ky lon nhat x2)."""
+        maxN = 0
+        for c in cols:
+            for pat, _ in self.CALC_PATTERNS:
+                m = re.match(pat, c)
+                if m:
+                    maxN = max(maxN, int(m.group(1)))
+        return maxN
+
+    INDICATOR_PRESETS = {
+        # Band Trading: dai Keltner phu len gia (uu tien cot dau tien co trong dataset)
+        'keltner':   {'overlay': [['kup9_1','kup10_1','kup11_1'], ['klo9_1','klo10_1','klo11_1'],
+                                  ['price_ema9','price_ema10']], 'panels': [['atr']]},
+        'keltner9':  {'overlay': [['kup9_1'], ['klo9_1'], ['price_ema9','price_ema10']], 'panels': [['atr']]},
+        'keltner11': {'overlay': [['kup11_1'], ['klo11_1'], ['price_ema11']], 'panels': [['atr']]},
+        # Trend Following: cap duong nhanh/cham
+        # Trend Following dung dung cap EMA9 x WMA45 (tu tinh neu dataset chua co)
+        'macross':   {'overlay': [['price_ema9'], ['price_wma45']],
+                      'panels': [['rsi'], ['rsi_wma45']]},
+        # DCA Long: bo loc RSI
+        'dca':       {'overlay': [['price_ema9']], 'panels': [['rsi'], ['rsi_wma45']]},
+        # Nhin tong quat
+        'all':       {'overlay': [['price_ema9','price_ema10'], ['kup9_1','kup10_1'], ['klo9_1','klo10_1']],
+                      'panels': [['atr'], ['rsi']]},
+    }
+
+    def availableColumns(self, frame=None):
+        """Cac cot chi bao co that trong dataset (de goi y khi go sai ten)."""
+        frame = frame or self.frame
+        doc = self.candleModels.setCollection(f"candle_{frame}").collection.find_one({'symbol': self.symbol})
+        if not doc:
+            return []
+        skip = {'_id', 'symbol', 'open_time', 'close_time', 'timestamp', 'event_time', 'is_close'}
+        return sorted(k for k in doc.keys() if k not in skip)
+
+    def pickFirstAvailable(self, candidates, cols):
+        """Chon cot dau tien co san, hoac cot dau tien co the tu tinh duoc."""
+        for c in candidates:
+            if c in cols:
+                return c
+        for c in candidates:
+            if self.neededLookback([c]) > 0:
+                return c
+        return None
+
+    def _autoLookback(self, cols):
+        """Tu dat so ngay lay them cho du nen tinh chi bao, neu nguoi dung chua chi dinh."""
+        if self.extraDays is not None:
+            return
+        n = self.neededLookback(cols)
+        if n == 0:
+            return
+        # so gio moi nen theo khung
+        perBar = {'1m': 1/60, '3m': .05, '5m': 1/12, '15m': .25, '30m': .5,
+                  '1h': 1, '2h': 2, '4h': 4, '8h': 8, '1d': 24}.get(self.frame, 4)
+        self.extraDays = max(1, int((n * 2 * perBar) / 24) + 1)
+        print(f"Tu lay them {self.extraDays} ngay du lieu de tinh chi bao (chu ky lon nhat {n})")
+
+    def resolveIndicators(self):
+        """Tra ve (cot phu len gia, cot ve khung rieng). Tu bo qua cot khong ton tai."""
+        raw = (self.indicator or '').strip()
+        if not raw:
+            return [], []
+
+        cols = self.availableColumns()
+
+        # --indicator list : chi liet ke cot co san roi thoat
+        if raw == 'list':
+            print(f"\n{len(cols)} cot chi bao co trong candle_{self.frame} cua {self.symbol}:")
+            for i in range(0, len(cols), 6):
+                print('  ' + '  '.join(f'{c:<18}' for c in cols[i:i+6]))
+            raise SystemExit(0)
+
+        if raw in self.INDICATOR_PRESETS:
+            cfg = self.INDICATOR_PRESETS[raw]
+            overlay = [x for x in (self.pickFirstAvailable(g, cols) for g in cfg['overlay']) if x]
+            panels = [x for x in (self.pickFirstAvailable(g, cols) for g in cfg['panels']) if x]
+            self._autoLookback(overlay + panels)
+            print(f"Preset '{raw}': ve {overlay} tren gia" + (f", panel {panels}" if panels else ""))
+            return overlay, panels
+
+        # Chi dinh thang ten cot, phan tach bang dau phay
+        wanted = [c.strip() for c in raw.split(',') if c.strip()]
+        self._autoLookback(wanted)
+        overlay, panels, missing = [], [], []
+        for c in wanted:
+            # cot khong co san nhung tinh duoc (wma/ema/sma) thi van nhan
+            if c not in cols and self.neededLookback([c]) == 0:
+                missing.append(c); continue
+            if c.startswith(('price_', 'kup', 'klo', 'ema', 'wma')) or c in ('close', 'open', 'high', 'low'):
+                overlay.append(c)
+            else:
+                panels.append(c)
+        if missing:
+            print(f"Khong co cot: {', '.join(missing)}")
+            print(f"   (chay '--indicator list' de xem {len(cols)} cot co san)")
+        return overlay, panels
+
+    def drawKlineIndicator(self, row, frame, overlayCols):
+        """Nến + các đường chỉ báo cùng đơn vị giá phủ lên trên."""
+        data = self.getData(f'candle_{frame}')
+        if len(data) == 0:
+            print(f"Khong co du lieu candle_{frame}")
+            return
+        timex = pd.to_datetime(data['open_time'].to_list(), unit='ms', utc=True).tz_convert(VN_TZ)
+        self.fig.add_trace(go.Candlestick(
+            x=timex, open=data['open'], high=data['high'],
+            low=data['low'], close=data['close'],
+            name=f'candle_{frame}'.upper(),
+        ), row=row, col=1)
+
+        palette = ['#e0a94a', '#4fb3a8', '#d9705a', '#8ab4f8', '#c58af9', '#f28b82']
+        for i, col in enumerate(overlayCols):
+            if not self.computeMissingColumn(data, col):
+                print(f"  (bo qua) khong co cot '{col}' trong candle_{frame}")
+                continue
+            self.fig.add_trace(go.Scattergl(
+                x=timex, y=data[col],
+                line=dict(color=palette[i % len(palette)], width=1.4),
+                name=col.upper(),
+            ), row=row, col=1)
+
+    def drawIndicatorPanel(self, row, frame, col):
+        """Một chỉ báo khác đơn vị giá (atr, rsi...) vẽ ở khung riêng."""
+        data = self.getData(f'candle_{frame}')
+        if len(data) == 0 or not self.computeMissingColumn(data, col):
+            print(f"  (bo qua panel) khong co cot '{col}'")
+            return
+        timex = pd.to_datetime(data['open_time'].to_list(), unit='ms', utc=True).tz_convert(VN_TZ)
+        self.fig.add_trace(go.Scattergl(
+            x=timex, y=data[col],
+            line=dict(color='#e0a94a', width=1.4),
+            name=col.upper(),
+        ), row=row, col=1)
+
+
+    def drawPositionOnChart(self, row):
+        """Đánh dấu điểm vào/thoát lệnh lên biểu đồ chỉ báo — phần để soi bằng mắt.
+        Long/Short kèm trạng thái: TP chốt lãi, ST cắt lỗ, W chờ, C huỷ."""
+        positionData = self.getData('Position')
+        orderData = self.getData('Order')
+
+        if len(positionData) > 0:
+            px = pd.to_datetime(positionData[LabResultsWrapper.lab_result_chart].to_list(),
+                                unit='ms', utc=True).tz_convert(VN_TZ)
+            positionData['type'] = positionData[LabResultsWrapper.lab_result_type].map(
+                lambda x: "Long" if x == 1 else "Short")
+            positionData['state'] = positionData[LabResultsWrapper.lab_result_status].map(
+                lambda x: "TP" if x == 2 else "ST" if x == 3 else 'W' if x == 6 else 'C' if x == 4 else '')
+            positionData['text'] = "<b>" + positionData['type'] + ":" + positionData['state'] + "</b>"
+            self.fig.add_trace(go.Scatter(
+                x=px, y=positionData[LabResultsWrapper.lab_result_chart_price],
+                name="Vao lenh", mode="markers+text",
+                marker=dict(color="crimson", size=9, symbol='triangle-up'),
+                text=positionData['text'], textposition="top center",
+                textfont=dict(color="crimson"),
+            ), row=row, col=1)
+
+        if len(orderData) > 0:
+            ox = pd.to_datetime(orderData[LabOrderWrapper.lab_order_time].to_list(),
+                                unit='ms', utc=True).tz_convert(VN_TZ)
+            orderData['type'] = orderData[LabOrderWrapper.lab_order_type].map(
+                lambda x: "<b>Buy</b>" if x == 1 else "<b>Sell</b>")
+            self.fig.add_trace(go.Scatter(
+                x=ox, y=orderData[LabOrderWrapper.lab_order_price],
+                name="Khop lenh", mode="markers+text",
+                marker=dict(color="green", size=8, symbol='square'),
+                text=orderData['type'], textposition="bottom center",
+                textfont=dict(color="green"),
+            ), row=row, col=1)
+
     def createChart(self):
 
-        if(self.type == 1):
+        # Co --indicator thi dung bo bieu do soi chi bao, bo qua type mac dinh
+        overlayCols, panelCols = self.resolveIndicators()
+        if overlayCols or panelCols:
+            charts = [{
+                "type": "KlineIndicator",
+                "heigh": 520,
+                "params": [self.frame, overlayCols],
+                "title": f"Gia {self.frame} + " + ", ".join(overlayCols) if overlayCols else f"Gia {self.frame}",
+            }]
+            for col in panelCols:
+                charts.append({
+                    "type": "IndicatorPanel",
+                    "heigh": 180,
+                    "params": [self.frame, col],
+                    "title": col.upper(),
+                })
+        elif(self.type == 1):
             charts = [
                 {
                     "type": "Price",
@@ -495,7 +748,12 @@ class Command(BaseCommand):
         self.data = {}
        
         for row, ch in enumerate(charts):
-            if(ch['type'] == 'Price'):
+            if(ch['type'] == 'KlineIndicator'):
+                self.drawKlineIndicator(row + 1, *ch['params'])
+                self.drawPositionOnChart(row + 1)
+            elif(ch['type'] == 'IndicatorPanel'):
+                self.drawIndicatorPanel(row + 1, *ch['params'])
+            elif(ch['type'] == 'Price'):
                 self.drawPrice(row + 1)
             elif(ch['type'] == 'BidAsk'):
                 self.drawBidAsk(row + 1, *ch['params'])

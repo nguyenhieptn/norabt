@@ -1,0 +1,17 @@
+[17/Aug/2026 09:22:54] "GET /api/authentication/getUser HTTP/1.1" 200 71
+[17/Aug/2026 09:29:42,750] - Broken pipe from ('199.45.155.101', 33648)
+
+[17/Aug/2026 09:29:42] code 400, message Bad request version ('À\x14À')
+[17/Aug/2026 09:29:42] You're accessing the development server over HTTPS, but it only supports HTTP.
+
+Invalid HTTP_HOST header: '103.141.141.24:8002'. You may need to add '103.141.141.24' to ALLOWED_HOSTS.
+Bad Request: /
+[17/Aug/2026 09:29:46] "GET / HTTP/1.1" 400 95197
+[17/Aug/2026 09:29:53] code 400, message Bad request version ('À\x14À')
+[17/Aug/2026 09:29:53] You're accessing the development server over HTTPS, but it only supports HTTP.
+
+Invalid HTTP_HOST header: '103.141.141.24:8002'. You may need to add '103.141.141.24' to ALLOWED_HOSTS.
+Bad Request: /
+[17/Aug/2026 09:29:54] "GET / HTTP/1.1" 400 95728
+[17/Aug/2026 09:29:55] code 505, message Invalid HTTP version (2.0)
+[17/Aug/2026 09:29:55] "PRI * HTTP/2.0" 505 -

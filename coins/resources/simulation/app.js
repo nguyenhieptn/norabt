@@ -54,6 +54,9 @@ App.link = (link) => {
 
 getUser().then((user) => {
 
+	// Chưa đăng nhập: error_handle trong getUser đã điều hướng về /login.
+	if (!user) return;
+
 	render(<Router ref={router => App.router = router}>
 
 		<Layout ref={layout => App.Layout = layout}>

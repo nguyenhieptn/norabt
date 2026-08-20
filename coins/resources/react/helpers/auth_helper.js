@@ -18,6 +18,7 @@ global.logout = () => {
 
 
 global.isAdmin = () => {
+    if (!App.user) return false;
     if (App.user[AUTHEN_GROUP] == AUTHEN_GROUP_ROOT) return true;
     if (App.user[AUTHEN_GROUP] == AUTHEN_GROUP_ADMIN) return true;
 

@@ -26,10 +26,17 @@ class LabAccount(models.Model):
     lab_account_db = models.TextField(blank=True, null=True)
     lab_account_data_type = models.CharField(max_length=150, blank=True, null=True)
     lab_account_data_length = models.IntegerField(blank=True, null=True)
+    lab_account_server = models.CharField(max_length=150, blank=True, null=True)
     lab_account_choice_strategy = models.IntegerField(blank=True, null=True)
     lab_account_choice_period = models.IntegerField(blank=True, null=True)
     lab_account_choice_result = models.TextField(blank=True, null=True)
     lab_account_choice_condition = models.TextField(blank=True, null=True)
+    lab_account_tele_bot = models.CharField(max_length=150, blank=True, null=True)
+    lab_account_tele_group_notice = models.CharField(max_length=150, blank=True, null=True)
+    lab_account_tele_group_summary = models.CharField(max_length=150, blank=True, null=True)
+    lab_account_tele_group_error = models.CharField(max_length=150, blank=True, null=True)
+    lab_account_user = models.IntegerField(blank=True, null=True)
+    lab_account_group = models.CharField(max_length=150, blank=True, null=True)
 
     class Meta:
         managed = False

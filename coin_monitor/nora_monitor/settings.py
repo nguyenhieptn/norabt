@@ -191,43 +191,33 @@ DATABASES = {
             "authMechanism": "SCRAM-SHA-1",
         },
     },
-    "raw_kline1m_future": {  # database save raw data of long van 3 HDD 2T: port 27018
+    # Mongo riêng của norabt: container norabt-mongo (127.0.0.1:27117, bind localhost,
+    # không auth, giới hạn 2 cores/3GB). Mongod 27017 trên máy là của dịch vụ khác.
+    "raw_kline1m_future": {  # nến 1m thô crawl từ Binance futures
         "ENGINE": "djongo",
         "NAME": "raw_kline1m_future",
         "ENFORCE_SCHEMA": False,
         "CLIENT": {
             "host": "127.0.0.1",
-            "port": 27017,
-            "username": "crawler",
-            "password": "crawler@1235",
-            "authSource": "raw_kline1m_future",
-            "authMechanism": "SCRAM-SHA-1",
+            "port": 27117,
         },
     },
-    "raw_kline1m_spot": {  # database save raw data of long van 3
+    "raw_kline1m_spot": {
         "ENGINE": "djongo",
         "NAME": "raw_kline1m_spot",
         "ENFORCE_SCHEMA": False,
         "CLIENT": {
             "host": "127.0.0.1",
-            "port": 27017,
-            "username": "crawler",
-            "password": "crawler@1235",
-            "authSource": "raw_kline1m_spot",
-            "authMechanism": "SCRAM-SHA-1",
+            "port": 27117,
         },
     },
-    "backtest_data": {  # database to save data for backtest on longvan3
+    "backtest_data": {
         "ENGINE": "djongo",
         "NAME": "backtest_data",
         "ENFORCE_SCHEMA": False,
         "CLIENT": {
             "host": "127.0.0.1",
-            "port": 27017,
-            "username": "crawler",
-            "password": "crawler@1245",
-            "authSource": "backtest_data",
-            "authMechanism": "SCRAM-SHA-1",
+            "port": 27117,
         },
     },
     "stock_backtest_result": {
@@ -255,17 +245,13 @@ DATABASES = {
             "authMechanism": "SCRAM-SHA-1",
         },
     },
-    "backtest_data_1m_custom": {  # database to save data for backtest on longvan3 HDD 2T: port 27018
+    "backtest_data_1m_custom": {  # dataset engine đọc để backtest (Mongo norabt 27117)
         "ENGINE": "djongo",
         "NAME": "backtest_data_1m_custom",
         "ENFORCE_SCHEMA": False,
         "CLIENT": {
             "host": "127.0.0.1",
-            "port": 27018,
-            "username": "crawler",
-            "password": "crawler@1245",
-            "authSource": "backtest_data_1m_custom",
-            "authMechanism": "SCRAM-SHA-1",
+            "port": 27117,
         },
     },
     "backtest_data_1m_spot": {  # database to save data for backtest on longvan3 HDD 2T: port 27018
@@ -318,6 +304,16 @@ DATABASES = {
 # Password validation
 # https://docs.djangoproject.com/en/2.2/ref/settings/#auth-password-validators
 
+DATABASES["backtest_data_1m_strategy810"] = {
+    "ENGINE": "djongo",
+    "NAME": "backtest_data_1m_strategy810",
+    "ENFORCE_SCHEMA": False,
+    "CLIENT": {
+        "host": "127.0.0.1",
+        "port": 27117,
+    },
+}
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
@@ -369,12 +365,19 @@ CSRF_TRUSTED_ORIGINS = ["https://monitor.f5traders.com"]
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
 LOGIN_URL = "/admin/login"
+# Dự phòng khi ?next= vắng mặt/không hợp lệ: về SPA thay vì /accounts/profile/ (404)
+LOGIN_REDIRECT_URL = "/"
 
 SECURE_SSL_REDIRECT = False
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+# Server nội bộ phục vụ qua HTTP thường: cookie Secure sẽ bị trình duyệt
+# từ chối lưu -> CSRF "cookie not set". Chỉ bật lại khi deploy sau HTTPS.
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
 
 ALLOWED_HOSTS = [
     "monitor.f5traders.com",
+    "localhost",
+    "127.0.0.1",
+    "103.141.141.24",
 ]

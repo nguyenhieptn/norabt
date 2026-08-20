@@ -742,6 +742,7 @@ class AccountImp(AccountInterface):
 
                     if not checkResult["result"]:
                         campaign.lab_campaign_log = checkResult["message"]
+                        print(f"[LAB] Dung backtest: campaign {campaign.lab_campaign_id} ({campSym}) loi: {checkResult.get('message')}")
                         breaker = True
                         break
                     activeCamps.append(proce.campaign.lab_campaign_id)
@@ -751,9 +752,11 @@ class AccountImp(AccountInterface):
                 checkLiquid = self.checkLiquidation(pendingEvents, runtimeInt)
                 if not checkLiquid["result"]:
                     campaign.lab_campaign_log = checkLiquid["message"]
+                    print(f"[LAB] Dung backtest: loi kiem tra thanh ly: {checkLiquid.get('message')}")
                     breaker = True
                     break
                 if checkLiquid["data"]:
+                    print(f"[LAB] Dung backtest: tai khoan bi THANH LY (liquidation)")
                     breaker = True
                     break
 
@@ -883,7 +886,8 @@ class AccountImp(AccountInterface):
                 + " minutes"
             )
             try:
-                client = MongoClient("mongodb://localhost:27017/")
+                # Mongo của norabt (27117). 27017 là mongod dịch vụ khác, có auth.
+                client = MongoClient("mongodb://127.0.0.1:27117/", serverSelectionTimeoutMS=3000)
                 db = client["nevir"]
                 collection = db["account"]
 
@@ -894,7 +898,8 @@ class AccountImp(AccountInterface):
                     "close_position": self.totalPosition,
                     "take_profit": self.totalTakeprofit,
                     "stop_lostt": self.totalStoploss,
-                    "pending_position": self.pendingEvent,
+                    # pendingEvent là list object Django -> Mongo không encode được, lưu số lượng
+                    "pending_position": len(self.pendingEvent) if isinstance(self.pendingEvent, (list, tuple)) else 0,
                     "max_unrealize": -self.maxUnrealize,
                     "max_invest": self.maxInvest,
                     "max_interval": Round(self.maxInterval / 60000),

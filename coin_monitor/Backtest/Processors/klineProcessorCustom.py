@@ -92,11 +92,11 @@ class klineProcessorCustom():
 
 class klineProcessor1mCustom():
 
-    def __init__(self, symbol, sourceDb, destDb) -> None:
+    def __init__(self, symbol, sourceDb, destDb, frames=None) -> None:
         self.symbol = symbol
         self.rawKlineModel = KlineModel(sourceDb, f'{self.symbol}_kline_1m')
         self.unstableTimePoint = 0
-        self.frames = ['1m', '15m', '30m', '1h', '2h', '4h', '8h', '1d']
+        self.frames = frames or ["1m", "15m", "30m", "1h", "2h", "4h", "8h", "1d"]
         self.indicators = [
             ['all', 'rsi', 'close', 14, 'rsi'], 
             ['all', 'tr', '', '', 'tr'], 
@@ -258,6 +258,11 @@ class klineProcessor1mCustom():
             
             frameInstance.insertData(fullData)
 
+    def flushData(self):
+        for fr in self.frameInstances:
+            frameInstance = self.frameInstances[fr] #type: Frame
+            frameInstance.flushData()
+
     def createIndex(self):
         for fr in self.frameInstances:
             frameInstance = self.frameInstances[fr] #type: Frame
@@ -320,6 +325,11 @@ class Frame():
         if(len(self.mongoBlock) >= 100):
             self.model.collection.insert_many(self.mongoBlock[:len(self.mongoBlock)-1])
             self.mongoBlock = self.mongoBlock[-1:]
+
+    def flushData(self):
+        if(len(self.mongoBlock) > 0):
+            self.model.collection.insert_many(self.mongoBlock)
+            self.mongoBlock = []
 
     def createIndex(self):
         self.model.collection.create_index([(Candle_Model.symbol, ASCENDING), (Candle_Model.timestamp, ASCENDING)])

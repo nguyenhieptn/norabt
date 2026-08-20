@@ -115,6 +115,7 @@
     "/react/js/./react/pages/user-PagesOrders-js.js": "/react/js/./react/pages/user-PagesOrders-js.js",
     "/react/js/./react/pages/user-PagesProduct-js.js": "/react/js/./react/pages/user-PagesProduct-js.js",
     "/react/js/./react/pages/user-PagesVouchers-js.js": "/react/js/./react/pages/user-PagesVouchers-js.js",
+    "/react/js/./react/pages/admin-Bot_ruinView-js.js": "/react/js/./react/pages/admin-Bot_ruinView-js.js",
     "/react/js/./react/pages/admin-ChartFlex-js.js": "/react/js/./react/pages/admin-ChartFlex-js.js",
     "/react/js/./react/pages/admin-ChartView_old1-js.js": "/react/js/./react/pages/admin-ChartView_old1-js.js",
     "/react/js/./react/pages/admin-Chart_btcView-js.js": "/react/js/./react/pages/admin-Chart_btcView-js.js",
@@ -145,6 +146,5 @@
     "/react/js/./react/pages/admin-System_infoView-js.js": "/react/js/./react/pages/admin-System_infoView-js.js",
     "/react/js/./react/pages/admin-Table_fluctuationView-js.js": "/react/js/./react/pages/admin-Table_fluctuationView-js.js",
     "/react/js/./react/pages/admin-Top_btcView-js.js": "/react/js/./react/pages/admin-Top_btcView-js.js",
-    "/react/js/./react/pages/admin-Top_sumView-js.js": "/react/js/./react/pages/admin-Top_sumView-js.js",
-    "/react/js/./react/pages/admin-Bot_ruinView-js.js": "/react/js/./react/pages/admin-Bot_ruinView-js.js"
+    "/react/js/./react/pages/admin-Top_sumView-js.js": "/react/js/./react/pages/admin-Top_sumView-js.js"
 }

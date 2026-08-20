@@ -55,6 +55,10 @@ App.link = (link) => {
 
 getUser(false).then((user) => {
 
+	// Chưa đăng nhập: error_handle trong getUser đã điều hướng về /login.
+	// Không render UI admin để tránh các component đọc App.user khi undefined.
+	if (!user) return;
+
 	App.user = user;
 
 	render(<Router ref={router => App.router = router}>
@@ -79,7 +83,7 @@ getUser(false).then((user) => {
 
 								// window.location.href = '/admin/#/admin/dashboard/view';
 								if(SERVER_LOCATION != 'google'){
-									if(App.user[AUTHEN_GROUP] == 4){
+									if(App.user && App.user[AUTHEN_GROUP] == 4){
 										window.location.href = '/admin/#/admin/testnet_order_track/view';
 									}else{
 										window.location.href = '/admin/#/admin/testnet/view';

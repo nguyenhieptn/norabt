@@ -186,6 +186,8 @@ class Lab_accountController extends Controller
             'backtest_data_1m_spot' => 'LongVan3 1m Full Spot',
             'backtest_data_1m_custom' => 'LongVan3 1m Full Custom',
             'ftx_backtest_data' => 'LongVan3 FTX',
+            // Dataset local trên server norabt (Mongo 127.0.0.1:27117), 25 coin, khung 1m + 4h
+            'backtest_data_1m_strategy810' => 'Norabt Local - Top25 1m+4h (2025->nay)',
 
         ];
         $mapData[LAB_ACCOUNT_SERVER] = Edge::mapping(Models::get('Admin/Lab_node'), null, LAB_NODE_NAME, LAB_NODE_NAME);

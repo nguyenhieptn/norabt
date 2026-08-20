@@ -35,6 +35,10 @@ class Command(BaseCommand):
             "-e", "--exchange", nargs="?", default="future", type=str
         )
         parser.add_argument("-s", "--symbol", nargs="?", default=None, type=str)
+        # Giới hạn khoảng crawl (YYYY_MM_DD). Mặc định 2025-01-01 -> nay
+        # theo yêu cầu: chỉ lấy dữ liệu từ 2025 để nhẹ RAM/đĩa.
+        parser.add_argument("--from", dest="fromDay", nargs="?", default="2025_01_01", type=str)
+        parser.add_argument("--to", dest="toDay", nargs="?", default=None, type=str)
 
     def handle(self, *args, **options):
         self.exchange = options.get("exchange", "future")
@@ -44,26 +48,43 @@ class Command(BaseCommand):
             print("Please define symbol")
             return
 
+        fromTime = int(
+            datetime.strptime(options["fromDay"], "%Y_%m_%d")
+            .replace(tzinfo=VN_TZ)
+            .timestamp() * 1000
+        )
+        if options.get("toDay"):
+            endTime = int(
+                datetime.strptime(options["toDay"], "%Y_%m_%d")
+                .replace(tzinfo=VN_TZ)
+                .timestamp() * 1000
+            )
+        else:
+            endTime = int(datetime.now().timestamp() * 1000)
+
         database = f"raw_kline1m_{self.exchange}"
         collection = f"{self.symbol}_kline_1m"
 
         self.candleModel = Candle_Model(database, collection)
 
-        # Get start Time
+        # Resume: crawl tiếp từ nến cuối trong DB (không thấp hơn mốc --from)
         lastData = list(
             self.candleModel.collection.find()
             .sort("close_time", DESCENDING)
             .limit(1)
         )
-        # print(lastData)
         if len(lastData) == 0:
-            startTime = 1577836800000
+            startTime = fromTime
         else:
-            startTime = lastData[0]["open_time"]
+            startTime = max(lastData[0]["open_time"], fromTime)
             self.candleModel.collection.delete_many({"open_time": startTime})
 
+        if startTime >= endTime:
+            print(f"{self.symbol}: đã đủ dữ liệu tới {datetime.fromtimestamp(endTime/1000, tz=VN_TZ)}")
+            return
+
         datas = getKlineBlock(
-            self.symbol, "1m", startTime, 1735689600000, self.exchange
+            self.symbol, "1m", startTime, endTime, self.exchange
         )
         for block in datas:
             print(f"{self.symbol} insert {len(block)}")

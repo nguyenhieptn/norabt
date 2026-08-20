@@ -23,23 +23,34 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("-s","--symbol", nargs='?', required=True, default=None, type=str)
         parser.add_argument("-d","--day", nargs='?', default=None, type=str)
+        parser.add_argument("--stop", nargs='?', default=None, type=str)
         parser.add_argument("--reset", action='store_true', default=False)
+        parser.add_argument("--db", nargs='?', default='backtest_data_1m_custom', type=str)
+        parser.add_argument("--frames", nargs='*', default=None)
         parser.add_argument("-e","--exchange", nargs='?', default='future', type=str)
 
     def handle(self, *args, **options):
         self.symbol = options.get('symbol').upper()
         self.day = options.get('day', None)
         self.exchange = options.get('exchange', "future")
-        db = "backtest_data_1m_custom"
-        self.processor = klineProcessor1mCustom(self.symbol, f'raw_kline1m_{self.exchange}', db)
+        self.stop_day = options.get('stop', None)
+        db = options.get('db', 'backtest_data_1m_custom')
+        frames = options.get('frames')
+        if frames:
+            frames = [frame.lower() for frame in frames]
+        self.processor = klineProcessor1mCustom(self.symbol, f'raw_kline1m_{self.exchange}', db, frames)
         self.reset = options.get('reset', False)
         if(self.reset):
             print("Clean data")
             self.processor.cleanData()
             
         startTime = self.getStartTime()//1000 * 1000
-        stopTime = int(datetime.now().timestamp()) * 1000 - 1
+        if self.stop_day is None:
+            stopTime = int(datetime.now().timestamp()) * 1000 - 1
+        else:
+            stopTime = int(datetime.strptime(self.stop_day, '%Y_%m_%d').replace(tzinfo=VN_TZ).timestamp() * 1000) - 1
        
+        print(f"{self.symbol} DB={db} frames={self.processor.frames}")
         print(f"{self.symbol} Completed Calculating first block")
         
         processed = 0
@@ -48,6 +59,8 @@ class Command(BaseCommand):
         startPoint = datetime.now().timestamp()
         while(workingTime < stopTime):
             newWorkingTime = workingTime + 15 * 24 * 60 * 60 * 1000 - 1
+            if newWorkingTime > stopTime:
+                newWorkingTime = stopTime
             datas = self.processor.getKlineData(workingTime, newWorkingTime)
 
             processed = 0
@@ -63,6 +76,7 @@ class Command(BaseCommand):
 
             workingTime = newWorkingTime + 1
         
+        self.processor.flushData()
         self.processor.createIndex()
 
 

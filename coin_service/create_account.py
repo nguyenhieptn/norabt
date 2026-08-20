@@ -9,7 +9,7 @@ django.setup()
 
 from Console.Models.Coin_lab import LabAccount, LabCampaigns
 
-def create_new_backtest_account(name, balance=10000, symbol="BTCUSDT", start_date="2023-01-01", stop_date="2023-12-31", strategy_id=204):
+def create_new_backtest_account(name, balance=10000, symbol="BTCUSDT", start_date="2023-01-01", stop_date="2023-12-31", strategy_id=204, active_budget=100.0, server="localhost", group="No group"):
     print(f"\n🔄 Đang khởi tạo Account Backtest mới: '{name}'...")
 
     # Chuyển ngày YYYY-MM-DD sang Unix Timestamp (giây)
@@ -25,6 +25,8 @@ def create_new_backtest_account(name, balance=10000, symbol="BTCUSDT", start_dat
         lab_account_db="backtest_data_1m_custom",
         lab_account_data_type="1m",
         lab_account_data_length=1,
+        lab_account_server=server,
+        lab_account_group=group,
         lab_account_running=0
     )
     acc_id = acc.lab_account_id
@@ -39,6 +41,7 @@ def create_new_backtest_account(name, balance=10000, symbol="BTCUSDT", start_dat
         lab_campaign_strategy=int(strategy_id),
         lab_campaign_side="BOTH",
         lab_campaign_budget=float(balance),
+        lab_campaign_active_budget=float(active_budget),
         lab_campaign_running=0
     )
 
@@ -48,6 +51,8 @@ def create_new_backtest_account(name, balance=10000, symbol="BTCUSDT", start_dat
     print(f"   - Vốn: ${balance:,.2f}")
     print(f"   - Cặp Coin: {symbol}")
     print(f"   - Khoảng thời gian: {start_date} -> {stop_date}")
+    print(f"   - Active Budget: {active_budget}%")
+    print(f"   - Server/Group: {server} / {group}")
     print(f"\n⚡ Để chạy backtest ngay cho Account này, bạn gõ:")
     print(f"   python run_backtest.py {acc_id}\n")
     return acc_id
@@ -60,7 +65,10 @@ if __name__ == "__main__":
         start = sys.argv[4] if len(sys.argv) > 4 else "2023-01-01"
         stop = sys.argv[5] if len(sys.argv) > 5 else "2023-12-31"
         strat = int(sys.argv[6]) if len(sys.argv) > 6 else 204
-        create_new_backtest_account(name, balance, symbol, start, stop, strat)
+        active_budget = float(sys.argv[7]) if len(sys.argv) > 7 else 100.0
+        server = sys.argv[8] if len(sys.argv) > 8 else "localhost"
+        group = sys.argv[9] if len(sys.argv) > 9 else "No group"
+        create_new_backtest_account(name, balance, symbol, start, stop, strat, active_budget, server, group)
     else:
-        print("💡 CÁCH DÙNG: python create_account.py <Tên_Test> <Vốn> <Cặp_Coin> <Từ_Ngày> <Đến_Ngày> <ID_Chiến_Lược>")
-        print("   Ví dụ: python create_account.py \"Test_BTC_2023\" 10000 BTCUSDT 2023-01-01 2023-12-31 204")
+        print("💡 CÁCH DÙNG: python create_account.py <Tên_Test> <Vốn> <Cặp_Coin> <Từ_Ngày> <Đến_Ngày> <ID_Chiến_Lược> [ActiveBudget] [Server] [Group]")
+        print("   Ví dụ: python create_account.py \"Test_BTC_2023\" 10000 BTCUSDT 2023-01-01 2023-12-31 204 100 localhost \"No group\"")

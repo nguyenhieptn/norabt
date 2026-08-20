@@ -327,6 +327,14 @@ class ChartBalance extends Component {
 
     }
 
+    setRangeSelector() {
+
+        this.setState({
+            Options: { rangeSelector: { selected: 4 } },
+        })
+
+    }
+
 
 }
 

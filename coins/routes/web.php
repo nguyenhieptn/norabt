@@ -30,6 +30,25 @@ Route::redirect('/home', '/admin', 301);
 
 
 /*route for admin*/
+// Font được CSS tham chiếu tương đối từ trang /admin -> /admin/fonts/...;
+// phải chặn trước catch-all bên dưới kẻo bị hiểu nhầm là FontsController (500).
+// File thật nằm ở /fonts hoặc /fonts/vendor/primeicons.
+Route::get('/admin/fonts/{path}', function ($path) {
+    foreach (['fonts/' . $path, 'fonts/vendor/primeicons/' . $path] as $candidate) {
+        if (file_exists(public_path($candidate))) return redirect('/' . $candidate);
+    }
+    abort(404);
+})->where('path', '.*');
+
+// CSS cũng tham chiếu /fonts/<file> trong khi file thật nằm ở fonts/vendor/primeicons
+Route::get('/fonts/{file}', function ($file) {
+    $real = public_path('fonts/vendor/primeicons/' . $file);
+    if (file_exists($real)) {
+        return response()->file($real, ['Cache-Control' => 'public, max-age=86400']);
+    }
+    abort(404);
+})->where('file', '[^/]+');
+
 Route::match(['post', 'get'], '/admin/{controller}/{method}', function ($controller, $method) {
     return App::call('\App\Http\Controllers\Admin\\'.ucfirst($controller).'Controller@' . $method);
 })->middleware('auth');

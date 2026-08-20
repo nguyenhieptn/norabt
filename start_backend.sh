@@ -21,9 +21,9 @@ echo "   - Lab Client PID: $CLIENT_PID"
 # 2. Khởi chạy coin_monitor Django REST API
 echo "🚀 Đang khởi chạy Data & Metrics REST API (coin_monitor)..."
 cd "$BASE_DIR/coin_monitor"
-$PYTHON_BIN manage.py runserver 0.0.0.0:8002 &
+$PYTHON_BIN manage.py runserver 127.0.0.1:18002 --noreload &
 MONITOR_PID=$!
-echo "   - Monitor API PID: $MONITOR_PID (Port 8002)"
+echo "   - Monitor API PID: $MONITOR_PID (Port 18002, chỉ bind localhost - truy cập qua proxy 18001)"
 
 echo ""
 echo "======================================================="

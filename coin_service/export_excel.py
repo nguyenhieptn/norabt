@@ -7,6 +7,10 @@ import pandas as pd
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "crypto_lab.settings")
 django.setup()
 
+# Mọi file kết quả xuất vào data/exports ở gốc repo (không vứt ra CWD)
+EXPORT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "exports"))
+os.makedirs(EXPORT_DIR, exist_ok=True)
+
 from Console.Models.Coin_lab import LabResults, LabAccount
 
 def export_backtest_to_csv(account_id):
@@ -53,7 +57,7 @@ def export_backtest_to_csv(account_id):
     ]]
 
     # 2. XUẤT FILE 1: CHI TIẾT TỪNG LỆNH
-    detail_filename = f"ket_qua_backtest_account_{account_id}_chi_tiet.csv"
+    detail_filename = os.path.join(EXPORT_DIR, f"ket_qua_backtest_account_{account_id}_chi_tiet.csv")
     df_detail.to_csv(detail_filename, index=False, encoding='utf-8-sig')
 
     # 3. TẠO BẢNG TỔNG HỢP THEO TỪNG CẶP COIN (GROUP BY SYMBOL)
@@ -81,7 +85,7 @@ def export_backtest_to_csv(account_id):
     df_summary = pd.DataFrame(summary_list)
 
     # XUẤT FILE 2: TỔNG HỢP THEO CẶP COIN
-    summary_filename = f"ket_qua_backtest_account_{account_id}_tong_hop.csv"
+    summary_filename = os.path.join(EXPORT_DIR, f"ket_qua_backtest_account_{account_id}_tong_hop.csv")
     df_summary.to_csv(summary_filename, index=False, encoding='utf-8-sig')
 
     # 4. IN KẾT QUẢ TRỰC QUAN RA MÀN HÌNH

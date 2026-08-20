@@ -6,6 +6,17 @@ import subprocess
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from helper.ResourceGuard import ResourceGuard
 
+
+def resource_limited_cmd(cmd):
+    cpuset = os.getenv("LAB_BACKTEST_CPUSET", "8-11").strip()
+    nice = os.getenv("LAB_BACKTEST_NICE", "10").strip()
+    limited = []
+    if cpuset:
+        limited.extend(["taskset", "-c", cpuset])
+    if nice:
+        limited.extend(["nice", "-n", nice])
+    return limited + cmd
+
 def run_full_backtest_pipeline(account_id):
     python_bin = "/home/ubuntu/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11"
     coin_service_dir = "/home/ubuntu/norabt/coin_service"
@@ -24,7 +35,8 @@ def run_full_backtest_pipeline(account_id):
 
     # BƯỚC 1: CHẠY ENGINE BACKTEST
     print(f"⚡ 1. Đang chạy Engine tính toán backtest (lab_account {account_id})...")
-    cmd_engine = [python_bin, "manage.py", "lab_account", str(account_id)]
+    cmd_engine = resource_limited_cmd([python_bin, "manage.py", "lab_account", str(account_id), "--tail"])
+    print("⚙️  Low-resource command: " + " ".join(cmd_engine))
     res_engine = subprocess.run(cmd_engine, cwd=coin_service_dir)
 
     ResourceGuard.cleanup_memory()

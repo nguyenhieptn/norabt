@@ -47,10 +47,19 @@ class LabAccountWrapper(Model):
     lab_account_leap = 'lab_account_leap'
     lab_account_db = 'lab_account_db'
     lab_account_data_type = 'lab_account_data_type'
+    lab_account_data_length = 'lab_account_data_length'
     lab_account_params = 'lab_account_params'
+    lab_account_server = 'lab_account_server'
     lab_account_choice_strategy = 'lab_account_choice_strategy'
     lab_account_choice_period = 'lab_account_choice_period'
     lab_account_choice_result = 'lab_account_choice_result'
+    lab_account_choice_condition = 'lab_account_choice_condition'
+    lab_account_tele_bot = 'lab_account_tele_bot'
+    lab_account_tele_group_notice = 'lab_account_tele_group_notice'
+    lab_account_tele_group_summary = 'lab_account_tele_group_summary'
+    lab_account_tele_group_error = 'lab_account_tele_group_error'
+    lab_account_user = 'lab_account_user'
+    lab_account_group = 'lab_account_group'
 
     def __init__(self):
         super().__init__(LabAccount, 'default')

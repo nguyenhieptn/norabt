@@ -5,6 +5,7 @@ from time import sleep, time
 import orjson
 import redis
 from django.core.management.base import BaseCommand
+from django.db import close_old_connections, connections
 
 from api.Helper.Defaults import exceptionInfo
 from api.Helper.Telegram import Tele
@@ -70,6 +71,10 @@ class Command(BaseCommand):
     def onMessage(self, data):
 
         try:
+            # Node nằm im hàng ngày giữa hai lệnh; MySQL đóng kết nối nhàn rỗi
+            # từ phía nó nên phải dọn kết nối cũ trước khi xử lý, tránh lỗi
+            # InterfaceError (0, '') ở truy vấn đầu tiên.
+            close_old_connections()
             data = Jwtoken.getPayload(data)
             controller = data["order_socket_controller"]
             method = "_" + data["order_socket_method"]

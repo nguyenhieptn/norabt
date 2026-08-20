@@ -25,7 +25,7 @@ const AppInlineMenu = (props) => {
             {!isMobile() && (isStatic() || isSlim() || isSidebar()) && <div className={classNames('layout-inline-menu', { 'layout-inline-menu-active': props.activeInlineProfile })}>
                 <button className="layout-inline-menu-action p-link" onClick={props.onChangeActiveInlineMenu}>
                     <img src="public/assets/layout/images/profile-image.png" alt="avatar" style={{ width: '44px', height: '44px' }} />
-                    <span className="layout-inline-menu-text">{global.USER.name}</span>
+                    <span className="layout-inline-menu-text">{global.USER ? global.USER.name : ''}</span>
                     <i className="layout-inline-menu-icon pi pi-angle-down"></i>
                 </button>
                 <CSSTransition classNames="p-toggleable-content" timeout={{ enter: 1000, exit: 450 }} in={props.activeInlineProfile} unmountOnExit>

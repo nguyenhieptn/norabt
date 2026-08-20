@@ -1,7 +1,11 @@
 from random import randint
+import os
 import subprocess
+import sys
 from threading import Thread
 from time import sleep
+
+import psutil
 from dateutil import tz
 
 from django.core.management.base import BaseCommand
@@ -12,6 +16,12 @@ from helper.Defaults import *
 
 
 VN_TZ = tz.gettz("Asia/Ho_Chi_Minh")
+
+# Thư mục gốc coin_monitor (không hardcode path server cũ)
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+# Guard tài nguyên: RAM khả dụng dưới ngưỡng thì tạm dừng nhận symbol mới
+MIN_AVAILABLE_RAM_GB = 3.0
 
 
 class Command(BaseCommand):
@@ -27,10 +37,19 @@ class Command(BaseCommand):
         parser.add_argument(
             "-e", "--except", nargs="*", dest="excepts", default=[]
         )
+        # Mặc định chỉ crawl danh sách coin chiến lược (has_symbols).
+        # --all: crawl toàn bộ cặp USDT trên Binance (nặng, chỉ khi chủ đích).
+        # --symbols: chỉ định danh sách cụ thể.
+        parser.add_argument("--all", action="store_true", dest="crawlAll", default=False)
+        parser.add_argument("--symbols", nargs="*", dest="symbols", default=None)
+        parser.add_argument("--from", dest="fromDay", nargs="?", default="2025_01_01", type=str)
+        parser.add_argument("--to", dest="toDay", nargs="?", default=None, type=str)
 
     def handle(self, *args, **options):
         self.exchange = options.get("exchange", "future")
         self.excepts = options.get("excepts", [])
+        self.fromDay = options.get("fromDay")
+        self.toDay = options.get("toDay")
         has_symbols = [
             "BTCUSDT",
             "ZENUSDT",
@@ -132,16 +151,22 @@ class Command(BaseCommand):
             "RLCUSDT",
         ]
 
-        symbols = self.getAllSymbols()
+        # Máy mới, Mongo local trống: crawl ĐÚNG danh sách coin chiến lược
+        # (has_symbols). Logic cũ "tất cả trừ has_symbols" chỉ đúng trên server
+        # cũ nơi các coin này đã có sẵn dữ liệu.
+        if options.get("symbols"):
+            symbols = options["symbols"]
+        elif options.get("crawlAll"):
+            symbols = self.getAllSymbols()
+        else:
+            symbols = has_symbols
+
         self.total = len(symbols)
         self.done = 0
-        # symbols = ['RVNUSDT']
 
         threads = list()
         max_threads = 3  # mỗi symbol tốn ~1000 weight mỗi phút
         for symbol in symbols:
-            if symbol in has_symbols:
-                continue
             if symbol in self.excepts:
                 continue
             thread = Thread(target=self.openProc, args=(symbol,))
@@ -160,18 +185,30 @@ class Command(BaseCommand):
                         threads[index] = None
                         continue
                     if count < max_threads:
+                        # Guard tài nguyên: RAM thấp thì chờ, không nhận symbol mới
+                        while psutil.virtual_memory().available < MIN_AVAILABLE_RAM_GB * 1024**3:
+                            print(f"[ResourceGuard] RAM khả dụng < {MIN_AVAILABLE_RAM_GB}GB - tạm dừng 30s...")
+                            sleep(30)
                         _thread.start()
                         start += 1
                         count += 1
+            sleep(1)
 
         print(f"Crawl kline 1m {self.total} symbols were done.")
 
     def openProc(self, symbol):
         print(f"Crawl kline 1m {symbol}")
-        pro = subprocess.Popen(
-            f"python /home/ubuntu/coins_backtest/coin_monitor/manage.py crawl_kline_1m -s {symbol} -e {self.exchange} > /home/ubuntu/coins_backtest/coin_monitor/logs/crawler_kline1m_{symbol}.log",
-            shell=True,
+        logs_dir = os.path.join(BASE_DIR, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        log_file = os.path.join(logs_dir, f"crawler_kline1m_{symbol}.log")
+        cmd = (
+            f"{sys.executable} {os.path.join(BASE_DIR, 'manage.py')} crawl_kline_1m"
+            f" -s {symbol} -e {self.exchange} --from {self.fromDay}"
         )
+        if self.toDay:
+            cmd += f" --to {self.toDay}"
+        cmd += f" > {log_file} 2>&1"
+        pro = subprocess.Popen(cmd, shell=True)
         pro.wait()
         self.done += 1
         print(f"Crawl kline 1m {symbol} done {self.done}/{self.total}")

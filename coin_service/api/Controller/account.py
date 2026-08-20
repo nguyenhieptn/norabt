@@ -1,6 +1,8 @@
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 
 # Create your views here.
 from django.http import JsonResponse
@@ -12,6 +14,17 @@ from crypto_lab.settings import WORK_DIR
 from api.Helper.Jwt import Jwtoken
 from api.Models.Wrappers.coin_lab import LabAccountWrapper
 from api.Models.coin_lab import LabAccount
+
+
+def resource_limited_prefix():
+    cpuset = os.getenv("LAB_BACKTEST_CPUSET", "8-11").strip()
+    nice = os.getenv("LAB_BACKTEST_NICE", "10").strip()
+    parts = []
+    if cpuset:
+        parts.append(f"taskset -c {shlex.quote(cpuset)}")
+    if nice:
+        parts.append(f"nice -n {shlex.quote(nice)}")
+    return " ".join(parts) + (" " if parts else "")
 
 def start(request):
     token = request.GET["token"]
@@ -29,10 +42,14 @@ def _start(payload):
     if(System.isComplied()):
         cmd = f"{WORK_DIR}/phoenix_optimization lab_account {id} --tail"
     else:
-        cmd = f"python {WORK_DIR}/manage.py lab_account {id} --tail"
+        # sys.executable: đúng Python đang chạy lab_client (đủ dependency),
+        # thay cho "python" trần vốn trỏ sang interpreter khác trên máy.
+        cmd = f"{sys.executable} {WORK_DIR}/manage.py lab_account {id} --tail"
 
+    cmd = resource_limited_prefix() + cmd
     if isContinue:
         cmd += " --continue"
+    os.makedirs(f"{WORK_DIR}/logs", exist_ok=True)
     cmd += f" > {WORK_DIR}/logs/py_lab_account_{id}.log 2>&1 &"
 
     os.system('pkill -f "lab_account ' + str(id) + ' "')

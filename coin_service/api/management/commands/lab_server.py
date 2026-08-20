@@ -5,6 +5,7 @@ from time import sleep, time
 import orjson
 import redis
 from django.core.management.base import BaseCommand
+from django.db import close_old_connections, connections
 
 from api.Helper.Defaults import exceptionInfo
 from api.Helper.Telegram import Tele
@@ -42,7 +43,12 @@ class Command(BaseCommand):
                 
             sio.start_background_task(self.subcribeRedis)
            
-            eventlet.wsgi.server(eventlet.listen(('', 5000)), app)
+            # Bind localhost: lab_client chạy cùng máy, không cần mở ra Internet.
+            # Đổi qua env nếu sau này có node từ xa.
+            host = os.getenv("LAB_SERVER_HOST", "127.0.0.1")
+            port = int(os.getenv("LAB_SERVER_PORT", "5000"))
+            print(f"Lab server listening on {host}:{port}")
+            eventlet.wsgi.server(eventlet.listen((host, port)), app)
 
         except Exception as e:
             exInfo = exceptionInfo(e)
@@ -59,7 +65,8 @@ class Command(BaseCommand):
             labNode = labNode[0] #type: LabNode
             labNode.lab_node_status = 'DISCONNECTED'
             labNode.save()
-            Tele.send(f"{Tele.TELE_ICON_WARNING} [LAB] Node {labNode.lab_node_name} disconnected", Tele.TELE_SIMULATE, Tele.TELE_BOT_DEFAULT)
+            # Không báo Telegram cho node local (group chung là của hệ thống production)
+            print(f"[LAB] Node {labNode.lab_node_name} disconnected")
         
     def onNewConnection(self, sid, environ, auth):
         try:
@@ -70,7 +77,7 @@ class Command(BaseCommand):
             port = environ['REMOTE_PORT']
             name = payload['name']
             
-            Tele.send(f"{Tele.TELE_ICON_WARNING} [LAB] Node {name} connect from {ip}:{port}", Tele.TELE_SIMULATE, Tele.TELE_BOT_DEFAULT)
+            print(f"[LAB] Node {name} connect from {ip}:{port}")
 
             labNode = LabNodeWrapper().filter({
                 LabNodeWrapper.lab_node_name: name
@@ -84,7 +91,9 @@ class Command(BaseCommand):
             labNode.lab_node_ip = ip
             labNode.lab_node_port = port
             labNode.lab_node_sid = sid
-            labNode.lab_node_status = 'CONNECTED'
+            # Dùng trạng thái riêng (mặc định LOCAL) để cron giám sát của hệ thống
+            # production (dùng chung MySQL) không hỏi node này rồi báo lỗi Telegram.
+            labNode.lab_node_status = os.getenv('LAB_NODE_STATUS', 'LOCAL')
             labNode.save()
 
         except Exception as e:
@@ -119,15 +128,32 @@ class Command(BaseCommand):
             # Tele.send(ms, Tele.TELE_SIMULATE, Tele.TELE_BOT_DEFAULT).join()
             print(ms)
 
+    def timNode(self, server):
+        """Tra cứu node, tự nối lại nếu kết nối MySQL đã chết.
+
+        Tiến trình này chạy nhiều ngày liền và có thể nằm im rất lâu giữa hai
+        lệnh; MySQL đóng kết nối nhàn rỗi từ phía nó mà Django không hay biết,
+        nên truy vấn đầu tiên sau đó ném InterfaceError (0, '') và người dùng
+        chỉ thấy đúng chuỗi đó thay vì lệnh được chạy.
+        """
+        close_old_connections()
+        for lan in range(2):
+            try:
+                return LabNodeWrapper().filter({
+                    LabNodeWrapper.lab_node_name: server
+                })
+            except Exception:
+                if lan:
+                    raise
+                connections.close_all()   # bỏ kết nối hỏng rồi thử lại một lần
+
     def onRedisMessage(self, message):
         try:
             if(message['type'] == 'message'):
                 data = message['data']
                 data = orjson.loads(data)
                 server = data['order_socket_server']
-                labNode = LabNodeWrapper().filter({
-                    LabNodeWrapper.lab_node_name: server
-                })
+                labNode = self.timNode(server)
                 if(len(labNode) > 0):
                     labNode = labNode[0] #type: LabNode
                 else:
@@ -135,7 +161,7 @@ class Command(BaseCommand):
                     Redis().publish("lab_order_result", data)
                     return
 
-                if(labNode.lab_node_status != 'CONNECTED'):
+                if(labNode.lab_node_status != os.getenv('LAB_NODE_STATUS', 'LOCAL')):
                     data['response'] = Reply.make(False, 'Server is disconnected')
                     Redis().publish("lab_order_result", data)
                     return
