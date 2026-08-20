@@ -5,8 +5,10 @@ tổng hợp thành 6 tầng thống kê cho giao diện mới.
 """
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import asyncio
@@ -257,6 +259,21 @@ async def ws_log(ws: WebSocket, run_id: int, tail: int = 60):
 
 # ---------------------------------------------- alpha mới sinh ra từ phiên đào
 
+def ten_khong_trung(ten: str) -> str:
+    """Tên lần chạy là khoá duy nhất trong bảng — trùng là engine báo lỗi 500.
+
+    Thêm hậu tố -2, -3… cho tới khi trống, thay vì ném lỗi vào mặt người dùng
+    chỉ vì họ dựng lại đúng cái alpha đó lần thứ hai.
+    """
+    ten = (ten or "").strip()[:190] or "Lần chạy Nora"
+    thu = ten
+    for i in range(2, 60):
+        if not fetch_one("SELECT 1 AS x FROM lab_account WHERE lab_account_name = %s", (thu,)):
+            return thu
+        thu = f"{ten}-{i}"
+    return f"{ten}-{int(time.time())}"
+
+
 DAU_ALPHA = "nora:alpha:"     # ghi vào lab_account_note để biết run nào dựng từ alpha nào
 NHOM_ALPHA = "Nora Alpha"
 
@@ -446,7 +463,7 @@ def tao_run_tu_alpha(rid: int, body: dict = Body(default={})):
     if not ca:
         raise HTTPException(400, "Alpha này không kèm danh sách coin nào")
 
-    ten = (body.get("name") or f"ALPHA-{r['opt_id']}-{rid}").strip()
+    ten = ten_khong_trung(body.get("name") or f"ALPHA-{r['opt_id']}-{rid}")
     dataset = (body.get("dataset") or ac.get("lab_account_db") or "").strip()
     if not dataset:
         goc = fetch_one("SELECT lab_account_db AS d FROM lab_account WHERE lab_account_id = "
@@ -545,11 +562,39 @@ def tao_run_tu_alpha(rid: int, body: dict = Body(default={})):
             "message": f"Đã dựng lần chạy {run_id} với {len(hang)} coin"}
 
 
+@app.get("/api/runs/{run_id}/chien-luoc")
+def chien_luoc_cua_run(run_id: int):
+    """Chiến lược mà lần chạy này dùng — để nhìn kết quả là biết ngay chạy cái gì."""
+    rows = fetch_all(
+        """SELECT lab_campaign_strategy AS sid, COUNT(*) AS so_coin
+           FROM lab_campaigns
+           WHERE lab_campaign_account = %s AND lab_campaign_strategy IS NOT NULL
+           GROUP BY lab_campaign_strategy""", (run_id,))
+    ra = []
+    for r in rows:
+        st = fetch_one(
+            """SELECT lab_strategy_id AS id, lab_strategy_name AS name,
+                      lab_strategy_group AS `group`, lab_strategy_content AS content,
+                      lab_strategy_container AS is_container,
+                      lab_strategy_takeprofit AS takeprofit, lab_strategy_stoploss AS stoploss,
+                      lab_strategy_baseprofit AS baseprofit, lab_strategy_stepprofit AS step_profit,
+                      lab_strategy_backprofit AS back_profit,
+                      lab_strategy_baseprofit_baseon AS baseprofit_baseon,
+                      lab_strategy_timelife AS timelife, lab_strategy_interval AS `interval`,
+                      lab_strategy_margin AS margin, lab_strategy_note AS note
+               FROM lab_strategies WHERE lab_strategy_id = %s""", (r["sid"],))
+        if not st:
+            continue
+        st["so_coin"] = r["so_coin"]
+        ra.append(st)
+    return {"rows": ra}
+
+
 # ------------------------------------------- chạy lại một backtest đã chạy xong
 
-# Khoá mang ý nghĩa cấu trúc, không phải con số để tinh chỉnh
-KHOA_CAU_TRUC = {"frame", "column", "index", "type", "enter_price", "name",
-                 "baseprofit_baseon", "symbol", "logic", "strategy"}
+# Khoá thuần cấu trúc, sửa vào là hỏng chiến lược
+KHOA_CAU_TRUC = {"type", "enter_price", "name", "baseprofit_baseon",
+                 "symbol", "logic", "strategy"}
 
 
 def _la_so(v):
@@ -566,21 +611,203 @@ def _la_so(v):
     return False
 
 
-def _quet_num(nut, duong, nhan, ra, nhom):
-    """Đi khắp cây JSON, nhặt mọi con số có thể chỉnh được kèm đường dẫn tới nó."""
+def _quet_num(nut, duong, nhan, ra, nhom, khoa=None):
+    """Đi khắp cây JSON, nhặt mọi thứ chỉnh được kèm đường dẫn tới nó.
+
+    Không chỉ con số: khung thời gian và tên chỉ báo cũng là tham số người ta
+    muốn quét (đổi EMA 9 sang EMA 21, đổi khung 4h sang 1h), nên lấy luôn và
+    đánh dấu kiểu để giao diện hiện đúng ô chọn.
+    """
     if isinstance(nut, dict):
         for k, v in nut.items():
             if k in KHOA_CAU_TRUC:
                 continue
-            _quet_num(v, duong + [k], f"{nhan}.{k}" if nhan else k, ra, nhom)
+            _quet_num(v, duong + [k], f"{nhan}.{k}" if nhan else k, ra, nhom, k)
     elif isinstance(nut, list):
         for i, v in enumerate(nut):
             # phần tử giữa của phép so sánh là toán tử, bỏ qua
             if isinstance(v, str) and v in (">", "<", "=", ">=", "<=", "!="):
                 continue
-            _quet_num(v, duong + [i], f"{nhan}[{i}]", ra, nhom)
+            _quet_num(v, duong + [i], f"{nhan}[{i}]", ra, nhom, khoa)
+    elif khoa == "frame" and isinstance(nut, str):
+        ra.append({"duong_dan": duong, "nhan": nhan, "gia_tri": nut, "nhom": nhom,
+                   "kieu": "khung", "chon": KHUNG, "y_nghia": "khung thời gian"})
+    elif khoa == "column" and isinstance(nut, str):
+        ra.append({"duong_dan": duong, "nhan": nhan, "gia_tri": nut, "nhom": nhom,
+                   "kieu": "chi_bao", "y_nghia": doc_chi_bao(nut) or "chỉ báo"})
     elif _la_so(nut):
-        ra.append({"duong_dan": duong, "nhan": nhan, "gia_tri": nut, "nhom": nhom})
+        ra.append({"duong_dan": duong, "nhan": nhan, "gia_tri": nut, "nhom": nhom,
+                   "kieu": "so", "y_nghia": NGHIA_KHOA.get(khoa)})
+
+
+# ---------------------------------- tham số dạng dễ hiểu, gom theo khái niệm
+
+RE_KELTNER = re.compile(r"^(k(?:up|lo))(\d+)(?:_(\d+))?$")
+RE_CHU_KY = re.compile(r"^((?:price_)?(?:ema|wma|sma|rsi|atr|macd)[a-z_]*?)(\d+)$")
+
+
+def _mo_ta_ve(v):
+    """Mô tả một vế của phép so sánh bằng lời."""
+    if isinstance(v, dict):
+        if v.get("type") == "event":
+            return NGHIA_KHOA.get(v.get("column"), f"lệnh.{v.get('column')}")
+        if v.get("column"):
+            ten = doc_chi_bao(v.get("column")) or v.get("column")
+            khung = v.get("frame")
+            ra = f"{ten}" + (f" khung {khung}" if khung else "")
+            if v.get("percent"):
+                ra += f" ×{v['percent']}%"
+            if v.get("subtract"):
+                ra += f" trừ {doc_chi_bao(v['subtract'].get('column')) or v['subtract'].get('column')}"
+            return ra
+        if v.get("type") in ("min", "max"):
+            return f"{v['type']}(…)"
+        if v.get("type") == "calculate":
+            return "biểu thức tính"
+    return str(v)
+
+
+def _di_dieu_kien(nut, duong, ra, nhom):
+    """Nhặt các ngưỡng số trong điều kiện, kèm mô tả vế trái để biết đang so cái gì."""
+    if isinstance(nut, list):
+        if (len(nut) == 3 and isinstance(nut[1], str)
+                and nut[1] in (">", "<", "=", ">=", "<=", "!=")):
+            trai, phep, phai = nut
+            if _la_so(phai) and not isinstance(phai, bool):
+                ra.append({
+                    "nhan": f"{_mo_ta_ve(trai)} {phep} …",
+                    "y_nghia": "ngưỡng của phép so sánh này",
+                    "kieu": "so", "gia_tri": phai, "so_cho": 1,
+                    "ap_dung": [{"duong_dan": duong + [2], "mau": "{}"}],
+                    "nhom": nhom,
+                })
+            return
+        for i, v in enumerate(nut):
+            _di_dieu_kien(v, duong + [i], ra, nhom)
+
+
+def _thu_thap_chuoi(nut, duong, khoa, ra):
+    """Gom mọi vị trí của frame và column trong cây."""
+    if isinstance(nut, dict):
+        for k, v in nut.items():
+            _thu_thap_chuoi(v, duong + [k], k, ra)
+    elif isinstance(nut, list):
+        for i, v in enumerate(nut):
+            _thu_thap_chuoi(v, duong + [i], khoa, ra)
+    elif isinstance(nut, str) and khoa in ("frame", "column"):
+        ra.append((khoa, nut, duong))
+
+
+def tham_so_de_hieu(sid, name, content, truong):
+    """Dịch chiến lược thành một nhúm núm vặn có tên gọi con người hiểu được.
+
+    Bảng tham số thô liệt kê từng đường dẫn JSON (condition[0][3][0].numbers[2]),
+    đúng nhưng không ai biết vặn cái nào. Ở đây gom theo khái niệm: một dòng
+    "chu kỳ Keltner" sửa hết 17 chỗ đang dùng kup17_05/klo17_05, một dòng
+    "khung 4h" đổi cả 30 chỗ — đó mới là cách người ta nghĩ khi chỉnh chiến lược.
+    """
+    ra = []
+
+    # 1. quản trị vốn và lệnh
+    for k in TRUONG_CHIEN_LUOC:
+        if k == "baseprofit_baseon" or truong.get(k) is None:
+            continue
+        ra.append({
+            "nhan": NGHIA_KHOA.get(k, k), "ma": f"truong:{k}",
+            "y_nghia": f"trường {k} của chiến lược", "kieu": "so",
+            "gia_tri": truong[k], "so_cho": 1,
+            "ap_dung": [{"duong_dan": ["__truong__", k], "mau": "{}"}],
+            "nhom": "Quản trị vốn và lệnh",
+        })
+
+    # 2. chỉ báo và khung thời gian — gom theo giá trị đang dùng
+    chuoi = []
+    _thu_thap_chuoi(content, [], None, chuoi)
+
+    khung = {}
+    kel_ky, kel_hs, chu_ky = {}, {}, {}
+    for khoa, gt, duong in chuoi:
+        if khoa == "frame":
+            khung.setdefault(gt, []).append(duong)
+            continue
+        # Chu kỳ và hệ số nằm chung một tên cột (kup17_05), hai núm cùng sửa một
+        # chỗ. Nên không gửi "chuỗi thay thế sẵn" mà gửi phần cần đổi, để giao
+        # diện ghép lại từ tên gốc — vặn cả hai núm vẫn ra kup21_1, không đè nhau.
+        m = RE_KELTNER.match(gt)
+        if m:
+            ky, hs = m.group(2), m.group(3)
+            kel_ky.setdefault(ky, []).append((duong, gt, "chu_ky"))
+            if hs:
+                kel_hs.setdefault(hs, []).append((duong, gt, "he_so"))
+            continue
+        m = RE_CHU_KY.match(gt)
+        if m:
+            chu_ky.setdefault((m.group(1), m.group(2)), []).append((duong, gt, "chu_ky"))
+
+    for k, ds in sorted(khung.items(), key=lambda x: -len(x[1])):
+        ra.append({
+            "nhan": f"Khung thời gian {k}", "ma": f"khung:{k}",
+            "y_nghia": f"đổi ở đây là đổi cả {len(ds)} chỗ đang dùng khung {k}",
+            "kieu": "khung", "chon": KHUNG, "gia_tri": k, "so_cho": len(ds),
+            "ap_dung": [{"duong_dan": d, "mau": "{}"} for d in ds],
+            "nhom": "Khung thời gian",
+        })
+
+    for ky, ds in sorted(kel_ky.items(), key=lambda x: -len(x[1])):
+        ra.append({
+            "nhan": "Keltner · chu kỳ EMA", "ma": f"kel_ky:{ky}",
+            "y_nghia": "số nến để tính đường giữa của dải Keltner",
+            "kieu": "so", "gia_tri": int(ky), "so_cho": len(ds),
+            "ap_dung": [{"duong_dan": d, "goc": g, "phan": p} for d, g, p in ds],
+            "nhom": "Chỉ báo",
+        })
+    for hs, ds in sorted(kel_hs.items(), key=lambda x: -len(x[1])):
+        # Tên cột viết hệ số không có dấu chấm: kup17_05 nghĩa là 0.5, kup29_1 là 1.
+        # Hiện ra cho người dùng thì phải trả lại dấu chấm.
+        hien = f"0.{hs[1:]}" if len(hs) > 1 and hs.startswith("0") else hs
+        ra.append({
+            "nhan": "Keltner · hệ số ATR", "ma": f"kel_hs:{hs}",
+            "y_nghia": "dải rộng bao nhiêu lần ATR; số càng lớn dải càng xa giá",
+            "kieu": "so", "bien_doi": "he_so", "gia_tri": hien, "so_cho": len(ds),
+            "ap_dung": [{"duong_dan": d, "goc": g, "phan": p} for d, g, p in ds],
+            "nhom": "Chỉ báo",
+        })
+    for (goc, ky), ds in sorted(chu_ky.items(), key=lambda x: -len(x[1])):
+        ra.append({
+            "nhan": f"{doc_chi_bao(goc + ky) or goc} · chu kỳ", "ma": f"ck:{goc}{ky}",
+            "y_nghia": f"số nến của {goc}",
+            "kieu": "so", "gia_tri": int(ky), "so_cho": len(ds),
+            "ap_dung": [{"duong_dan": d, "goc": g, "phan": p} for d, g, p in ds],
+            "nhom": "Chỉ báo",
+        })
+
+    # 3. từng bậc vào lệnh và các ngưỡng trong điều kiện
+    for ten_luong, luong in (content or {}).items():
+        if not isinstance(luong, dict) or not luong.get("type"):
+            continue
+        for i, bac in enumerate(luong.get("match") or []):
+            nhom = f"{ten_luong} · bậc {i}"
+            for k in ("enter_package", "margin", "stoploss", "baseprofit",
+                      "enter_step", "enter_back"):
+                v = bac.get(k)
+                if _la_so(v):
+                    ra.append({
+                        "nhan": NGHIA_KHOA.get(k, k), "ma": f"{ten_luong}:{i}:{k}",
+                        "y_nghia": f"áp cho bậc {i} của nhánh {ten_luong}",
+                        "kieu": "bool" if isinstance(v, bool) else "so",
+                        "gia_tri": v, "so_cho": 1,
+                        "ap_dung": [{"duong_dan": [ten_luong, "match", i, k], "mau": "{}"}],
+                        "nhom": nhom,
+                    })
+            _di_dieu_kien(bac.get("condition"), [ten_luong, "match", i, "condition"], ra, nhom)
+        if luong.get("stop"):
+            _di_dieu_kien(luong["stop"], [ten_luong, "stop"], ra,
+                          f"{ten_luong} · điều kiện thoát")
+
+    for i, x in enumerate(ra):
+        x.setdefault("ma", f"n{i}")
+        x["strategy"] = sid
+    return ra
 
 
 def _num_chien_luoc(sid):
@@ -601,7 +828,8 @@ def _num_chien_luoc(sid):
     for k in TRUONG_CHIEN_LUOC:
         if st.get(k) is not None and k != "baseprofit_baseon":
             knobs.append({"duong_dan": ["__truong__", k], "nhan": k,
-                          "gia_tri": st[k], "nhom": "Chiến lược"})
+                          "gia_tri": st[k], "nhom": "Chiến lược",
+                          "kieu": "so", "y_nghia": NGHIA_KHOA.get(k)})
 
     try:
         content = json.loads(st.get("content") or "{}")
@@ -623,8 +851,10 @@ def _num_chien_luoc(sid):
                 continue
             _quet_num(v, [ten_luong, k], k, knobs, f"{ten_luong} · khác")
 
+    truong_cl = {k: st.get(k) for k in TRUONG_CHIEN_LUOC}
     return {"id": st["id"], "name": st["name"], "group": st["group"],
-            "container": bool(st.get("container")), "tham_so": knobs}
+            "container": bool(st.get("container")), "tham_so": knobs,
+            "de_hieu": tham_so_de_hieu(st["id"], st["name"], content, truong_cl)}
 
 
 @app.get("/api/runs/{run_id}/tham-so")
@@ -697,7 +927,7 @@ def chay_lai(run_id: int, body: dict = Body(default={})):
     for x in sua:
         theo_cl.setdefault(int(x["strategy"]), []).append(x)
 
-    ten_moi = (body.get("name") or f"{cu['name']}-v2").strip()
+    ten_moi = ten_khong_trung(body.get("name") or f"{cu['name']}-v2")
     dataset = (body.get("dataset") or cu["db"] or "").strip()
     if not dataset:
         raise HTTPException(400, "Chưa chọn bộ dữ liệu nến")
@@ -1116,7 +1346,7 @@ def mau_tham_so(base_run: int = None, opt: int = None):
         (goc_id,),
     ) or {}
     bien, to_hop = _doc_bien(goc.get("params"))
-    bien = _gan_tot_nhat(bien, kq)
+    bien = gan_nghia(_gan_tot_nhat(bien, kq))
 
     return {
         "base_run": base_run or None,
@@ -1135,6 +1365,308 @@ def mau_tham_so(base_run: int = None, opt: int = None):
     }
 
 
+# ------------------------------------------------ đọc tên tham số cho dễ hiểu
+
+KHUNG = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"]
+
+# Nghĩa của những khoá engine dùng cố định
+NGHIA_KHOA = {
+    "takeprofit": "chốt lãi", "stoploss": "cắt lỗ", "baseprofit": "lãi nền",
+    "step_profit": "bước lãi", "back_profit": "lùi lãi", "stepprofit": "bước lãi",
+    "backprofit": "lùi lãi", "margin": "đòn bẩy", "timelife": "thời hạn giữ lệnh",
+    "interval": "giãn cách", "enter_package": "tỷ lệ vốn vào lệnh",
+    "enter_step": "bước vào lệnh", "enter_back": "lùi vào lệnh",
+    "percent": "phần trăm so với giá tham chiếu", "multiply": "hệ số nhân",
+    "index": "lùi bao nhiêu nến", "frame": "khung thời gian", "column": "chỉ báo",
+    "max_open_trades": "số lệnh mở tối đa",
+    "allow_negative_price_rate": "cho phép giá âm",
+    "match_price": "giá đặt khớp lệnh", "match_order": "giá đặt bậc nhồi",
+    "input": "biến vào", "order": "bậc nhồi lệnh",
+}
+
+
+def doc_chi_bao(col: str):
+    """Dịch tên cột chỉ báo sang tiếng người: ema9 -> EMA 9, kup17_05 -> Keltner trên."""
+    if not col:
+        return None
+    c = str(col).lower()
+    goc = {"close": "giá đóng", "open": "giá mở", "high": "giá cao nhất",
+           "low": "giá thấp nhất", "volume": "khối lượng",
+           "matched_price": "giá đã khớp", "profit": "lãi lỗ hiện tại"}
+    if c in goc:
+        return goc[c]
+
+    m = re.match(r"^(price_)?(ema|wma|sma|rsi|atr|macd)_?(\d+)?", c)
+    if m:
+        ten = {"ema": "EMA", "wma": "WMA", "sma": "SMA", "rsi": "RSI",
+               "atr": "ATR", "macd": "MACD"}[m.group(2)]
+        chu_ky = m.group(3)
+        nhan = f"{ten} {chu_ky}" if chu_ky else ten
+        if "rsi_wma" in c:
+            nhan = "RSI làm mượt bằng WMA"
+        return ("giá so với " if m.group(1) else "") + nhan
+
+    m = re.match(r"^k(up|lo)(\d+)(?:_(\d+))?", c)
+    if m:
+        he_so = m.group(3)
+        he_so = f"{float('0.' + he_so.lstrip('0') if len(he_so) > 1 else he_so)}" if he_so else None
+        return (f"Keltner biên {'trên' if m.group(1) == 'up' else 'dưới'}"
+                f" · EMA {m.group(2)}" + (f" · hệ số {he_so}" if he_so else ""))
+    return None
+
+
+def nghia_tham_so(ten: str, bien_khac=None):
+    """Đoán nghĩa một biến quét từ tên và từ chỗ nó được dùng."""
+    if not ten:
+        return None
+    t = str(ten).lower()
+
+    # Tên gắn khung thời gian ở đuôi (stoploss4h, match_price_1h) phải tách đuôi
+    # trước, không thì "stoploss4h" chỉ ra "cắt lỗ" mà mất mất khung.
+    for k in sorted(KHUNG, key=len, reverse=True):
+        if t.endswith(k) and len(t) > len(k):
+            goc = nghia_tham_so(t[: -len(k)].rstrip("_"), bien_khac)
+            return f"{goc} · khung {k}" if goc else f"tham số khung {k}"
+        if t == k:
+            return f"khung thời gian {k}"
+
+    if t in NGHIA_KHOA:
+        return NGHIA_KHOA[t]
+    ci = doc_chi_bao(t)
+    if ci:
+        return ci
+    for k, v in NGHIA_KHOA.items():
+        if t.startswith(k):
+            duoi = t[len(k):].strip("_")
+            return f"{v} {duoi}" if duoi.isdigit() else v
+    # dùng ở công thức nào thì nói ra công thức đó
+    for b in (bien_khac or []):
+        d = b.get("values") or []
+        if b.get("type") == "EXPRESSIONS" and d and f"#{ten}#" in str(d[0]):
+            return f"dùng trong công thức {b.get('name')} = {d[0]}"
+    return None
+
+
+def _tinh_bieu_thuc(bt: str):
+    """Tính một biểu thức số học đơn giản, chỉ cho phép + - * / ( ) và số."""
+    import ast as _ast
+
+    def di(n):
+        if isinstance(n, _ast.Expression):
+            return di(n.body)
+        if isinstance(n, _ast.Constant) and isinstance(n.value, (int, float)):
+            return float(n.value)
+        if isinstance(n, _ast.UnaryOp) and isinstance(n.op, (_ast.UAdd, _ast.USub)):
+            v = di(n.operand)
+            return v if isinstance(n.op, _ast.UAdd) else -v
+        if isinstance(n, _ast.BinOp) and isinstance(
+                n.op, (_ast.Add, _ast.Sub, _ast.Mult, _ast.Div)):
+            a, b = di(n.left), di(n.right)
+            if isinstance(n.op, _ast.Add):
+                return a + b
+            if isinstance(n.op, _ast.Sub):
+                return a - b
+            if isinstance(n.op, _ast.Mult):
+                return a * b
+            return a / b if b else None
+        raise ValueError("phép toán không cho phép")
+
+    try:
+        return di(_ast.parse(str(bt), mode="eval"))
+    except Exception:
+        return None
+
+
+def _goi_so(x):
+    """Số cho người đọc: bỏ đuôi thập phân vô nghĩa (98.03921569 -> 98,04)."""
+    if x is None:
+        return "?"
+    lam_tron = round(x, 2)
+    if abs(lam_tron) < 0.01 and x != 0:
+        lam_tron = round(x, 6)
+    ra = f"{lam_tron:.10g}"
+    return ra.replace(".", ",")
+
+
+def giai_thich_bien(ten, gia_tri, bien_khac):
+    """Nói bằng lời một biến quét thật ra điều khiển cái gì.
+
+    Tên biến trong chiến lược do người viết tự đặt (input4h, order2…) nên tự nó
+    chẳng nói gì. Nhưng biến luôn được dùng trong một công thức, và công thức đó
+    mới là ý nghĩa thật. Thay số vào rồi diễn ra thành câu là hiểu ngay:
+    order2 = -3, công thức 100+#order2# = 97  ->  "nhồi bậc 2 khi giá giảm 3%".
+    """
+    if gia_tri in (None, ""):
+        return None
+    v = str(gia_tri).strip()
+    so = _tinh_bieu_thuc(v)
+
+    for b in bien_khac or []:
+        if b.get("type") != "EXPRESSIONS":
+            continue
+        d = b.get("values") or []
+        ct = str(d[0]) if d else ""
+        if f"#{ten}#" not in ct:
+            continue
+        thay = ct.replace(f"#{ten}#", f"({v})")
+        kq = _tinh_bieu_thuc(re.sub(r"#[^#]+#", "1", thay))
+        kq = _tinh_bieu_thuc(thay) if "#" not in thay else kq
+        ten_dung = str(b.get("name") or "")
+
+        m = re.match(r"^match_order(\d+)", ten_dung)
+        if m and kq is not None:
+            lech = 100 - kq
+            huong = "giảm" if lech > 0 else "tăng"
+            return (f"giá nhồi bậc {m.group(1)} = {_goi_so(kq)}% giá đã khớp"
+                    f" → nhồi khi giá {huong} {_goi_so(abs(lech))}%")
+        if ten_dung.startswith("match_price") and kq is not None:
+            lech = 100 - kq
+            if abs(lech) < 1e-9:
+                return "giá đặt lệnh bằng đúng giá tham chiếu"
+            huong = "thấp hơn" if lech > 0 else "cao hơn"
+            return (f"giá đặt lệnh = {_goi_so(kq)}% giá tham chiếu"
+                    f" → đặt {huong} {_goi_so(abs(lech))}%")
+        if kq is not None:
+            return f"{ten_dung} = {ct.replace('#' + ten + '#', v)} = {_goi_so(kq)}"
+
+    # không có công thức nào dùng nó thì giải nghĩa theo tên và giá trị
+    goc = nghia_tham_so(ten, bien_khac)
+    if goc and so is not None:
+        if "cắt lỗ" in goc:
+            return f"{goc}: đóng lệnh khi lỗ {_goi_so(abs(so))}%"
+        if "chốt lãi" in goc or "lãi nền" in goc:
+            return f"{goc}: chốt khi lãi {_goi_so(so)}%"
+        if "đòn bẩy" in goc:
+            return f"{goc} {_goi_so(so)} lần"
+        if "thời hạn" in goc:
+            return f"{goc}: giữ tối đa {_goi_so(so)}"
+    return goc
+
+
+def gan_giai_thich(bien):
+    """Viết lại ý nghĩa của từng biến quét cho ra tiếng người."""
+    for b in bien:
+        gt = (b.get("values") or [None])[0]
+        if b.get("type") == "SETS" and gt:
+            try:
+                bo = json.loads(gt)
+                if isinstance(bo, list):
+                    b["y_nghia"] = ("tỷ lệ vốn " + str(len(bo)) + " bậc: "
+                                    + " / ".join(f"{x}%" for x in bo))
+                    continue
+            except Exception:
+                pass
+        if b.get("type") == "EXPRESSIONS":
+            # thay số của các biến được tham chiếu vào rồi tính ra kết quả thật
+            ct = str(gt or "")
+            thay = ct
+            for x in bien:
+                v = (x.get("values") or [None])[0]
+                if v is not None and x.get("type") != "EXPRESSIONS":
+                    thay = thay.replace(f"#{x.get('name')}#", f"({v})")
+            kq = _tinh_bieu_thuc(thay) if "#" not in thay else None
+            goc = nghia_tham_so(b.get("name"), bien)
+            b["y_nghia"] = (f"{goc} = {_goi_so(kq)}" if (goc and kq is not None)
+                            else goc)
+            continue
+        b["y_nghia"] = giai_thich_bien(b.get("name"), gt, bien) or nghia_tham_so(b.get("name"), bien)
+    return bien
+
+
+def gan_nghia(bien):
+    return gan_giai_thich(bien)
+
+
+# ------------------------------------------- kiểm biến quét theo luật của engine
+
+RE_TEN_BIEN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _so_hop_le(v):
+    """Giá trị có qua nổi str2num của engine không.
+
+    Engine chạy str2num: chỉ nhận [số + - * / ( ) khoảng trắng] rồi eval. Nên
+    "4h" bị coi là chuỗi nguy hiểm, còn "05" thì Python 3 báo lỗi cú pháp
+    (số nguyên không được bắt đầu bằng 0). Cả hai đều làm sập cả phiên quét
+    giữa chừng, nên phải chặn ngay lúc tạo.
+    """
+    st = str(v).strip()
+    if not st:
+        return "để trống"
+    if not re.match(r"^[\d+\-*/(). ]+$", st):
+        return f"“{st}” không phải số — bộ tối ưu chỉ nhận số và phép + - * / ( )"
+    if _tinh_bieu_thuc(st) is None:
+        return f"“{st}” không tính được (số nguyên không được bắt đầu bằng 0, ví dụ viết 0.5 thay cho 05)"
+    return None
+
+
+def kiem_bien_quet(bien):
+    """Soi bộ biến quét trước khi ghi, trả về danh sách lỗi bằng tiếng Việt."""
+    loi = []
+    da_khai = set()
+    for i, b in enumerate(bien):
+        ten = str(b.get("name") or "").strip()
+        vt = f"dòng {i + 1}"
+        if not RE_TEN_BIEN.match(ten):
+            loi.append(f"{vt}: tên biến “{ten}” không hợp lệ — chỉ dùng chữ, số và gạch dưới, "
+                       f"không bắt đầu bằng số")
+            continue
+        if ten in da_khai:
+            loi.append(f"{vt}: trùng tên biến “{ten}”")
+        kieu = b.get("type") or "INPUT"
+        gt = [x for x in (b.get("values") or []) if str(x).strip() != ""]
+
+        if kieu == "EXPRESSIONS":
+            ct = str(gt[0]) if gt else ""
+            if not ct:
+                loi.append(f"{vt}: công thức “{ten}” đang trống")
+            for ref in re.findall(r"#([^#]+)#", ct):
+                goc = ref.split("[")[0]
+                if goc not in da_khai:
+                    loi.append(f"{vt}: công thức “{ten}” dùng #{ref}# nhưng biến đó chưa khai "
+                               f"phía trên — kéo “{goc}” lên trước “{ten}”")
+        elif kieu == "SETS":
+            if not gt:
+                loi.append(f"{vt}: “{ten}” chưa có bộ giá trị nào")
+            do_dai = set()
+            for v in gt:
+                try:
+                    bo = json.loads(v) if isinstance(v, str) else v
+                except Exception:
+                    loi.append(f"{vt}: “{ten}” có bộ không đọc được: {v}")
+                    continue
+                if not isinstance(bo, list):
+                    loi.append(f"{vt}: “{ten}” kiểu SETS thì mỗi dòng phải là một bộ, ví dụ [15,30,30,25]")
+                    continue
+                do_dai.add(len(bo))
+                for x in bo:
+                    ly_do = _so_hop_le(x)
+                    if ly_do:
+                        loi.append(f"{vt}: “{ten}” — {ly_do}")
+            if len(do_dai) > 1:
+                loi.append(f"{vt}: “{ten}” có các bộ dài ngắn khác nhau ({sorted(do_dai)}) — "
+                           f"chiến lược sẽ thiếu #{ten}[n]# ở bộ ngắn")
+        else:
+            if not gt:
+                loi.append(f"{vt}: “{ten}” chưa có giá trị nào để quét")
+            for v in gt:
+                ly_do = _so_hop_le(v)
+                if ly_do:
+                    loi.append(f"{vt}: “{ten}” — {ly_do}")
+
+        da_khai.add(ten)
+    return loi
+
+
+def _sinh_id_bien(bien):
+    """Gắn id cho biến chưa có, giữ đúng dạng bản ghi mà portal cũ sinh ra."""
+    moc = int(time.time() * 1_000_000)
+    for i, b in enumerate(bien):
+        if not str(b.get("id") or "").strip():
+            b["id"] = str(moc + i)
+    return bien
+
+
 @app.get("/api/miner/optimizations/{oid}/params")
 def optimization_params(oid: int):
     """Tham số quét của một phiên, đã tách sẵn để chỉnh trên giao diện."""
@@ -1149,7 +1681,7 @@ def optimization_params(oid: int):
         raise HTTPException(404, "Không tìm thấy phiên đào")
     bien, to_hop = _doc_bien(row.pop("params"))
     kq, nguon = _tot_nhat_cho(row.get("base_run"), oid)
-    bien = _gan_tot_nhat(bien, kq)
+    bien = gan_nghia(_gan_tot_nhat(bien, kq))
     return {
         **row, "bien": bien, "to_hop": to_hop, "max_workers": MAX_WORKERS,
         "tot_nhat": {"opt_id": (kq or {}).get("opt_id"), "balance": (kq or {}).get("balance"),
@@ -1174,10 +1706,14 @@ def create_optimization(body: dict = Body(...)):
     if not bien:
         raise HTTPException(400, "Chưa có biến nào để quét")
 
+    loi = kiem_bien_quet(bien)
+    if loi:
+        raise HTTPException(400, " · ".join(loi[:6]))
+
     workers = max(1, min(int(body.get("workers") or 2), MAX_WORKERS))
     data_len = max(1, int(body.get("data_len") or 10))
     node = body.get("node") or ctl.NODE
-    params = _viet_bien(bien)
+    params = _viet_bien(_sinh_id_bien(bien))
     _, to_hop = _doc_bien(params)
 
     with cursor() as c:
@@ -1217,6 +1753,288 @@ def optimization_stop(oid: int):
 @app.get("/api/miner/optimizations/{oid}/log")
 def optimization_log(oid: int, tail: int = 120):
     return ctl.opt_log(oid, tail)
+
+
+# Bộ xử lý dữ liệu nến tính sẵn một lưới cột chỉ báo; quét ra ngoài lưới đó là
+# engine đọc phải cột không tồn tại và lặng lẽ ra kết quả rỗng.
+FILE_XU_LY = Path("/home/ubuntu/norabt/coin_monitor/Backtest/Processors/klineProcessorCustom.py")
+_luoi_cache = {}
+
+
+def luoi_chi_bao():
+    """Đọc cấu hình bộ xử lý để biết chỉ báo nào quét được, trong dải nào."""
+    if _luoi_cache:
+        return _luoi_cache
+    kel_ky, kel_hs, ema_ky, co_dinh = set(), set(), set(), {}
+    try:
+        noi_dung = FILE_XU_LY.read_text(encoding="utf-8")
+    except Exception:
+        noi_dung = ""
+    for dong in noi_dung.splitlines():
+        d = dong.strip()
+        if not d.startswith("['"):
+            continue
+        if "'keltner'" in d:
+            m = re.search(r"\[(\d+),\s*(\d+),\s*([\d.]+)\]", d)
+            if m:
+                kel_ky.add(int(m.group(1)))
+                kel_hs.add(m.group(3))
+        if "'ema'" in d:
+            for c in re.findall(r"'price_ema(\d+)'", d):
+                ema_ky.add(int(c))
+        m = re.match(r"\['all',\s*'(rsi|atr)',[^,]*,\s*(\d+)", d)
+        if m:
+            co_dinh[m.group(1)] = int(m.group(2))
+    _luoi_cache.update({
+        "keltner_chu_ky": sorted(kel_ky), "keltner_he_so": sorted(kel_hs),
+        "ema_chu_ky": sorted(ema_ky), "co_dinh": co_dinh,
+        "nguon": str(FILE_XU_LY),
+    })
+    return _luoi_cache
+
+
+@app.get("/api/miner/luoi-chi-bao")
+def api_luoi_chi_bao():
+    """Dải giá trị chỉ báo mà bộ dữ liệu đã tính sẵn."""
+    return luoi_chi_bao()
+
+
+def _gioi_han_cho(t):
+    """Núm chỉ báo này quét được những giá trị nào."""
+    lu = luoi_chi_bao()
+    goc = (t.get("ap_dung") or [{}])[0].get("goc") or ""
+    phan = (t.get("ap_dung") or [{}])[0].get("phan")
+    if re.match(r"^k(?:up|lo)", goc):
+        if phan == "he_so":
+            # Tên cột viết hệ số không dấu chấm (kup17_05), mà bộ tối ưu chạy
+            # str2num trên giá trị biến — "05" là cú pháp số không hợp lệ nên
+            # cả phiên quét sẽ sập. Đổi hệ số thì dùng "Đổi tham số" ở lần chạy.
+            return {"co_dinh": True,
+                    "ghi_chu": "hệ số ghi trong tên cột dạng 05/1 nên không quét được "
+                               "(bộ tối ưu chỉ nhận số thuần) — đổi hệ số bằng "
+                               "“Chạy backtest → Đổi tham số” ở lần chạy"}
+        return {"tu": min(lu["keltner_chu_ky"] or [0]), "den": max(lu["keltner_chu_ky"] or [0]),
+                "ghi_chu": "bộ dữ liệu tính sẵn Keltner chu kỳ "
+                           f"{min(lu['keltner_chu_ky'] or [0])}–{max(lu['keltner_chu_ky'] or [0])}"}
+    if re.match(r"^price_ema", goc):
+        return {"tu": min(lu["ema_chu_ky"] or [0]), "den": max(lu["ema_chu_ky"] or [0]),
+                "ghi_chu": f"bộ dữ liệu tính sẵn EMA chu kỳ "
+                           f"{min(lu['ema_chu_ky'] or [0])}–{max(lu['ema_chu_ky'] or [0])}"}
+    if re.match(r"^(rsi|atr)", goc):
+        n = luoi_chi_bao()["co_dinh"].get(goc[:3])
+        return {"co_dinh": True,
+                "ghi_chu": f"bộ dữ liệu chỉ có một cột {goc[:3].upper()} chu kỳ {n} — "
+                           "muốn quét phải xử lý lại dữ liệu nến"}
+    return {}
+
+
+@app.get("/api/miner/chi-bao")
+def chi_bao_quet_duoc(base_run: int):
+    """Các chỉ báo trong chiến lược của một lần chạy mà có thể đem đi quét.
+
+    Bộ nạp của engine thay #biến# vào nội dung chiến lược ở dạng CHUỖI rồi mới
+    đọc JSON (processLabChildStrategy), nên "kup#ky#_05" là hợp lệ — tức là chu
+    kỳ chỉ báo hoàn toàn quét được, chỉ là từ trước tới nay chưa ai làm.
+    """
+    sids = [r["s"] for r in fetch_all(
+        "SELECT DISTINCT lab_campaign_strategy AS s FROM lab_campaigns "
+        "WHERE lab_campaign_account = %s AND lab_campaign_strategy IS NOT NULL", (base_run,))]
+    ra = []
+    for sid in sids:
+        d = _num_chien_luoc(sid)
+        if not d:
+            continue
+        for t in d["de_hieu"]:
+            if t["nhom"] != "Chỉ báo":
+                continue
+            ra.append({**t, "strategy": sid, "chien_luoc": d["name"],
+                       "ten_bien_goi_y": _ten_bien_goi_y(t),
+                       "gioi_han": _gioi_han_cho(t)})
+    return {"rows": ra, "base_run": base_run}
+
+
+def _ten_bien_goi_y(t):
+    """Tên biến gợi ý cho một chỉ báo, chỉ gồm chữ thường và gạch dưới."""
+    goc = (t.get("ap_dung") or [{}])[0].get("goc") or t.get("ma") or "bien"
+    phan = t.get("phan") or (t.get("ap_dung") or [{}])[0].get("phan") or ""
+    ten = re.sub(r"[^a-z0-9]+", "_", str(goc).lower()).strip("_")
+    ten = re.sub(r"\d+", "", ten).strip("_") or "chi_bao"
+    return f"{ten}_{'he_so' if phan == 'he_so' else 'chu_ky'}"
+
+
+@app.post("/api/miner/quet-chi-bao")
+def tao_phien_quet_chi_bao(body: dict = Body(...)):
+    """Tạo phiên đào có quét cả chu kỳ chỉ báo.
+
+    Muốn quét chu kỳ EMA thì nội dung chiến lược phải mang #biến# ở đúng chỗ đó,
+    mà chiến lược gốc thì dùng chung với lần chạy khác — nên ở đây nhân bản
+    thành chiến lược mới có tham số, kèm một lần chạy mới trỏ vào nó, rồi mới
+    tạo phiên đào trên lần chạy đó. Không đụng gì tới bản gốc.
+    """
+    base_run = body.get("base_run")
+    chi_bao = body.get("chi_bao") or []
+    if not base_run:
+        raise HTTPException(400, "Chưa chọn lần chạy gốc")
+    if not chi_bao:
+        raise HTTPException(400, "Chưa chọn chỉ báo nào để quét")
+
+    ten = (body.get("name") or f"Quét chỉ báo từ lần chạy {base_run}").strip()
+    workers = max(1, min(int(body.get("workers") or 2), MAX_WORKERS))
+    data_len = max(1, int(body.get("data_len") or 10))
+
+    cu = fetch_one(
+        """SELECT lab_account_name AS name, lab_account_balance AS balance,
+                  lab_account_margin_balance AS margin_balance, lab_account_reserve AS reserve,
+                  lab_account_compound AS compound, lab_account_margin_type AS margin_type,
+                  lab_account_track_balance AS track_balance, lab_account_sync AS sync,
+                  lab_account_leap AS leap, lab_account_db AS db,
+                  lab_account_data_type AS data_type, lab_account_data_length AS data_len,
+                  lab_account_group AS `group`
+           FROM lab_account WHERE lab_account_id = %s""", (base_run,))
+    if not cu:
+        raise HTTPException(404, "Không tìm thấy lần chạy gốc")
+
+    # gom thay đổi theo chiến lược: đặt #biến# vào đúng phần cần quét
+    theo_cl = {}
+    for c in chi_bao:
+        sid = int(c["strategy"])
+        ten_bien = re.sub(r"[^A-Za-z0-9_]", "", str(c.get("ten_bien") or ""))
+        if not ten_bien:
+            raise HTTPException(400, "Biến quét phải có tên")
+        gia_tri = [str(x).strip() for x in (c.get("values") or []) if str(x).strip()]
+        if not gia_tri:
+            raise HTTPException(400, f"Biến {ten_bien} chưa có dải giá trị")
+
+        # Quét ra ngoài lưới cột đã tính sẵn thì engine đọc phải cột trống và
+        # trả về kết quả rỗng mà không báo gì — chặn ngay từ đây.
+        gh = _gioi_han_cho(c)
+        if gh.get("co_dinh"):
+            raise HTTPException(400, gh.get("ghi_chu") or "Chỉ báo này chưa quét được")
+        if gh.get("chon"):
+            xau = [v for v in gia_tri if v not in gh["chon"]
+                   and (f"0.{v[1:]}" if len(v) > 1 and v.startswith("0") else v) not in gh["chon"]]
+            if xau:
+                raise HTTPException(400, f"Giá trị {', '.join(xau)} không có trong bộ dữ liệu. "
+                                         f"{gh.get('ghi_chu', '')}")
+        if gh.get("tu") is not None:
+            xau = [v for v in gia_tri
+                   if not v.lstrip("-").isdigit() or not (gh["tu"] <= int(v) <= gh["den"])]
+            if xau:
+                raise HTTPException(400, f"Giá trị {', '.join(xau)} nằm ngoài dải đã tính sẵn. "
+                                         f"{gh.get('ghi_chu', '')}")
+        theo_cl.setdefault(sid, []).append((ten_bien, gia_tri, c.get("ap_dung") or []))
+
+    doi_ma = {}
+    with cursor() as c:
+        for sid, ds in theo_cl.items():
+            st = fetch_one("SELECT * FROM lab_strategies WHERE lab_strategy_id = %s", (sid,))
+            if not st:
+                raise HTTPException(404, f"Không tìm thấy chiến lược {sid}")
+            content = json.loads(st.get("lab_strategy_content") or "{}")
+            for ten_bien, _gt, ap in ds:
+                for a in ap:
+                    goc = str(a.get("goc") or "")
+                    phan = a.get("phan")
+                    m = re.match(r"^(k(?:up|lo))(\d+)(?:_(\d+))?$", goc)
+                    if m:
+                        moi = (f"{m.group(1)}#{ten_bien}#" + (f"_{m.group(3)}" if m.group(3) else "")
+                               if phan == "chu_ky"
+                               else f"{m.group(1)}{m.group(2)}_#{ten_bien}#")
+                    else:
+                        m2 = re.match(r"^(.*?)(\d+)$", goc)
+                        if not m2:
+                            continue
+                        moi = f"{m2.group(1)}#{ten_bien}#"
+                    _dat_theo_duong(content, a["duong_dan"], moi)
+
+            c.execute(
+                """INSERT INTO lab_strategies
+                     (lab_strategy_name, lab_strategy_content, lab_strategy_takeprofit,
+                      lab_strategy_stoploss, lab_strategy_baseprofit, lab_strategy_stepprofit,
+                      lab_strategy_backprofit, lab_strategy_baseprofit_baseon,
+                      lab_strategy_timelife, lab_strategy_interval, lab_strategy_margin,
+                      lab_strategy_note, lab_strategy_group)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (f"{st['lab_strategy_name']}-quet", json.dumps(content, ensure_ascii=False),
+                 st["lab_strategy_takeprofit"], st["lab_strategy_stoploss"],
+                 st["lab_strategy_baseprofit"], st["lab_strategy_stepprofit"],
+                 st["lab_strategy_backprofit"], st["lab_strategy_baseprofit_baseon"],
+                 st["lab_strategy_timelife"], st["lab_strategy_interval"],
+                 st["lab_strategy_margin"],
+                 f"Tham số hoá chỉ báo từ chiến lược {sid} để quét", NHOM_ALPHA))
+            c.connection.commit()
+            c.execute("SELECT LAST_INSERT_ID() AS id")
+            doi_ma[sid] = (c.fetchone() or {}).get("id")
+
+        c.execute(
+            """INSERT INTO lab_account
+                 (lab_account_name, lab_account_balance, lab_account_margin_balance,
+                  lab_account_reserve, lab_account_compound, lab_account_margin_type,
+                  lab_account_track_balance, lab_account_running, lab_account_sync,
+                  lab_account_leap, lab_account_db, lab_account_data_type,
+                  lab_account_data_length, lab_account_server, lab_account_note,
+                  lab_account_group)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (ten_khong_trung(f"{ten} · nền"), cu["balance"], cu["margin_balance"], cu["reserve"],
+             cu["compound"], cu["margin_type"], cu["track_balance"], cu["sync"], cu["leap"],
+             cu["db"], cu["data_type"], cu["data_len"], ctl.NODE,
+             f"nora:quet:{base_run}", cu["group"] or NHOM_ALPHA))
+        c.connection.commit()
+        c.execute("SELECT LAST_INSERT_ID() AS id")
+        run_moi = (c.fetchone() or {}).get("id")
+
+        c.execute(
+            """SELECT lab_campaign_symbol AS symbol, lab_campaign_start AS start,
+                      lab_campaign_stop AS stop, lab_campaign_params AS params,
+                      lab_campaign_side AS side, lab_campaign_strategy AS strategy,
+                      lab_campaign_budget AS budget, lab_campaign_reserve AS reserve,
+                      lab_campaign_compound AS compound, lab_campaign_money AS money,
+                      lab_campaign_active_budget AS active_budget,
+                      lab_campaign_priority AS priority
+               FROM lab_campaigns WHERE lab_campaign_account = %s""", (base_run,))
+        hang = [(
+            f"{ten}-{cp['symbol']}", cp["symbol"], cp["start"], cp["stop"], cp["params"],
+            cp["side"], doi_ma.get(cp["strategy"], cp["strategy"]), run_moi,
+            cp["budget"], cp["reserve"], cp["compound"], cp["money"],
+            cp["active_budget"], cp["priority"],
+        ) for cp in c.fetchall()]
+        c.executemany(
+            """INSERT INTO lab_campaigns
+                 (lab_campaign_name, lab_campaign_symbol, lab_campaign_start,
+                  lab_campaign_stop, lab_campaign_params, lab_campaign_side,
+                  lab_campaign_strategy, lab_campaign_account, lab_campaign_budget,
+                  lab_campaign_reserve, lab_campaign_compound, lab_campaign_money,
+                  lab_campaign_active_budget, lab_campaign_priority,
+                  lab_campaign_status, lab_campaign_running)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, '0,0', 0)""",
+            hang)
+        c.connection.commit()
+
+        bien = list(body.get("bien") or [])
+        for ds in theo_cl.values():
+            for ten_bien, gia_tri, _ap in ds:
+                bien.append({"id": "", "name": ten_bien, "type": "INPUT", "values": gia_tri})
+        loi = kiem_bien_quet(bien)
+        if loi:
+            raise HTTPException(400, " · ".join(loi[:6]))
+        params = _viet_bien(_sinh_id_bien(bien))
+        _, to_hop = _doc_bien(params)
+
+        c.execute(
+            """INSERT INTO lab_optimization
+                 (lab_opt_name, lab_opt_account, lab_opt_params, lab_opt_thread,
+                  lab_opt_data_leng, lab_opt_server, lab_opt_note)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (ten, run_moi, params, workers, data_len, ctl.NODE,
+             f"Quét chỉ báo, nền từ lần chạy {base_run}"))
+        c.connection.commit()
+        c.execute("SELECT LAST_INSERT_ID() AS id")
+        opt_id = (c.fetchone() or {}).get("id")
+
+    return {"result": True, "opt_id": opt_id, "run_id": run_moi,
+            "chien_luoc_moi": doi_ma, "so_coin": len(hang), "to_hop": to_hop,
+            "message": f"Đã tạo phiên đào {opt_id} trên lần chạy nền {run_moi}"
+                       f" · {to_hop} tổ hợp · {len(hang)} coin"}
 
 
 @app.get("/api/miner/optimizations/{oid}/results")

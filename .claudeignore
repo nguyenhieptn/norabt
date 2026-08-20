@@ -1,0 +1,17 @@
+data/
+coins/
+coin_monitor/
+node_modules/
+__pycache__/
+*.parquet
+*.feather
+*.csv
+*.tsv
+*.sqlite*
+*.db
+*.log
+*.tar*
+*.gz
+*.zip
+*.bin
+.git/

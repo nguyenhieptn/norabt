@@ -2,6 +2,11 @@
 
 /* Chế độ sáng — bật bằng thuộc tính data-theme trên thẻ gốc */
 :root[data-theme="light"] {
+  /* Bảng màu biểu đồ — kiểm bằng validate_palette.js trên nền #FFFFFF:
+     lọt dải sáng, đủ sắc độ, tách được với mọi kiểu mù màu. Ba màu s3/s4/s5
+     dưới 3:1 nên mọi biểu đồ dùng chúng đều phải ghi nhãn/số trực tiếp. */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+  --s4: #eda100; --s5: #e87ba4; --s6: #008300;
   --ground: #F7F5F0;
   --panel: #FFFFFF;
   --panel-2: #EFECE4;
@@ -19,6 +24,9 @@
 }
 
 :root {
+  /* cùng tám sắc đó nhưng bước lại cho nền tối #151F31, kiểm riêng cho chế độ tối */
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+  --s4: #c98500; --s5: #d55181; --s6: #008300;
   --ground: #0E1626;
   --panel: #151F31;
   --panel-2: #1B283C;
@@ -288,7 +296,11 @@ svg.spark { display: block; width: 100%; height: 190px; }
 }
 .tuner-form input { width: 100%; }
 .modal input.dai { width: 100%; min-width: 220px; font-family: var(--mono); font-size: 12px; }
-.modal input.ten { width: 130px; font-family: var(--mono); font-size: 12px; }
+.modal input.ten {
+  width: 150px; font-family: var(--mono); font-size: 11.5px;
+  color: var(--ink-3); background: none; border-color: var(--line);
+  padding: 2px 7px;
+}
 .tuner-f {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   padding: 12px 14px; border-top: 1px solid var(--line); font-size: 13px;
@@ -328,3 +340,93 @@ svg.spark { display: block; width: 100%; height: 190px; }
 }
 .mau button { margin-left: auto; }
 .tuner input.ten { width: 130px; font-family: var(--mono); font-size: 12px; }
+
+/* ---------- biểu đồ ---------- */
+.viz { position: relative; }
+.viz svg { display: block; max-width: 100%; }
+.viz-hero { font-size: 25px; font-weight: 600; fill: var(--ink); font-family: var(--sans); }
+.viz-sub,
+.viz-truc-nhan { font-size: 11px; fill: var(--ink-3); font-family: var(--mono); }
+.viz-nhan { font-size: 11.5px; fill: var(--ink-2); font-family: var(--mono); }
+.viz-luoi { stroke: var(--line); stroke-width: 1; }
+.viz-truc { stroke: var(--line-2); stroke-width: 1; }
+.viz-doc { stroke: var(--line-2); stroke-width: 1; }
+
+.viz-donut { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.viz-legend { flex: 1 1 210px; min-width: 200px; display: flex; flex-direction: column; gap: 3px; }
+.viz-leg {
+  display: flex; align-items: center; gap: 9px; font-size: 13px;
+  padding: 2px 0; transition: opacity .15s;
+}
+.viz-leg.mo { opacity: .4; }
+.viz-leg i { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 9px; }
+.viz-leg .ten { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viz-leg b { margin-left: auto; font-variant-numeric: tabular-nums; }
+.viz-leg .pct { color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; width: 44px; text-align: right; }
+
+.viz-tip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: var(--panel); border: 1px solid var(--line-2);
+  padding: 7px 10px; font-size: 12.5px; line-height: 1.5;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .28); white-space: nowrap;
+}
+
+/* ---------- thẻ tóm tắt chiến lược trên trang kết quả ---------- */
+.cl { border: 1px solid var(--line); background: var(--panel); }
+.cl + .cl { margin-top: 12px; }
+.cl-h {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 11px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2);
+}
+.cl-so {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 1px; background: var(--line); border-bottom: 1px solid var(--line);
+}
+.cl-so > div { background: var(--panel); padding: 9px 12px; }
+.cl-so span {
+  display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 3px;
+}
+.cl-so b { font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.cl-luong { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 14px; }
+.cl-chip {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 13px;
+  border: 1px solid var(--line); padding: 5px 11px; background: var(--panel-2);
+}
+.cl-chip i { font-style: normal; font-family: var(--mono); font-size: 11px; font-weight: 600; }
+.cl-chip em { font-style: normal; color: var(--ink-3); font-size: 12px; }
+.cl-chip u { text-decoration: none; color: var(--amber); font-family: var(--mono); font-size: 11.5px; }
+.cl .cond { padding: 12px 14px; }
+
+/* ---------- báo chạy xong ---------- */
+.xong {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  border: 1px solid var(--up); background: var(--panel-2);
+  padding: 11px 14px; margin-bottom: 12px; font-size: 13.5px;
+}
+.xong b { color: var(--up); }
+.xong span { color: var(--ink-2); }
+.xong .btn { margin-left: 0; }
+.xong .btn.pri { margin-left: auto; }
+
+/* ---------- ô nhập dải quét ---------- */
+.switch.nho button { font-size: 11px; padding: 3px 9px; }
+.dai-o { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dai-o label {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.dai-o label input {
+  width: 74px; font-family: var(--mono); font-size: 12px;
+  text-transform: none; letter-spacing: 0;
+}
+.dai-o .xem { font-size: 11.5px; color: var(--ink-3); font-family: var(--mono); }
+.dai-o .canh { font-size: 11.5px; color: var(--down); }
+
+/* nhãn "sửa N chỗ" cho núm vặn gom nhiều vị trí */
+.nhieu {
+  display: inline-block; margin-left: 8px; padding: 1px 7px;
+  border: 1px solid var(--amber); color: var(--amber);
+  font-family: var(--mono); font-size: 10.5px; border-radius: 2px;
+}

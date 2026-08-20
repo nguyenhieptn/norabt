@@ -24,6 +24,7 @@ export const api = {
   log: (id, tail = 120) => req(`/api/runs/${id}/log?tail=${tail}`),
   progress: (id) => req(`/api/runs/${id}/progress`),
   thamSo: (id) => req(`/api/runs/${id}/tham-so`),
+  chienLuocRun: (id) => req(`/api/runs/${id}/chien-luoc`),
   chayLai: (id, body) => req(`/api/runs/${id}/chay-lai`, {
     method: 'POST', body: JSON.stringify(body || {}),
   }),
@@ -41,6 +42,10 @@ export const api = {
     return req(`/api/miner/mau?${qs}`)
   },
   createOptimization: (body) => req('/api/miner/optimizations', {
+    method: 'POST', body: JSON.stringify(body),
+  }),
+  chiBaoQuet: (base_run) => req(`/api/miner/chi-bao?base_run=${base_run}`),
+  quetChiBao: (body) => req('/api/miner/quet-chi-bao', {
     method: 'POST', body: JSON.stringify(body),
   }),
   optProgress: (id) => req(`/api/miner/optimizations/${id}/progress`),

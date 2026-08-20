@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { Loading, ErrorBox, Empty, Card, Block, BarCell, Spark, Legend } from '../components/common'
 import MetricTable from '../components/MetricTable'
+import StrategyCard from '../components/StrategyCard'
 import { money, pct, int, num, dur, dt } from '../lib/format'
 
 export default function RunDetail() {
@@ -16,6 +17,7 @@ export default function RunDetail() {
   const [eq, setEq] = useState(null)
   const [ins, setIns] = useState(null)
   const [met, setMet] = useState(null)
+  const [cls, setCls] = useState(null)
   const [gocNhin, setGocNhin] = useState('coin')   // bảng diễn biến: theo coin hay theo tháng
   const [err, setErr] = useState(null)
 
@@ -30,6 +32,7 @@ export default function RunDetail() {
     api.equity(id, 1200).then(setEq).catch(() => setEq(null))
     api.insights(id).then((r) => setIns(r.rows)).catch(() => setIns([]))
     api.metrics(id).then(setMet).catch(() => setMet(null))
+    api.chienLuocRun(id).then((r) => setCls(r.rows)).catch(() => setCls([]))
   }, [id])
 
   if (err) return <ErrorBox error={err} />
@@ -66,6 +69,13 @@ export default function RunDetail() {
         <Card label="Vốn cao nhất" value={ov.von_cao_nhat}
           sub={`thấp nhất ${money(ov.von_thap_nhat)}`} />
       </div>
+
+      {/* ---------- Chiến lược đã dùng ---------- */}
+      {cls && cls.length > 0 && (
+        <Block title="Chiến lược đã chạy" note="bấm để xem điều kiện vào lệnh">
+          {cls.map((s) => <StrategyCard key={s.id} s={s} />)}
+        </Block>
+      )}
 
       {/* ---------- Tầng 6: nhận xét tự động ---------- */}
       {ins && ins.length > 0 && (

@@ -94,8 +94,16 @@ export function bangChiSo(m) {
  */
 export default function MetricTable({ m, gonNheYNghia = false }) {
   const nhom = bangChiSo(m)
+  const thieu_von = m.co_duong_von === false
   return (
     <div className="tblwrap">
+      {thieu_von && (
+        <div className="pre luu_y" style={{ margin: '12px 14px' }}>
+          Lần chạy này không bật theo dõi số dư nên không có đường vốn — mọi chỉ số
+          rủi ro (sụt giảm, Sharpe, Sortino, Calmar, biến động) không tính được.
+          Các chỉ số tính từ danh sách lệnh vẫn đúng.
+        </div>
+      )}
       <table className="chiso">
         <thead>
           <tr>

@@ -7,7 +7,9 @@ vừa nhanh vừa đúng chuẩn ngành (chỉ số rủi ro tính trên lợi s
 import math
 import time
 
-from ..db import fetch_all, fetch_one
+import datetime
+
+from ..db import fetch_all, fetch_one, stream
 
 # Bộ nhớ đệm cho các truy vấn nặng (quét toàn bảng 9 triệu dòng).
 # Dashboard không cần số liệu tức thời nên đệm 10 phút là hợp lý.
@@ -24,18 +26,81 @@ def _cached(key: str, ttl: int, fn):
     return val
 
 
-def _daily_equity(run_id: int):
-    """Số dư cuối mỗi ngày — nền để tính mọi chỉ số rủi ro."""
-    return fetch_all(
-        """SELECT DATE(FROM_UNIXTIME(lab_track_bl_time / 1000)) AS ngay,
-                  SUBSTRING_INDEX(
-                      GROUP_CONCAT(lab_track_bl_balance ORDER BY lab_track_bl_time DESC), ',', 1
-                  ) + 0 AS balance
-           FROM lab_track_balance
-           WHERE lab_track_bl_account = %s
-           GROUP BY ngay ORDER BY ngay""",
+def quet_duong_von(run_id: int):
+    """Duyệt đường vốn đúng MỘT lần, lấy ra cả ba thứ cần cho mọi chỉ số.
+
+      - vốn ban đầu: điểm đầu tiên của đường vốn.
+        Engine lấy vốn khởi điểm từ lab_account_balance rồi cộng dồn lãi lỗ vào
+        chính cột đó (AccountImp: originBalance = lab_account_balance, sau đó
+        lab_account_balance += profit), nên chạy xong là không đọc ngược ra vốn
+        ban đầu được nữa. Điểm đầu đường vốn là mốc trung thực nhất còn lại.
+        Lấy số dư cuối NGÀY đầu làm gốc như trước là lệch hẳn một phiên: với lần
+        chạy 3379 nó biến 137% thành 164%.
+
+      - số dư cuối mỗi ngày, cắt ngày theo UTC (time // 86400000). Không dùng
+        FROM_UNIXTIME vì hàm đó cắt theo múi giờ máy chủ MySQL (ở đây +07) —
+        dời máy chủ là Sharpe/CAGR/MDD đổi số mà không ai biết vì sao.
+
+      - sụt giảm tối đa trên ĐÚNG đường vốn đầy đủ. Tính trên số dư cuối ngày sẽ
+        bỏ lọt các cú tụt trong ngày rồi hồi lại trước khi đóng cửa, tức là luôn
+        báo rủi ro nhẹ hơn thực tế.
+
+    Đường vốn có gần một triệu điểm nên đọc theo luồng, và gộp cả ba phép tính
+    vào một lượt thay vì quét ba lần.
+    """
+    von_dau = None
+    ngay_hien_tai = None
+    dong_cua = None
+    theo_ngay = []
+
+    dinh = None
+    mdd = mdd_abs = 0.0
+    dinh_t = day_t = dinh_hien_tai = None
+
+    for t, b in stream(
+        """SELECT lab_track_bl_time, lab_track_bl_balance FROM lab_track_balance
+           WHERE lab_track_bl_account = %s ORDER BY lab_track_bl_time""",
         (run_id,),
-    )
+    ):
+        v = float(b or 0)
+        if von_dau is None:
+            von_dau = v
+
+        ngay = int(t) // 86400000
+        if ngay_hien_tai is None:
+            ngay_hien_tai = ngay
+        elif ngay != ngay_hien_tai:
+            theo_ngay.append((ngay_hien_tai, dong_cua))
+            ngay_hien_tai = ngay
+        dong_cua = v
+
+        if dinh is None or v > dinh:
+            dinh, dinh_hien_tai = v, t
+        elif dinh > 0:
+            d = (dinh - v) / dinh * 100
+            if d > mdd:
+                mdd, mdd_abs = d, dinh - v
+                dinh_t, day_t = dinh_hien_tai, t
+
+    if ngay_hien_tai is not None:
+        theo_ngay.append((ngay_hien_tai, dong_cua))
+
+    eq = [{"ngay": datetime.datetime.utcfromtimestamp(n * 86400).date(), "balance": v}
+          for n, v in theo_ngay]
+
+    def ngay_cua(ms):
+        return (datetime.datetime.utcfromtimestamp(int(ms) / 1000).date().isoformat()
+                if ms else None)
+
+    # Không có điểm nào thì phải trả về rỗng, không được trả 0: "sụt giảm 0%"
+    # đọc thành "không hề rủi ro", trong khi sự thật là không có gì để tính.
+    if von_dau is None:
+        return None, [], {"mdd_pct": None, "mdd_abs": None,
+                          "peak_at": None, "trough_at": None}
+
+    dd = {"mdd_pct": round(mdd, 2), "mdd_abs": round(mdd_abs, 2),
+          "peak_at": ngay_cua(dinh_t), "trough_at": ngay_cua(day_t)}
+    return von_dau, eq, dd
 
 
 def drawdown(equity):
@@ -71,10 +136,14 @@ def drawdown(equity):
     }
 
 
-def _returns(equity):
-    """Lợi suất ngày, bỏ qua các ngày số dư bằng 0."""
+def _returns(equity, von_dau=None):
+    """Lợi suất ngày, bỏ qua các ngày số dư bằng 0.
+
+    Ngày đầu tiên phải được đo từ vốn ban đầu, không phải từ chính nó — bỏ qua
+    ngày đó là mất luôn phiên giao dịch đầu, thường là phiên biến động nhất.
+    """
     out = []
-    prev = None
+    prev = float(von_dau) if von_dau else None
     for row in equity:
         v = float(row["balance"])
         if prev is not None and prev > 0:
@@ -83,9 +152,9 @@ def _returns(equity):
     return out
 
 
-def risk_ratios(equity, rf_annual: float = 0.0):
+def risk_ratios(equity, rf_annual: float = 0.0, von_dau: float = None, mdd_pct: float = None):
     """Sharpe, Sortino, Calmar — quy đổi theo năm (365 ngày giao dịch crypto)."""
-    rets = _returns(equity)
+    rets = _returns(equity, von_dau)
     n = len(rets)
     if n < 2:
         return {"sharpe": None, "sortino": None, "calmar": None,
@@ -111,7 +180,7 @@ def risk_ratios(equity, rf_annual: float = 0.0):
     # lãi một tuần nâng lũy thừa 52 lần cho ra những con số hàng nghìn tỷ phần
     # trăm, và Calmar ăn theo cũng hỏng. Thà không có số còn hơn có số sai.
     du_dai = n >= 30
-    first = float(equity[0]["balance"])
+    first = float(von_dau if von_dau else equity[0]["balance"])
     last = float(equity[-1]["balance"])
     years = n / P
     if du_dai and first > 0 and last > 0 and years > 0:
@@ -119,8 +188,10 @@ def risk_ratios(equity, rf_annual: float = 0.0):
     else:
         cagr = None
 
-    dd = drawdown(equity)
-    calmar = (cagr / dd["mdd_pct"]) if (cagr is not None and dd["mdd_pct"] > 0) else None
+    # Calmar phải chia cho sụt giảm của ĐÚNG đường vốn đầy đủ; lấy theo số dư
+    # cuối ngày thì mẫu số nhỏ đi, Calmar đẹp lên một cách giả tạo.
+    sut = mdd_pct if mdd_pct is not None else drawdown(equity)["mdd_pct"]
+    calmar = (cagr / sut) if (cagr is not None and sut and sut > 0) else None
 
     return {
         "sharpe": round(sharpe, 2) if sharpe is not None else None,
@@ -180,23 +251,28 @@ def trade_metrics(run_id: int):
 
 def full_metrics(run_id: int):
     """Bộ chỉ số đầy đủ cho một lần chạy — dùng cho bảng chi tiết khi bấm vào."""
-    eq = _daily_equity(run_id)
+    von_dau, eq, dd = quet_duong_von(run_id)
     tm = trade_metrics(run_id) or {}
-    dd = drawdown(eq) if eq else {}
-    rr = risk_ratios(eq) if eq else {}
+    rr = risk_ratios(eq, von_dau=von_dau, mdd_pct=dd.get("mdd_pct")) if eq else {}
 
-    start_bal = float(eq[0]["balance"]) if eq else None
+    start_bal = von_dau if von_dau else (float(eq[0]["balance"]) if eq else None)
     end_bal = float(eq[-1]["balance"]) if eq else None
     roi = ((end_bal - start_bal) / start_bal * 100) if (start_bal and start_bal > 0) else None
 
     return {
         **tm, **dd, **rr,
+        # Lần chạy không bật theo dõi số dư thì mọi chỉ số rủi ro đều vô nghĩa —
+        # nói rõ ra để giao diện giải thích, thay vì hiện một bảng toàn dấu gạch.
+        "co_duong_von": bool(eq),
         "start_balance": round(start_bal, 2) if start_bal else None,
         "end_balance": round(end_bal, 2) if end_bal else None,
         "roi_pct": round(roi, 2) if roi is not None else None,
-        "equity_daily": [
-            {"ngay": str(e["ngay"]), "balance": round(float(e["balance"]), 2)} for e in eq
-        ],
+        # Chèn vốn ban đầu làm điểm mở đầu để đường vốn và các con số cùng một gốc
+        "equity_daily": (
+            ([{"ngay": str(eq[0]["ngay"] - datetime.timedelta(days=1)),
+               "balance": round(start_bal, 2)}] if (eq and start_bal) else [])
+            + [{"ngay": str(e["ngay"]), "balance": round(float(e["balance"]), 2)} for e in eq]
+        ),
     }
 
 
@@ -246,6 +322,33 @@ def _dashboard_raw():
            WHERE EXISTS (SELECT 1 FROM lab_results r
                          WHERE r.lab_result_account = a.lab_account_id LIMIT 1)"""
     )
+    # Đường tăng trưởng lấy từ lần chạy mới nhất có kết quả — gộp cả 9 triệu
+    # lệnh của mọi lần chạy thì dashboard đứng hình, mà cũng chẳng nói lên gì.
+    moi_nhat = fetch_one(
+        """SELECT lab_result_account AS run_id, COUNT(*) AS n
+           FROM lab_results
+           WHERE lab_result_account = (SELECT MAX(lab_result_account) FROM lab_results)
+           GROUP BY lab_result_account"""
+    )
+    tang_truong, run_tt = [], None
+    if moi_nhat:
+        run_tt = fetch_one(
+            "SELECT lab_account_id AS id, lab_account_name AS name FROM lab_account "
+            "WHERE lab_account_id = %s", (moi_nhat["run_id"],))
+        thang = fetch_all(
+            """SELECT DATE_FORMAT(FROM_UNIXTIME(lab_result_chart / 1000), '%%Y-%%m') AS thang,
+                      ROUND(SUM(lab_result_realpnl), 2) AS pnl,
+                      COUNT(*) AS so_lenh
+               FROM lab_results
+               WHERE lab_result_account = %s AND lab_result_chart > 0
+               GROUP BY thang ORDER BY thang""",
+            (moi_nhat["run_id"],))
+        cong_don = 0.0
+        for t in thang:
+            cong_don += float(t["pnl"] or 0)
+            tang_truong.append({"thang": t["thang"], "pnl": t["pnl"],
+                                "so_lenh": t["so_lenh"], "cong_don": round(cong_don, 2)})
+
     return {
         "runs": acc["n"] if acc else 0,
         "runs_co_ket_qua": co_kq["n"] if co_kq else 0,
@@ -254,6 +357,8 @@ def _dashboard_raw():
         "optimizations": opt["n"] if opt else 0,
         "groups": groups,
         "recent_runs": recent,
+        "tang_truong": tang_truong,
+        "tang_truong_run": run_tt,
     }
 
 

@@ -21,6 +21,8 @@ export default function Relaunch({ runId, canhBao = [], onClose, onXong }) {
   const [err, setErr] = useState(null)
   const [ok, setOk] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [loc, setLoc] = useState('')
+  const [nangCao, setNangCao] = useState(false)   // false: núm vặn dễ hiểu · true: đường dẫn thô
 
   useEffect(() => {
     setD(null); setErr(null); setOk(null); setSua({})
@@ -37,11 +39,54 @@ export default function Relaunch({ runId, canhBao = [], onClose, onXong }) {
     return () => window.removeEventListener('keydown', esc)
   }, [onClose])
 
+  /** Hệ số Keltner viết không dấu chấm trong tên cột: 0.5 -> "05", 1 -> "1". */
+  const maHoa = (v, bien_doi) => (bien_doi === 'he_so' ? String(v).replace('.', '') : String(v))
+
+  /** Ghép lại tên cột từ tên gốc và các phần đã đổi.
+   *  Chu kỳ và hệ số nằm chung một tên (kup17_05) nên phải ghép chứ không thay
+   *  cả chuỗi — vặn hai núm mà thay cả chuỗi thì núm sau đè mất núm trước. */
+  const ghepCot = (goc, phan) => {
+    let m = /^(k(?:up|lo))(\d+)(?:_(\d+))?$/.exec(goc)
+    if (m) {
+      const ky = phan.chu_ky !== undefined ? phan.chu_ky : m[2]
+      const hs = phan.he_so !== undefined ? phan.he_so : m[3]
+      return `${m[1]}${ky}` + (hs ? `_${hs}` : '')
+    }
+    m = /^((?:price_)?(?:ema|wma|sma|rsi|atr|macd)[a-z_]*?)(\d+)$/.exec(goc)
+    if (m) return `${m[1]}${phan.chu_ky !== undefined ? phan.chu_ky : m[2]}`
+    return goc
+  }
+
   const doi = useMemo(() => {
     const ra = []
+    const cot = new Map()          // đường dẫn -> { goc, phan, strategy }
+
     for (const [khoa, gt] of Object.entries(sua)) {
-      const [sid, dd] = khoa.split('|')
-      ra.push({ strategy: Number(sid), duong_dan: JSON.parse(dd), gia_tri: gt })
+      if (!khoa.startsWith('nut|')) {
+        const [sid, dd] = khoa.split('|')
+        ra.push({ strategy: Number(sid), duong_dan: JSON.parse(dd), gia_tri: gt })
+        continue
+      }
+      // một núm dễ hiểu có thể chạm nhiều chỗ cùng lúc
+      const nut = JSON.parse(khoa.slice(4))
+      for (const ap of nut.ap_dung) {
+        if (ap.phan) {
+          const k = JSON.stringify(ap.duong_dan)
+          const cu = cot.get(k) || { goc: ap.goc, phan: {}, strategy: nut.strategy }
+          cu.phan[ap.phan] = maHoa(gt, nut.bien_doi)
+          cot.set(k, cu)
+        } else {
+          ra.push({
+            strategy: nut.strategy,
+            duong_dan: ap.duong_dan,
+            gia_tri: ap.mau.replace('{}', maHoa(gt, nut.bien_doi)),
+          })
+        }
+      }
+    }
+
+    for (const [k, v] of cot) {
+      ra.push({ strategy: v.strategy, duong_dan: JSON.parse(k), gia_tri: ghepCot(v.goc, v.phan) })
     }
     return ra
   }, [sua])
@@ -58,6 +103,14 @@ export default function Relaunch({ runId, canhBao = [], onClose, onXong }) {
       onXong && onXong(r)
     } catch (e) { setErr(e) } finally { setBusy(false) }
   }
+
+  // gõ về đúng giá trị cũ thì thôi không tính là đã đổi
+  const dat = (khoa, v, cu) => setSua((s) => {
+    const n = { ...s }
+    if (v === String(cu)) delete n[khoa]
+    else n[khoa] = v
+    return n
+  })
 
   const than = () => {
     if (err && !d) return <div className="msg err">{String(err.message || err)}</div>
@@ -103,48 +156,138 @@ export default function Relaunch({ runId, canhBao = [], onClose, onXong }) {
               </label>
             </div>
 
+            <div className="bar-ctl" style={{ padding: '0 14px' }}>
+              <div className="switch">
+                <button className={!nangCao ? 'on' : ''}
+                  onClick={() => { setNangCao(false); setSua({}) }}>Dễ hiểu</button>
+                <button className={nangCao ? 'on' : ''}
+                  onClick={() => { setNangCao(true); setSua({}) }}>Nâng cao</button>
+              </div>
+              <input placeholder="Lọc tham số… (keltner, ema, khung, chốt lãi…)"
+                value={loc} onChange={(e) => setLoc(e.target.value)}
+                style={{ minWidth: 260 }} />
+              {loc && <button className="btn" onClick={() => setLoc('')}>Xoá lọc</button>}
+              <span style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--ink-3)' }}>
+                {nangCao
+                  ? 'từng đường dẫn trong chiến lược — sửa đúng một chỗ'
+                  : 'gom theo khái niệm — một dòng sửa hết mọi chỗ đang dùng'}
+              </span>
+            </div>
+
             {d.chien_luoc.map((cl) => (
               <div key={cl.id}>
                 <div className="mau">
                   <span>
                     Chiến lược <span className="mono" style={{ color: 'var(--amber)' }}>{cl.id}</span>{' '}
-                    {cl.name} · {cl.tham_so.length} con số chỉnh được
+                    {cl.name} · {nangCao ? `${cl.tham_so.length} đường dẫn`
+                      : `${(cl.de_hieu || []).length} núm vặn`}
                   </span>
                 </div>
+
+                {!nangCao && (
+                  <div className="tblwrap">
+                    <table className="chiso">
+                      <thead>
+                        <tr>
+                          <th>Tham số</th><th>Ý nghĩa</th>
+                          <th className="n">Đang dùng</th><th>Giá trị mới</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(cl.de_hieu || []).filter((t) => !loc
+                          || `${t.nhan} ${t.y_nghia || ''} ${t.nhom}`.toLowerCase().includes(loc.toLowerCase())
+                        ).map((t, i, mang) => {
+                          const khoa = 'nut|' + JSON.stringify(t)
+                          const truoc = i === 0 ? null : mang[i - 1].nhom
+                          const cu = String(t.gia_tri)
+                          const hien = khoa in sua ? sua[khoa] : cu
+                          return (
+                            <React.Fragment key={t.ma + i}>
+                              {t.nhom !== truoc && (
+                                <tr className="nhom"><td colSpan={4}>{t.nhom}</td></tr>
+                              )}
+                              <tr>
+                                <td>
+                                  {t.nhan}
+                                  {t.so_cho > 1 && (
+                                    <span className="nhieu">sửa {t.so_cho} chỗ</span>
+                                  )}
+                                </td>
+                                <td style={{ color: 'var(--ink-3)', fontSize: 12.5,
+                                  whiteSpace: 'normal', maxWidth: 260 }}>{t.y_nghia || '—'}</td>
+                                <td className="n mono" style={{ color: 'var(--ink-3)' }}>{cu}</td>
+                                <td>
+                                  {t.kieu === 'khung' ? (
+                                    <select style={{ borderColor: khoa in sua ? 'var(--amber)' : undefined }}
+                                      value={hien} onChange={(e) => dat(khoa, e.target.value, cu)}>
+                                      {(t.chon || []).map((x) => <option key={x} value={x}>{x}</option>)}
+                                    </select>
+                                  ) : t.kieu === 'bool' ? (
+                                    <select style={{ borderColor: khoa in sua ? 'var(--amber)' : undefined }}
+                                      value={hien} onChange={(e) => dat(khoa, e.target.value, cu)}>
+                                      <option value="false">tắt</option>
+                                      <option value="true">bật</option>
+                                    </select>
+                                  ) : (
+                                    <input className="dai" style={{ maxWidth: 150,
+                                      borderColor: khoa in sua ? 'var(--amber)' : undefined }}
+                                      value={hien} onChange={(e) => dat(khoa, e.target.value, cu)} />
+                                  )}
+                                </td>
+                              </tr>
+                            </React.Fragment>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {nangCao && (
                 <div className="tblwrap">
                   <table className="chiso">
                     <thead>
-                      <tr><th>Tham số</th><th className="n">Đang dùng</th><th>Giá trị mới</th></tr>
+                      <tr>
+                        <th>Đường dẫn</th><th>Ý nghĩa</th>
+                        <th className="n">Đang dùng</th><th>Giá trị mới</th>
+                      </tr>
                     </thead>
                     <tbody>
-                      {cl.tham_so.map((t, i) => {
+                      {cl.tham_so.filter((t) => !loc
+                        || `${t.nhan} ${t.y_nghia || ''} ${t.nhom} ${t.gia_tri}`
+                          .toLowerCase().includes(loc.toLowerCase())
+                      ).map((t, i, mang) => {
                         const khoa = `${cl.id}|${JSON.stringify(t.duong_dan)}`
-                        const truoc = i === 0 ? null : cl.tham_so[i - 1].nhom
+                        const truoc = i === 0 ? null : mang[i - 1].nhom
                         return (
                           <React.Fragment key={khoa}>
                             {t.nhom !== truoc && (
-                              <tr className="nhom"><td colSpan={3}>{t.nhom}</td></tr>
+                              <tr className="nhom"><td colSpan={4}>{t.nhom}</td></tr>
                             )}
                             <tr>
                               <td className="mono" style={{ fontSize: 12 }}>{t.nhan || '(giá trị)'}</td>
+                              <td style={{ color: 'var(--ink-3)', fontSize: 12.5 }}>
+                                {t.y_nghia || '—'}
+                              </td>
                               <td className="n mono" style={{ color: 'var(--ink-3)' }}>
                                 {String(t.gia_tri)}
                               </td>
                               <td>
-                                <input
-                                  className="dai"
-                                  style={{ maxWidth: 170,
-                                    borderColor: khoa in sua ? 'var(--amber)' : undefined }}
-                                  value={khoa in sua ? sua[khoa] : String(t.gia_tri)}
-                                  onChange={(e) => {
-                                    const v = e.target.value
-                                    setSua((s) => {
-                                      const n = { ...s }
-                                      if (v === String(t.gia_tri)) delete n[khoa]
-                                      else n[khoa] = v
-                                      return n
-                                    })
-                                  }} />
+                                {t.kieu === 'khung' ? (
+                                  <select
+                                    style={{ borderColor: khoa in sua ? 'var(--amber)' : undefined }}
+                                    value={khoa in sua ? sua[khoa] : String(t.gia_tri)}
+                                    onChange={(e) => dat(khoa, e.target.value, t.gia_tri)}>
+                                    {(t.chon || []).map((x) => <option key={x} value={x}>{x}</option>)}
+                                  </select>
+                                ) : (
+                                  <input
+                                    className="dai"
+                                    style={{ maxWidth: 170,
+                                      borderColor: khoa in sua ? 'var(--amber)' : undefined }}
+                                    value={khoa in sua ? sua[khoa] : String(t.gia_tri)}
+                                    onChange={(e) => dat(khoa, e.target.value, t.gia_tri)} />
+                                )}
                               </td>
                             </tr>
                           </React.Fragment>
@@ -153,6 +296,7 @@ export default function Relaunch({ runId, canhBao = [], onClose, onXong }) {
                     </tbody>
                   </table>
                 </div>
+                )}
               </div>
             ))}
           </>
@@ -161,7 +305,8 @@ export default function Relaunch({ runId, canhBao = [], onClose, onXong }) {
         <div className="tuner-f">
           {kieu === 'doi' && (
             <span>
-              Đã đổi <b style={{ color: 'var(--amber)' }}>{doi.length}</b> con số
+              Đã đổi <b style={{ color: 'var(--amber)' }}>{Object.keys(sua).length}</b> tham số
+            {doi.length !== Object.keys(sua).length ? ` (chạm vào ${doi.length} chỗ)` : ''}
               {doi.length === 0 ? ' — chưa có gì để sinh chiến lược mới' : ''}
             </span>
           )}

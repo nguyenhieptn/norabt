@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { Loading, ErrorBox, Block, Card } from '../components/common'
+import { Donut, CotPnL, TangTruong } from '../components/charts'
 import { int, money, pct } from '../lib/format'
 
 export default function Dashboard() {
@@ -13,7 +14,13 @@ export default function Dashboard() {
   if (err) return <ErrorBox error={err} />
   if (!d) return <Loading text="Đang tổng hợp…" />
 
-  const maxG = Math.max(...d.groups.map((g) => g.n), 1)
+  const co_pnl = (d.recent_runs || []).filter((r) => r.pnl !== null && r.pnl !== undefined)
+  const cot = co_pnl.map((r) => ({
+    nhan: String(r.run_id), ten: r.name || `Lần chạy ${r.run_id}`,
+    gia_tri: r.pnl, phu: `${int(r.trades)} lệnh · thắng ${pct(r.winrate)}`,
+  }))
+  const tt = d.tang_truong || []
+  const lai = co_pnl.filter((r) => Number(r.pnl) > 0).length
 
   return (
     <>
@@ -29,22 +36,20 @@ export default function Dashboard() {
         <Card label="Nhóm chiến lược" value={int(d.groups.length)} sub="theo phân loại" />
       </div>
 
+      {tt.length > 1 && (
+        <Block
+          title="Lãi lỗ lũy kế theo tháng"
+          note={d.tang_truong_run
+            ? `lần chạy ${d.tang_truong_run.id} · ${d.tang_truong_run.name}`
+            : ''}
+        >
+          <TangTruong data={tt} />
+        </Block>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 20 }}>
-        <Block title="Kho chiến lược theo nhóm">
-          {d.groups.map((g) => (
-            <div key={g.ten} style={{ marginBottom: 9 }}>
-              <div style={{ display: 'flex', fontSize: 13.5, marginBottom: 3 }}>
-                <span>{g.ten}</span>
-                <b style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{int(g.n)}</b>
-              </div>
-              <div style={{ height: 5, background: 'var(--panel-3)' }}>
-                <div style={{
-                  height: '100%', width: `${(g.n / maxG) * 100}%`,
-                  background: 'var(--amber)', opacity: .75,
-                }} />
-              </div>
-            </div>
-          ))}
+        <Block title="Kho chiến lược theo nhóm" note={`${int(d.strategies)} chiến lược`}>
+          <Donut data={d.groups} nhan_tong="chiến lược" don_vi="chiến lược" />
         </Block>
 
         <Block title="Lần chạy gần đây" flush>
@@ -77,11 +82,18 @@ export default function Dashboard() {
         </Block>
       </div>
 
+      {cot.length > 0 && (
+        <Block title="Lãi lỗ các lần chạy gần đây"
+          note={`${lai}/${cot.length} lần chạy có lãi`}>
+          <CotPnL data={cot} />
+        </Block>
+      )}
+
       <Block title="Luồng làm việc">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 14 }}>
           {[
-            { to: '/miner', n: '1', t: 'Đào chiến lược', d: 'Quét dải tham số, sinh hàng loạt biến thể rồi chấm điểm.' },
-            { to: '/library/alpha', n: '2', t: 'Thư viện Alpha', d: 'Chiến lược đã có, phân theo bốn loại logic.' },
+            { to: '/library/alpha?tab=dao', n: '1', t: 'Đào alpha', d: 'Quét dải tham số, sinh hàng loạt biến thể rồi chấm điểm.' },
+            { to: '/library/alpha', n: '2', t: 'Kho alpha', d: 'Chiến lược đã có, phân theo bốn loại logic.' },
             { to: '/library/base', n: '3', t: 'Cấu hình chạy', d: 'Gắn coin, vốn, khoảng thời gian cho một lần chạy.' },
             { to: '/library/result', n: '4', t: 'Kết quả', d: 'Chỉ số đầy đủ, biểu đồ và đánh giá từng lần chạy.' },
           ].map((s) => (

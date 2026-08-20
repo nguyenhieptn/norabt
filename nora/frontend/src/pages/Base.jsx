@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { Loading, ErrorBox, Empty, Block } from '../components/common'
 import { Pager, usePaged } from '../components/Pager'
@@ -25,6 +25,8 @@ function RunPanel({ runId, onChanged }) {
   const [msg, setMsg] = useState(null)
   const [err, setErr] = useState(null)
   const [chayLai, setChayLai] = useState(false)
+  const [xong, setXong] = useState(null)      // thông báo chạy xong + đếm ngược
+  const dieuHuong = useNavigate()
 
   // Tiến độ đẩy về theo thời gian thực; mất kết nối thì tự lùi về hỏi định kỳ
   const { progress: prog, live, refresh } = useRunProgress(runId, true)
@@ -52,8 +54,22 @@ function RunPanel({ runId, onChanged }) {
     } else if (dangChay.current) {
       dangChay.current = false
       onChanged && onChanged()
+      // Chạy xong thì báo và đưa thẳng sang trang kết quả — đó là việc kế tiếp
+      // người dùng muốn làm. Vẫn để nút ở lại phòng khi cần xem log.
+      setXong({ trades: prog?.trades || 0, dem: 6 })
     }
   }, [prog?.busy, prog?.running])
+
+  // đếm ngược rồi chuyển trang
+  useEffect(() => {
+    if (!xong) return undefined
+    if (xong.dem <= 0) {
+      dieuHuong(`/library/result/${runId}`)
+      return undefined
+    }
+    const t = setTimeout(() => setXong((x) => (x ? { ...x, dem: x.dem - 1 } : x)), 1000)
+    return () => clearTimeout(t)
+  }, [xong, runId])
 
   const doStop = async () => {
     if (!window.confirm('Dừng backtest đang chạy?')) return
@@ -146,6 +162,15 @@ function RunPanel({ runId, onChanged }) {
               Tiến trình đã dừng giữa chừng — chưa chạy hết dữ liệu.
             </div>
           )}
+        </div>
+      )}
+
+      {xong && (
+        <div className="xong">
+          <b>Chạy xong</b>
+          <span>{int(xong.trades)} lệnh đã sinh · sang trang kết quả sau {xong.dem} giây</span>
+          <Link className="btn pri" to={`/library/result/${runId}`}>Xem kết quả ngay</Link>
+          <button className="btn" onClick={() => setXong(null)}>Ở lại</button>
         </div>
       )}
 

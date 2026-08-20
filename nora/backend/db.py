@@ -32,6 +32,26 @@ def cursor():
         conn.close()
 
 
+def stream(sql: str, params=None, size: int = 20000):
+    """Đọc từng khối, không kéo cả bảng vào bộ nhớ.
+
+    Đường vốn của một lần chạy có tới gần một triệu điểm; muốn tính sụt giảm
+    trên đúng đường vốn đầy đủ thì phải duyệt kiểu này.
+    """
+    conn = pymysql.connect(**{**DB, "cursorclass": pymysql.cursors.SSCursor})
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            while True:
+                khoi = cur.fetchmany(size)
+                if not khoi:
+                    break
+                for hang in khoi:
+                    yield hang
+    finally:
+        conn.close()
+
+
 def fetch_all(sql: str, params=None):
     with cursor() as cur:
         cur.execute(sql, params or ())

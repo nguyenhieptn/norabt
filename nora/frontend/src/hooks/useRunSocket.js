@@ -86,25 +86,55 @@ export function useRunProgress(runId, enabled = true) {
   return { progress: data, live, refresh }
 }
 
-/** Theo dõi log chạy theo thời gian thực (chỉ mở khi đang chạy) */
+/**
+ * Theo dõi log chạy theo thời gian thực (chỉ mở khi đang chạy).
+ *
+ * Lấy một bản qua HTTP ngay lúc bật để có cái hiện liền, rồi mới mở WebSocket
+ * cho các dòng tiếp theo — chờ gói đầu của WebSocket thì ô log trống hàng chục
+ * giây, mà mất kết nối là trống luôn tới hết lượt chạy.
+ */
 export function useRunLog(runId, enabled) {
   const [log, setLog] = useState(null)
 
   useEffect(() => {
-    if (!runId || !enabled) return
-    let sock
+    if (!runId || !enabled) return undefined
     let huy = false
-    try {
-      sock = new WebSocket(wsUrl(`/ws/runs/${runId}/log?tail=80`))
-    } catch (e) { return }
-    sock.onmessage = (ev) => {
+    let sock = null
+    let hen = null
+    let lan = 0
+
+    const lay_ngay = () => fetch(`/api/runs/${runId}/log?tail=80`)
+      .then((r) => r.json())
+      .then((r) => { if (!huy && r && r.data) setLog(r.data) })
+      .catch(() => {})
+
+    const noi = () => {
       if (huy) return
       try {
-        const m = JSON.parse(ev.data)
-        if (m.log) setLog(m.log)
-      } catch (e) { /* bỏ qua */ }
+        sock = new WebSocket(wsUrl(`/ws/runs/${runId}/log?tail=80`))
+      } catch (e) { return }
+      sock.onmessage = (ev) => {
+        if (huy) return
+        try {
+          const m = JSON.parse(ev.data)
+          if (m.log) setLog(m.log)
+        } catch (e) { /* bỏ qua gói hỏng */ }
+      }
+      sock.onclose = () => {
+        if (huy) return
+        lan += 1
+        if (lan <= 2) hen = setTimeout(noi, 2000 * lan)
+      }
+      sock.onerror = () => { try { sock.close() } catch (e) {} }
     }
-    return () => { huy = true; try { sock.close() } catch (e) {} }
+
+    lay_ngay()
+    noi()
+    return () => {
+      huy = true
+      clearTimeout(hen)
+      try { sock && sock.close() } catch (e) {}
+    }
   }, [runId, enabled])
 
   return log
