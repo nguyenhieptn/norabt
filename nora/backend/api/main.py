@@ -24,13 +24,21 @@ from backend.stats import queries as q               # noqa: E402
 from backend.stats import metrics as mt              # noqa: E402
 from backend import control as ctl                   # noqa: E402
 
-app = FastAPI(title="Nora Backtest API", version="1.0")
+app = FastAPI(title="Nora Backtest API", version="2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+try:
+    from backend.api.routers import engine, meta
+    app.include_router(engine.router)
+    app.include_router(meta.router)
+except Exception as e:
+    print(f"Warning: Could not load V2 routers: {e}")
+
 
 CHART_DIR = Path("/home/ubuntu/norabt/coin_monitor/frontend/build/plot")
 MONITOR_DIR = Path("/home/ubuntu/norabt/coin_monitor")

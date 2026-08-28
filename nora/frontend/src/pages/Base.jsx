@@ -54,11 +54,11 @@ function RunPanel({ runId, onChanged }) {
     } else if (dangChay.current) {
       dangChay.current = false
       onChanged && onChanged()
-      // Chạy xong thì báo và đưa thẳng sang trang kết quả — đó là việc kế tiếp
-      // người dùng muốn làm. Vẫn để nút ở lại phòng khi cần xem log.
-      setXong({ trades: prog?.trades || 0, dem: 6 })
+      // Chỉ run hoàn tất bình thường mới được báo thành công và tự chuyển trang.
+      // `interrupted` vẫn có kết quả dở dang để xem, nhưng không phải backtest xong.
+      if (prog?.state === 'done') setXong({ trades: prog?.trades || 0, dem: 6 })
     }
-  }, [prog?.busy, prog?.running])
+  }, [prog?.busy, prog?.running, prog?.state, prog?.trades])
 
   // đếm ngược rồi chuyển trang
   useEffect(() => {
@@ -78,7 +78,6 @@ function RunPanel({ runId, onChanged }) {
       await api.stop(runId)
       setMsg('Đã gửi lệnh dừng.')
       refresh()
-      onChanged && onChanged()
     } catch (e) { setErr(e) } finally { setBusy(false) }
   }
 

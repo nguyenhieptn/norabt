@@ -29,7 +29,14 @@ def processLabChildStrategy(strategyid, optParams={}):
     
     for key in optParams:
         content = content.replace(key, str(optParams[key]))
-        
+
+    # Keltner processor columns encode decimal coefficients without a dot
+    # (kup21_05, not kup21_0.5). Optimizer values remain real numbers such as
+    # 0.5 so str2num can evaluate them safely; normalize only the column token
+    # after all placeholders have been substituted.
+    content = re.sub(r"(k(?:up|lo)\d+(?:\.\d+)?)_0\.(\d+)",
+                     lambda m: f"{m.group(1)}_0{m.group(2)}", content)
+
     regex = r"\#[^\#]+\#"
     match = re.search(regex, content)
     if(not match is None):

@@ -23,29 +23,49 @@ export function useRunProgress(runId, enabled = true) {
   const ws = useRef(null)
   const poll = useRef(null)
   const retry = useRef(0)
+  const retryTimer = useRef(null)
   const xong = useRef(false)                 // đã nhận gói cuối, thôi nối lại
-  const huy = useRef(false)                  // rời màn hình
 
   useEffect(() => {
-    if (!runId || !enabled) return
-    huy.current = false
+    if (!runId || !enabled) return undefined
+    let huy = false                            // riêng cho đúng lượt effect này
+    let sock = null
+    let pollTimer = null
+    let retryTimerId = null
+    let retryCount = 0
+    let daXong = false
+
     xong.current = false
     retry.current = 0
+    setData(null)
+    clearTimeout(retryTimer.current)
+    retryTimer.current = null
     setLive(false)
 
+    const stopPolling = () => {
+      if (poll.current === pollTimer) poll.current = null
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
     const startPolling = () => {
-      if (poll.current) return
+      if (huy || pollTimer) return
       const tick = () => fetch(`/api/runs/${runId}/progress`)
-        .then((r) => r.json()).then((m) => { if (!huy.current) setData(m) })
+        .then((r) => r.json()).then((m) => { if (!huy) setData(m) })
         .catch(() => {})
       tick()
-      poll.current = setInterval(tick, 5000)
+      pollTimer = setInterval(tick, 5000)
+      poll.current = pollTimer
     }
-    const stopPolling = () => { clearInterval(poll.current); poll.current = null }
+    const clearRetry = () => {
+      clearTimeout(retryTimerId)
+      retryTimerId = null
+      clearTimeout(retryTimer.current)
+      retryTimer.current = null
+    }
 
     const connect = () => {
-      if (huy.current || xong.current) return
-      let sock
+      clearRetry()
+      if (huy || daXong) return
       try {
         sock = new WebSocket(wsUrl(`/ws/runs/${runId}/progress`))
       } catch (e) {
@@ -54,32 +74,46 @@ export function useRunProgress(runId, enabled = true) {
       }
       ws.current = sock
 
-      sock.onopen = () => { if (!huy.current) { setLive(true); retry.current = 0; stopPolling() } }
+      sock.onopen = () => {
+        if (huy || sock !== ws.current) return
+        setLive(true)
+        retryCount = 0
+        retry.current = 0
+        stopPolling()
+      }
       sock.onmessage = (ev) => {
-        if (huy.current) return
+        if (huy || sock !== ws.current) return
         try {
           const m = JSON.parse(ev.data)
           if (m.error) return
           setData(m)
-          if (m.final) xong.current = true
+          if (m.final) {
+            daXong = true
+            xong.current = true
+          }
         } catch (e) { /* bỏ qua gói hỏng */ }
       }
       sock.onclose = () => {
-        if (huy.current) return
+        if (huy || sock !== ws.current) return
         setLive(false)
-        if (xong.current) return                    // kết thúc bình thường
-        retry.current += 1
-        if (retry.current <= 3) setTimeout(connect, 1500 * retry.current)
-        else startPolling()                          // đành hỏi định kỳ
+        if (daXong) return                         // kết thúc bình thường
+        retryCount += 1
+        retry.current = retryCount
+        if (retryCount <= 3) {
+          retryTimerId = setTimeout(connect, 1500 * retryCount)
+          retryTimer.current = retryTimerId
+        } else startPolling()                      // đành hỏi định kỳ
       }
       sock.onerror = () => { try { sock.close() } catch (e) {} }
     }
 
     connect()
     return () => {
-      huy.current = true
+      huy = true
+      clearRetry()
       stopPolling()
-      try { ws.current?.close() } catch (e) {}
+      if (ws.current === sock) ws.current = null
+      try { sock?.close() } catch (e) {}
     }
   }, [runId, enabled, lan])
 

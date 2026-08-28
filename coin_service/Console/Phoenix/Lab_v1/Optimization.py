@@ -141,6 +141,8 @@ class Optimization:
             else:
                 blockLeng = min(safe_thread_count, max(1, int(20/numberOfCamp)))
 
+        blocks = []
+        block = []
         for param in self.paramsList:
             block.append(param)
             if(len(block) == blockLeng):

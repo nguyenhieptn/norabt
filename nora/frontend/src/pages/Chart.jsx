@@ -106,11 +106,12 @@ export default function Chart() {
       </Block>
 
       {url && (
-        <p style={{ color: 'var(--ink-3)', fontSize: 12.5 }}>
-          Tam giác đỏ là điểm vào lệnh (nhãn ghi hướng và kết cục) · vuông xanh là điểm khớp lệnh ·
-          dùng thanh trượt dưới biểu đồ để phóng to khoảng thời gian.
+        <p style={{ color: 'var(--ink-3)', fontSize: 12.5, lineHeight: 1.6 }}>
+          🟢 <b>BUY</b> (tam giác xanh dưới đáy nến): Long Entry / DCA · 🔴 <b>SELL</b> (tam giác đỏ trên đỉnh nến): Short Entry / DCA · <i>Rê chuột vào điểm nến</i> để xem chi tiết giá khớp, thời gian, luồng và lý do vào lệnh.
         </p>
       )}
+
+
     </>
   )
 }

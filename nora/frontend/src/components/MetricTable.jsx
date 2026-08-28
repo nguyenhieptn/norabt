@@ -2,12 +2,17 @@ import React from 'react'
 import { money, pct, num, int } from '../lib/format'
 
 /** Lỗ gộp trong dữ liệu là số dương (độ lớn) — hiển thị đúng dấu âm cho dễ đọc */
-const am = (v) => money(-Math.abs(Number(v || 0)))
+const am = (v) => {
+  const n = Number(v)
+  return v === null || v === undefined || v === '' || !Number.isFinite(n)
+    ? '—'
+    : money(-Math.abs(n))
+}
 
 /** Xếp hạng một chỉ số theo các mốc quen dùng trong đánh giá chiến lược.
  *  moc: [ngưỡng, nhãn, tone] xếp từ tốt xuống kém; cao = giá trị càng lớn càng tốt. */
 function xep(v, moc, cao = true) {
-  if (v === null || v === undefined || Number.isNaN(Number(v))) return null
+  if (v === null || v === undefined || v === '' || !Number.isFinite(Number(v))) return null
   const x = Number(v)
   for (const [nguong, nhan, tone] of moc) {
     if (cao ? x >= nguong : x <= nguong) return { nhan, tone }
@@ -16,6 +21,10 @@ function xep(v, moc, cao = true) {
   return { nhan: cuoi[1], tone: cuoi[2] }
 }
 
+const toneSo = (v, positive = 'up', negative = 'down') =>
+  v === null || v === undefined || v === '' || !Number.isFinite(Number(v))
+    ? '' : (Number(v) > 0 ? positive : negative)
+
 /** Danh sách chỉ số đánh giá một lần chạy, gom theo nhóm. */
 export function bangChiSo(m) {
   const G = (ten, hang) => ({ ten, hang: hang.filter(Boolean) })
@@ -23,24 +32,24 @@ export function bangChiSo(m) {
 
   return [
     G('Hiệu quả', [
-      R('Lãi lỗ ròng', money(m.net), Number(m.net) > 0 ? 'up' : 'down',
+      R('Lãi lỗ ròng', money(m.net), toneSo(m.net),
         xep(m.net, [[0.0001, 'Có lãi', 'tot'], [-1e18, 'Lỗ', 'xau']]),
         'tổng lãi lỗ của mọi lệnh, đã trừ phí'),
-      R('Tỷ suất sinh lời', pct(m.roi_pct), Number(m.roi_pct) > 0 ? 'up' : 'down', null,
+      R('Tỷ suất sinh lời', pct(m.roi_pct), toneSo(m.roi_pct), null,
         'lãi lỗ ròng so với vốn ban đầu'),
       R('Tăng trưởng năm (CAGR)', pct(m.cagr_pct), '', null,
         m.du_dai_de_quy_nam === false
           ? `mới ${int(m.so_ngay)} ngày — quá ngắn để quy đổi về năm`
           : `quy đổi về một năm, tính trên ${int(m.so_ngay)} ngày chạy`),
       R('Kỳ vọng mỗi lệnh', money(m.expectancy),
-        Number(m.expectancy) > 0 ? 'up' : 'down', null,
+        toneSo(m.expectancy), null,
         'trung bình một lệnh mang về bao nhiêu'),
       R('Số dư đầu → cuối', `${num(m.start_balance)} → ${num(m.end_balance)}`, '', null,
         'vốn lúc bắt đầu và lúc kết thúc'),
     ]),
 
     G('Rủi ro', [
-      R('Sụt giảm tối đa (MDD)', pct(m.mdd_pct), 'down',
+      R('Sụt giảm tối đa (MDD)', pct(m.mdd_pct), toneSo(m.mdd_pct, 'down', 'down'),
         xep(m.mdd_pct, [[25, 'Chấp nhận được', 'tot'], [50, 'Cao', 'canh'], [1e18, 'Rất rủi ro', 'xau']], false),
         m.peak_at ? `từ đỉnh ${m.peak_at} xuống đáy ${m.trough_at}` : 'mức tụt sâu nhất của đường vốn'),
       R('Mức sụt giảm tuyệt đối', am(m.mdd_abs), 'down', null,
@@ -93,6 +102,7 @@ export function bangChiSo(m) {
  * kèm mức xếp hạng và một câu giải thích ý nghĩa.
  */
 export default function MetricTable({ m, gonNheYNghia = false }) {
+  if (!m) return <div className="pre luu_y">Chưa có dữ liệu thống kê.</div>
   const nhom = bangChiSo(m)
   const thieu_von = m.co_duong_von === false
   return (

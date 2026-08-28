@@ -29,7 +29,10 @@ def processLabChildStrategy(strategyid, optParams={}):
     
     for key in optParams:
         content = content.replace(key, str(optParams[key]))
-        
+
+    content = re.sub(r"(k(?:up|lo)\d+(?:\.\d+)?)_0\.(\d+)",
+                     lambda m: f"{m.group(1)}_0{m.group(2)}", content)
+
     regex = r"\#[^\#]+\#"
     match = re.search(regex, content)
     if(not match is None):

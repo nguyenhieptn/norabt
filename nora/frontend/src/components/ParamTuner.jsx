@@ -64,10 +64,18 @@ function nghiaTheoGiaTri(b, bien) {
 
 /** Giá trị nào nằm ngoài lưới cột mà bộ dữ liệu đã tính sẵn.
  *  Quét ra ngoài lưới thì engine đọc phải cột trống, kết quả rỗng mà không báo. */
+function maHeSo(v) {
+  const n = Number(String(v).trim())
+  return Number.isFinite(n) ? String(n) : null
+}
+
 function ngoaiLuoi(c, values) {
   const g = c.gioi_han || {}
   const v = (values || []).map((x) => String(x).trim()).filter(Boolean)
-  if (g.chon) return v.filter((x) => !g.chon.includes(x))
+  if (g.chon) {
+    const cho = new Set(g.chon.map((x) => maHeSo(x) || String(x)))
+    return v.filter((x) => !cho.has(c.bien_doi === 'he_so' ? maHeSo(x) : x))
+  }
   if (g.tu !== undefined) {
     return v.filter((x) => !/^\d+$/.test(x) || Number(x) < g.tu || Number(x) > g.den)
   }
@@ -188,8 +196,9 @@ export default function ParamTuner({ oid, baseRun, onCreated, onClose }) {
       .map(({ c, q }) => ({
         strategy: c.strategy, ten_bien: q.ten_bien || c.ten_bien_goi_y,
         ap_dung: c.ap_dung,
-        // hệ số Keltner viết không dấu chấm trong tên cột: 0.5 -> "05"
-        values: q.values.map((v) => (c.bien_doi === 'he_so' ? String(v).replace('.', '') : String(v))),
+        // Tên cột Keltner dùng 05, còn optimizer chỉ nhận số hợp lệ như 0.5.
+        // Backend sẽ chuyển giá trị số này thành mã cột sau khi engine thay biến.
+        values: q.values.map((v) => String(v)),
       }))
 
     const toHop = demToHop(d.bien) * chon.reduce((t, x) => t * Math.max(1, x.values.length), 1)

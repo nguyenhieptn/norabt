@@ -59,7 +59,8 @@ export default function Relaunch({ runId, canhBao = [], onClose, onXong }) {
 
   const doi = useMemo(() => {
     const ra = []
-    const cot = new Map()          // đường dẫn -> { goc, phan, strategy }
+    // Cùng đường dẫn ở hai chiến lược là hai giá trị độc lập, không được gộp.
+    const cot = new Map()          // "strategy|đường dẫn" -> { goc, phan, strategy, duong_dan }
 
     for (const [khoa, gt] of Object.entries(sua)) {
       if (!khoa.startsWith('nut|')) {
@@ -71,8 +72,11 @@ export default function Relaunch({ runId, canhBao = [], onClose, onXong }) {
       const nut = JSON.parse(khoa.slice(4))
       for (const ap of nut.ap_dung) {
         if (ap.phan) {
-          const k = JSON.stringify(ap.duong_dan)
-          const cu = cot.get(k) || { goc: ap.goc, phan: {}, strategy: nut.strategy }
+          const duong_dan = JSON.stringify(ap.duong_dan)
+          const k = `${nut.strategy}|${duong_dan}`
+          const cu = cot.get(k) || {
+            goc: ap.goc, phan: {}, strategy: nut.strategy, duong_dan: ap.duong_dan,
+          }
           cu.phan[ap.phan] = maHoa(gt, nut.bien_doi)
           cot.set(k, cu)
         } else {
@@ -85,8 +89,8 @@ export default function Relaunch({ runId, canhBao = [], onClose, onXong }) {
       }
     }
 
-    for (const [k, v] of cot) {
-      ra.push({ strategy: v.strategy, duong_dan: JSON.parse(k), gia_tri: ghepCot(v.goc, v.phan) })
+    for (const v of cot.values()) {
+      ra.push({ strategy: v.strategy, duong_dan: v.duong_dan, gia_tri: ghepCot(v.goc, v.phan) })
     }
     return ra
   }, [sua])
@@ -197,12 +201,13 @@ export default function Relaunch({ runId, canhBao = [], onClose, onXong }) {
                         {(cl.de_hieu || []).filter((t) => !loc
                           || `${t.nhan} ${t.y_nghia || ''} ${t.nhom}`.toLowerCase().includes(loc.toLowerCase())
                         ).map((t, i, mang) => {
-                          const khoa = 'nut|' + JSON.stringify(t)
+                          const nut = { ...t, strategy: cl.id }
+                          const khoa = 'nut|' + JSON.stringify(nut)
                           const truoc = i === 0 ? null : mang[i - 1].nhom
                           const cu = String(t.gia_tri)
                           const hien = khoa in sua ? sua[khoa] : cu
                           return (
-                            <React.Fragment key={t.ma + i}>
+                            <React.Fragment key={`${cl.id}|${t.ma}|${i}`}>
                               {t.nhom !== truoc && (
                                 <tr className="nhom"><td colSpan={4}>{t.nhom}</td></tr>
                               )}

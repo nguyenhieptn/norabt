@@ -464,39 +464,123 @@ class Command(BaseCommand):
 
 
     def drawPositionOnChart(self, row):
-        """Đánh dấu điểm vào/thoát lệnh lên biểu đồ chỉ báo — phần để soi bằng mắt.
-        Long/Short kèm trạng thái: TP chốt lãi, ST cắt lỗ, W chờ, C huỷ."""
+        """Chỉ đánh dấu điểm BUY (Long Entry/DCA) và SELL (Short Entry/DCA) trên nến:
+        - BUY: Tam giác xanh ngọc hướng lên dưới đáy nến (low - pad).
+        - SELL: Tam giác đỏ tươi hướng xuống trên đỉnh nến (high + pad).
+        - Không hiển thị các chấm đỏ/hình thoi exit hay chữ rườm rà.
+        """
         positionData = self.getData('Position')
-        orderData = self.getData('Order')
+        candleData = self.getData(f'candle_{self.frame}')
 
-        if len(positionData) > 0:
-            px = pd.to_datetime(positionData[LabResultsWrapper.lab_result_chart].to_list(),
-                                unit='ms', utc=True).tz_convert(VN_TZ)
-            positionData['type'] = positionData[LabResultsWrapper.lab_result_type].map(
-                lambda x: "Long" if x == 1 else "Short")
-            positionData['state'] = positionData[LabResultsWrapper.lab_result_status].map(
-                lambda x: "TP" if x == 2 else "ST" if x == 3 else 'W' if x == 6 else 'C' if x == 4 else '')
-            positionData['text'] = "<b>" + positionData['type'] + ":" + positionData['state'] + "</b>"
+        if len(positionData) == 0:
+            return
+
+        has_candles = len(candleData) > 0
+        if has_candles:
+            candleData = candleData.sort_values('open_time').reset_index(drop=True)
+            avg_range = (candleData['high'] - candleData['low']).mean()
+            min_pad = max(avg_range * 0.35, candleData['close'].mean() * 0.003) if len(candleData) > 0 else 0
+        else:
+            min_pad = 0
+
+        def _get_candle(ts_ms):
+            if not has_candles or ts_ms is None or pd.isna(ts_ms):
+                return None
+            m = candleData[(candleData['open_time'] <= ts_ms) & (candleData['close_time'] >= ts_ms)]
+            if len(m) > 0:
+                return m.iloc[0]
+            diffs = (candleData['open_time'] - ts_ms).abs()
+            min_idx = diffs.idxmin()
+            if diffs.loc[min_idx] <= 86400000 * 2:
+                return candleData.loc[min_idx]
+            return None
+
+        top_stack = {}     # SELL points per candle
+        bottom_stack = {}  # BUY points per candle
+
+        for _, p in positionData.iterrows():
+            p_type = p.get(LabResultsWrapper.lab_result_type)  # 1: Long, 2: Short
+            p_status = p.get(LabResultsWrapper.lab_result_status)  # 2: TP, 3: ST/SL, 4: C, 6: W
+            p_phase = int(p.get(LabResultsWrapper.lab_result_phase, 0) or 0)
+            enter_t = p.get(LabResultsWrapper.lab_result_chart) or p.get(LabResultsWrapper.lab_result_enter_time)
+            enter_p = float(p.get(LabResultsWrapper.lab_result_chart_price) or p.get(LabResultsWrapper.lab_result_enter_price) or 0)
+            close_t = p.get(LabResultsWrapper.lab_result_close_time) or p.get(LabResultsWrapper.lab_result_sell_time)
+            profit_pct = float(p.get(LabResultsWrapper.lab_result_realprofit) or p.get(LabResultsWrapper.lab_result_eventprofit) or 0)
+            flow = p.get(LabResultsWrapper.lab_result_flow, '')
+            reason = str(p.get(LabResultsWrapper.lab_result_start_reason) or '')[:140]
+
+            c_in = _get_candle(enter_t)
+            if c_in is not None:
+                x_in = pd.to_datetime(c_in['open_time'], unit='ms', utc=True).tz_convert(VN_TZ)
+                pad_in = max(min_pad, (c_in['high'] - c_in['low']) * 0.35)
+                c_low_in = c_in['low']
+                c_high_in = c_in['high']
+            else:
+                x_in = pd.to_datetime(enter_t, unit='ms', utc=True).tz_convert(VN_TZ)
+                pad_in = min_pad
+                c_low_in = enter_p * 0.995
+                c_high_in = enter_p * 1.005
+
+            time_str = pd.to_datetime(enter_t, unit='ms', utc=True).tz_convert(VN_TZ).strftime('%Y-%m-%d %H:%M')
+            phase_suffix = f" #{p_phase}" if p_phase > 0 else ""
+            status_text = "TP (Chốt lãi)" if p_status == 2 else "SL (Cắt lỗ)" if p_status == 3 else "Đang chờ/Huỷ"
+            pnl_info = f"<br>• Kết quả: {status_text} ({profit_pct:+.2f}%)" if close_t and close_t > 0 else ""
+
+            k = str(x_in)
+            if p_type == 1:  # LONG -> Mua (dưới nến)
+                bottom_stack.setdefault(k, []).append({
+                    'x': x_in,
+                    'base_y': c_low_in,
+                    'pad': pad_in,
+                    'hover': f"<b>🟢 LONG BUY{phase_suffix}</b><br>• Thời gian: {time_str}<br>• Giá vào: {enter_p:g}<br>• Luồng: {flow}<br>• Tín hiệu: {reason}{pnl_info}",
+                })
+            else:  # SHORT -> Bán (trên nến)
+                top_stack.setdefault(k, []).append({
+                    'x': x_in,
+                    'base_y': c_high_in,
+                    'pad': pad_in,
+                    'hover': f"<b>🔴 SHORT SELL{phase_suffix}</b><br>• Thời gian: {time_str}<br>• Giá vào: {enter_p:g}<br>• Luồng: {flow}<br>• Tín hiệu: {reason}{pnl_info}",
+                })
+
+        buy_pts = []
+        sell_pts = []
+
+        # Xếp các điểm SELL ở TRÊN đỉnh nến
+        for k, items in top_stack.items():
+            for idx, it in enumerate(items):
+                y_val = it['base_y'] + it['pad'] * (1.0 + idx * 0.9)
+                sell_pts.append({'x': it['x'], 'y': y_val, 'hover': it['hover']})
+
+        # Xếp các điểm BUY ở DƯỚI đáy nến
+        for k, items in bottom_stack.items():
+            for idx, it in enumerate(items):
+                y_val = it['base_y'] - it['pad'] * (1.0 + idx * 0.9)
+                buy_pts.append({'x': it['x'], 'y': y_val, 'hover': it['hover']})
+
+        # Vẽ Marker BUY (Tam giác xanh)
+        if buy_pts:
+            bdf = pd.DataFrame(buy_pts)
             self.fig.add_trace(go.Scatter(
-                x=px, y=positionData[LabResultsWrapper.lab_result_chart_price],
-                name="Vao lenh", mode="markers+text",
-                marker=dict(color="crimson", size=9, symbol='triangle-up'),
-                text=positionData['text'], textposition="top center",
-                textfont=dict(color="crimson"),
+                x=bdf['x'], y=bdf['y'],
+                name="BUY (Long Entry/DCA)", mode="markers",
+                marker=dict(color="#00e676", size=12, symbol='triangle-up',
+                            line=dict(color="#004d40", width=1.2)),
+                hovertext=bdf['hover'], hoverinfo="text",
             ), row=row, col=1)
 
-        if len(orderData) > 0:
-            ox = pd.to_datetime(orderData[LabOrderWrapper.lab_order_time].to_list(),
-                                unit='ms', utc=True).tz_convert(VN_TZ)
-            orderData['type'] = orderData[LabOrderWrapper.lab_order_type].map(
-                lambda x: "<b>Buy</b>" if x == 1 else "<b>Sell</b>")
+        # Vẽ Marker SELL (Tam giác đỏ)
+        if sell_pts:
+            sdf = pd.DataFrame(sell_pts)
             self.fig.add_trace(go.Scatter(
-                x=ox, y=orderData[LabOrderWrapper.lab_order_price],
-                name="Khop lenh", mode="markers+text",
-                marker=dict(color="green", size=8, symbol='square'),
-                text=orderData['type'], textposition="bottom center",
-                textfont=dict(color="green"),
+                x=sdf['x'], y=sdf['y'],
+                name="SELL (Short Entry/DCA)", mode="markers",
+                marker=dict(color="#ff5252", size=12, symbol='triangle-down',
+                            line=dict(color="#b71c1c", width=1.2)),
+                hovertext=sdf['hover'], hoverinfo="text",
             ), row=row, col=1)
+
+
+
 
     def createChart(self):
 
@@ -781,21 +865,17 @@ class Command(BaseCommand):
         
         # Set title
         self.fig.update_layout(
-            
-            # legend = dict(orientation = "h",   # show entries horizontally
-            #     xanchor = "center",  # use center of legend as anchor
-            #     x = 0.5), # put legend in center of x-axis
-
             hovermode="x unified",
             hoverdistance=10,
+            xaxis_rangeslider_visible=False,
             margin=dict(b=20, t=40, l=0, r=0)
-
         )
-        self.fig.update_yaxes(showspikes=True, spikemode='across', spikesnap='cursor',  spikedash='dot')
-        self.fig.update_xaxes(showspikes=True, spikemode='across', spikesnap='cursor',  spikedash='dot')
+        self.fig.update_yaxes(showspikes=True, spikemode='across', spikesnap='cursor', spikedash='dot')
+        self.fig.update_xaxes(showspikes=True, spikemode='across', spikesnap='cursor', spikedash='dot', rangeslider_visible=False)
         self.fig.update_traces(xaxis='x1')
         self.fig.update_xaxes(type="date", row=1, col=1)
         self.fig.update_annotations(font_size=8)
+
         
         print("Export to html")
         

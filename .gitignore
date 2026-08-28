@@ -2,3 +2,39 @@ __MACOSX
 coins/node_modules
 .idea
 data/
+.env
+.env.*
+!.env.example
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Node dependencies and build output
+node_modules/
+dist/
+.vite/
+
+# Logs and runtime output
+*.log
+*.pid
+*.sock
+
+# Data, databases, exports, archives
+*.db
+*.sqlite
+*.sqlite3
+*.csv
+*.pkl
+*.zip
+*.tar
+*.tar.gz
+
+# Local secrets and keys
+*private*
+*id_rsa*
+*id_ed25519*
+*.pem
+*.key

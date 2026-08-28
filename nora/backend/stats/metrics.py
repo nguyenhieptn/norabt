@@ -9,7 +9,7 @@ import time
 
 import datetime
 
-from ..db import fetch_all, fetch_one, stream
+from ..db import fetch_all, fetch_one, stream_rows as stream
 
 # Bộ nhớ đệm cho các truy vấn nặng (quét toàn bảng 9 triệu dòng).
 # Dashboard không cần số liệu tức thời nên đệm 10 phút là hợp lý.
@@ -48,7 +48,15 @@ def quet_duong_von(run_id: int):
     Đường vốn có gần một triệu điểm nên đọc theo luồng, và gộp cả ba phép tính
     vào một lượt thay vì quét ba lần.
     """
-    von_dau = None
+    # Engine cập nhật lab_account_balance trong khi chạy, còn margin_balance
+    # giữ vốn cấu hình ban đầu. Dùng nó làm mốc nếu có; chỉ fallback về tick
+    # đầu cho các account cũ thiếu margin_balance.
+    account = fetch_one(
+        "SELECT lab_account_margin_balance AS initial_margin FROM lab_account "
+        "WHERE lab_account_id = %s", (run_id,)) or {}
+    von_dau = account.get("initial_margin")
+    if von_dau is not None:
+        von_dau = float(von_dau)
     ngay_hien_tai = None
     dong_cua = None
     theo_ngay = []
@@ -92,11 +100,12 @@ def quet_duong_von(run_id: int):
         return (datetime.datetime.utcfromtimestamp(int(ms) / 1000).date().isoformat()
                 if ms else None)
 
-    # Không có điểm nào thì phải trả về rỗng, không được trả 0: "sụt giảm 0%"
-    # đọc thành "không hề rủi ro", trong khi sự thật là không có gì để tính.
-    if von_dau is None:
-        return None, [], {"mdd_pct": None, "mdd_abs": None,
-                          "peak_at": None, "trough_at": None}
+    # Không có điểm nào thì mọi risk metric đều unavailable. Vốn cấu hình
+    # vẫn có thể trả về cho phần đầu/cuối, nhưng không được biến thiếu equity
+    # thành "sụt giảm 0%".
+    if not eq:
+        return von_dau, [], {"mdd_pct": None, "mdd_abs": None,
+                             "peak_at": None, "trough_at": None}
 
     dd = {"mdd_pct": round(mdd, 2), "mdd_abs": round(mdd_abs, 2),
           "peak_at": ngay_cua(dinh_t), "trough_at": ngay_cua(day_t)}
@@ -143,7 +152,7 @@ def _returns(equity, von_dau=None):
     ngày đó là mất luôn phiên giao dịch đầu, thường là phiên biến động nhất.
     """
     out = []
-    prev = float(von_dau) if von_dau else None
+    prev = float(von_dau) if von_dau is not None else None
     for row in equity:
         v = float(row["balance"])
         if prev is not None and prev > 0:
@@ -180,7 +189,7 @@ def risk_ratios(equity, rf_annual: float = 0.0, von_dau: float = None, mdd_pct: 
     # lãi một tuần nâng lũy thừa 52 lần cho ra những con số hàng nghìn tỷ phần
     # trăm, và Calmar ăn theo cũng hỏng. Thà không có số còn hơn có số sai.
     du_dai = n >= 30
-    first = float(von_dau if von_dau else equity[0]["balance"])
+    first = float(von_dau if von_dau is not None else equity[0]["balance"])
     last = float(equity[-1]["balance"])
     years = n / P
     if du_dai and first > 0 and last > 0 and years > 0:
@@ -255,22 +264,24 @@ def full_metrics(run_id: int):
     tm = trade_metrics(run_id) or {}
     rr = risk_ratios(eq, von_dau=von_dau, mdd_pct=dd.get("mdd_pct")) if eq else {}
 
-    start_bal = von_dau if von_dau else (float(eq[0]["balance"]) if eq else None)
+    # `von_dau` là điểm đầu tiên của đường vốn đầy đủ; phải dùng is not None
+    # để không biến một vốn hợp lệ bằng 0 thành giá trị thiếu.
+    start_bal = von_dau if von_dau is not None else (float(eq[0]["balance"]) if eq else None)
     end_bal = float(eq[-1]["balance"]) if eq else None
-    roi = ((end_bal - start_bal) / start_bal * 100) if (start_bal and start_bal > 0) else None
+    roi = ((end_bal - start_bal) / start_bal * 100) if (start_bal is not None and start_bal > 0) else None
 
     return {
         **tm, **dd, **rr,
         # Lần chạy không bật theo dõi số dư thì mọi chỉ số rủi ro đều vô nghĩa —
         # nói rõ ra để giao diện giải thích, thay vì hiện một bảng toàn dấu gạch.
         "co_duong_von": bool(eq),
-        "start_balance": round(start_bal, 2) if start_bal else None,
-        "end_balance": round(end_bal, 2) if end_bal else None,
+        "start_balance": round(start_bal, 2) if start_bal is not None else None,
+        "end_balance": round(end_bal, 2) if end_bal is not None else None,
         "roi_pct": round(roi, 2) if roi is not None else None,
         # Chèn vốn ban đầu làm điểm mở đầu để đường vốn và các con số cùng một gốc
         "equity_daily": (
             ([{"ngay": str(eq[0]["ngay"] - datetime.timedelta(days=1)),
-               "balance": round(start_bal, 2)}] if (eq and start_bal) else [])
+               "balance": round(start_bal, 2)}] if (eq and start_bal is not None) else [])
             + [{"ngay": str(e["ngay"]), "balance": round(float(e["balance"]), 2)} for e in eq]
         ),
     }
