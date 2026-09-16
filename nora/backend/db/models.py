@@ -105,6 +105,12 @@ class PositionModel:
     close_reason: str = ""
     max_price: float = 0.0
     min_price: float = 0.0
+    qty: float = 0.0
+    entry_equity: float = 0.0
+    entry_margin_usd: float = 0.0
+    entry_notional_usd: float = 0.0
+    entry_fee_usd: float = 0.0
+    exit_fee_usd: float = 0.0
 
     @classmethod
     def from_row(cls, row: Dict[str, Any]) -> "PositionModel":

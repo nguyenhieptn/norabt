@@ -1,0 +1,59 @@
+# NOTE on where Docker actually reads this file from:
+#
+# Agent/deploy/Dockerfile needs to COPY Agent/backend/ and
+# Agent/requirements.txt, and Docker refuses any COPY source that resolves
+# outside the build context via "..". That forces docker-compose.yml's build
+# context to be Agent/ (one level up from this deploy/ directory), not
+# Agent/deploy/ itself. Docker's *automatic* .dockerignore discovery only
+# ever looks at "<context>/.dockerignore" -- i.e. Agent/.dockerignore -- so
+# this file, kept at the path this deployment package documents everything
+# else at, is NOT automatically picked up by a plain `docker compose build`.
+#
+# That is not a security gap: Agent/deploy/Dockerfile's own COPY list is an
+# explicit ALLOW-list (only requirements.txt and backend/), never a wildcard
+# "COPY . .", so nothing below can leak into the image regardless of whether
+# this particular file is "wired up" by Docker itself. This file is a second,
+# human-reviewable line of defence -- and doubles as the exact list an
+# operator can `ln -sf Agent/deploy/.dockerignore Agent/.dockerignore` (see
+# Agent/deploy/README.md) to also get the minor, purely cosmetic benefit of
+# Docker skipping these paths when it uploads the build context.
+
+# Bot ledgers/candle cache/analysis output -- 260MB+ of runtime data that is
+# never baked into the image; mounted from the host instead (data read-only,
+# cache/candles read-write) -- see docker-compose.yml.
+data/
+
+# Secrets: OKX API key/secret/passphrase. Loaded into the container as real
+# environment variables via docker-compose's `env_file:` at `docker compose
+# up` time -- the file itself must never be copied into the image.
+.env
+.env.*
+!.env.example
+
+# Version control, caches, editor/tooling cruft.
+.git/
+.gitignore
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Test suite -- not needed to run the service, and its fixtures duplicate
+# real bot data under test-only paths.
+test/
+
+# Human-facing docs, plans, generated reports, ad-hoc run logs -- none of
+# this is needed to run the service.
+docs/
+plan.md
+README.md
+log/
+
+# One-off crawler/maintenance scripts -- not imported by Agent.backend.web.*,
+# not needed at runtime.
+scripts/
+
+# This deploy/ directory is the tooling that builds/runs the image; it is
+# never needed *inside* the image itself.
+deploy/

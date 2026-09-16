@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from backend.db import cursor, fetch_all, fetch_one   # noqa: E402
 from backend.stats import queries as q               # noqa: E402
 from backend.stats import metrics as mt              # noqa: E402
@@ -33,10 +34,14 @@ app.add_middleware(
 )
 
 try:
-    from backend.api.routers import engine, meta
+    from backend.api.routers import engine, meta, studio, research
     app.include_router(engine.router)
     app.include_router(meta.router)
+    app.include_router(studio.router)
+    app.include_router(research.router)
 except Exception as e:
+    import traceback
+    traceback.print_exc()
     print(f"Warning: Could not load V2 routers: {e}")
 
 
@@ -46,6 +51,78 @@ PYBIN = "/home/ubuntu/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/p
 
 
 # ---------------------------------------------------------------- danh sách
+
+
+def _clean_symbol(raw, fallback="SOL"):
+    clean = re.sub(r"[^A-Za-z0-9]+", "", str(raw or fallback)).upper()
+    for sfx in ("USDT", "USDC", "PERP", "USD"):
+        if clean.endswith(sfx) and len(clean) > len(sfx):
+            clean = clean[:-len(sfx)]
+    clean = clean.replace("1000", "").replace("BACKTEST", "").strip()
+    return clean or fallback
+
+
+def _fnum(v):
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _metric_summary_for_runs(run_ids):
+    ids = [int(x) for x in run_ids if x]
+    if not ids:
+        return {}
+    ph = ",".join(["%s"] * len(ids))
+    stats_rows = fetch_all(
+        f"""SELECT lab_result_account AS a,
+                   COUNT(*) AS trades,
+                   ROUND(SUM(lab_result_realpnl), 2) AS pnl,
+                   ROUND(100.0 * SUM(lab_result_realpnl > 0) / COUNT(*), 1) AS winrate,
+                   ROUND(SUM(CASE WHEN lab_result_realpnl > 0 THEN lab_result_realpnl ELSE 0 END), 2) AS gross_profit,
+                   ROUND(ABS(SUM(CASE WHEN lab_result_realpnl < 0 THEN lab_result_realpnl ELSE 0 END)), 2) AS gross_loss,
+                   MIN(lab_result_symbol) AS primary_symbol
+            FROM lab_results
+            WHERE lab_result_account IN ({ph}) GROUP BY lab_result_account""",
+        ids,
+    )
+    out = {}
+    for s in stats_rows:
+        trades = int(s.get("trades") or 0)
+        pnl = _fnum(s.get("pnl"))
+        winrate = _fnum(s.get("winrate")) if trades else None
+        gross_profit = _fnum(s.get("gross_profit"))
+        gross_loss = _fnum(s.get("gross_loss"))
+        profit_factor = round(gross_profit / gross_loss, 2) if gross_profit is not None and gross_loss and gross_loss > 0 else None
+        out[int(s["a"])] = {
+            "trades": trades,
+            "pnl": pnl,
+            "net": pnl,
+            "winrate": winrate,
+            "gross_profit": gross_profit,
+            "gross_loss": gross_loss,
+            "profit": gross_profit,
+            "profit_factor": profit_factor,
+            "symbol": _clean_symbol(s.get("primary_symbol")),
+            "has_result": trades > 0,
+        }
+    return out
+
+
+def _processing(status, progress_pct=None, message=None):
+    label = {
+        "running": "Đang chạy",
+        "completed": "Đã chạy xong",
+        "done": "Đã chạy xong",
+        "failed": "Lỗi",
+        "interrupted": "Dừng giữa chừng",
+        "stopped": "Chưa chạy",
+        "pending": "Đang chờ",
+    }.get(status or "", status or "—")
+    return {"status": status, "label": label, "progress_pct": progress_pct, "message": message}
+
 
 @app.get("/api/runs")
 def list_runs(group: str = None, q_: str = Query(None, alias="q"), limit: int = 50):
@@ -61,29 +138,45 @@ def list_runs(group: str = None, q_: str = Query(None, alias="q"), limit: int = 
         f"""SELECT lab_account_id AS id, lab_account_name AS name,
                    lab_account_group AS `group`, lab_account_db AS dataset,
                    lab_account_balance AS balance, lab_account_running AS running,
-                   lab_account_margin_type AS margin_type
+                   lab_account_margin_type AS margin_type, lab_account_note AS note
             FROM lab_account WHERE {' AND '.join(where)}
             ORDER BY lab_account_id DESC LIMIT %s""",
         params + [limit],
     )
-    # đếm số lệnh của từng run (một truy vấn gộp, không lặp)
     if rows:
-        ids = tuple(r["id"] for r in rows)
-        ph = ",".join(["%s"] * len(ids))
-        counts = {
-            c["a"]: c["n"]
-            for c in fetch_all(
-                f"""SELECT lab_result_account AS a, COUNT(*) AS n FROM lab_results
-                    WHERE lab_result_account IN ({ph}) GROUP BY lab_result_account""",
-                list(ids),
-            )
-        }
-        # Cờ trong bảng chỉ đáng tin khi engine kết thúc bình thường; đối chiếu
-        # với tiến trình thật để danh sách không báo "đang chạy" mãi mãi.
+        stats_map = _metric_summary_for_runs([r["id"] for r in rows])
         dang_chay = ctl.running_ids()
         for r in rows:
-            r["trades"] = counts.get(r["id"], 0)
-            r["running"] = 1 if r["id"] in dang_chay else 0
+            st = stats_map.get(int(r["id"]), {})
+            running = 1 if r["id"] in dang_chay else 0
+            status = "running" if running else ("done" if st.get("has_result") else "stopped")
+            pnl_val = st.get("pnl")
+            init_bal = _fnum(r.get("balance"))
+            note = str(r.get("note") or "")
+            alpha_id = note.split(":")[-1] if note.startswith("nora:alpha:") else None
+            r.update({
+                "result_type": "backtest",
+                "run_id": r["id"],
+                "params": None,
+                "param_label": f"Alpha {alpha_id}" if alpha_id else (r.get("dataset") or r.get("group")),
+                "trades": st.get("trades"),
+                "pnl": pnl_val,
+                "net": pnl_val,
+                "winrate": st.get("winrate"),
+                "win_rate": st.get("winrate"),
+                "mdd_pct": None,
+                "sharpe": None,
+                "profit_factor": st.get("profit_factor"),
+                "profit": st.get("profit"),
+                "gross_profit": st.get("gross_profit"),
+                "gross_loss": st.get("gross_loss"),
+                "symbol": st.get("symbol") or _clean_symbol(r.get("name") or r.get("dataset")),
+                "return_pct": round(pnl_val / init_bal * 100.0, 2) if pnl_val is not None and init_bal and init_bal > 0 else None,
+                "running": running,
+                "status": status,
+                "processing": _processing(status),
+                "has_result": bool(st.get("has_result")),
+            })
     return {"rows": rows}
 
 
@@ -2136,15 +2229,17 @@ if CHART_DIR.exists():
     app.mount("/charts", StaticFiles(directory=str(CHART_DIR)), name="charts")
 
 
+@app.get("/api/health")
+def health():
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- giao diện
 
 WEB = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if WEB.exists():
     app.mount("/assets", StaticFiles(directory=str(WEB / "assets")), name="assets")
 
-    # index.html trỏ tới tên tệp có băm nội dung; nếu trình duyệt giữ lại bản cũ
-    # thì người dùng vẫn thấy giao diện cũ sau khi đã build lại. Bắt kiểm tra lại
-    # mỗi lần tải — riêng /assets có băm trong tên nên nhớ đệm thoải mái.
     def trang_chu():
         return FileResponse(WEB / "index.html",
                             headers={"Cache-Control": "no-cache, must-revalidate"})
@@ -2155,12 +2250,9 @@ if WEB.exists():
 
     @app.get("/{path:path}")
     def spa(path: str):
+        if path.startswith("api/"):
+            raise HTTPException(404, detail="API endpoint not found")
         f = WEB / path
         if f.is_file():
             return FileResponse(f)
         return trang_chu()
-
-
-@app.get("/api/health")
-def health():
-    return {"ok": True}

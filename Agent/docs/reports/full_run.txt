@@ -1,0 +1,2278 @@
+============================================================================================================================================
+BƯỚC 1 — DỮ LIỆU (KIỂM KÊ ĐẦU VÀO CHO MARKET VÀ BOT)
+14/09/2026 07:42 UTC | 15/15 thị trường đủ nguồn | 30/30 bot đủ dữ liệu
+============================================================================================================================================
+
+BẢNG 1.1 — DỮ LIỆU THỊ TRƯỜNG (15 ASSET)
+--------------------------------------------------------------------------------------------------------------------------------------------
+THỊ TRƯỜNG   NẾN 1H   NGUỒN ĐẠT  CHẤT LƯỢNG  THIẾU / QUÁ HẠN
+--------------------------------------------------------------------------------------------------------------------------------------------
+CEX/BTC      30,133   6/6        1.00        ✓ đủ
+CEX/ETH      30,133   6/6        1.00        ✓ đủ
+CEX/SOL      30,133   6/6        1.00        ✓ đủ
+CEX/XRP      32,439   6/6        1.00        ✓ đủ
+CEX/DOGE     32,439   6/6        1.00        ✓ đủ
+CEX/ADA      32,439   6/6        1.00        ✓ đủ
+CEX/AVAX     32,439   6/6        1.00        ✓ đủ
+CEX/BNB      32,439   6/6        1.00        ✓ đủ
+CEX/LINK     32,439   6/6        1.00        ✓ đủ
+CEX/SUI      29,460   6/6        1.00        ✓ đủ
+DEX/WBTC     32,439   5/5        1.00        ✓ đủ
+DEX/WETH     32,439   5/5        1.00        ✓ đủ
+DEX/SOL      32,439   5/5        1.00        ✓ đủ
+DEX/UNI      32,439   5/5        1.00        ✓ đủ
+DEX/PEPE     29,508   5/5        1.00        ✓ đủ
+--------------------------------------------------------------------------------------------------------------------------------------------
+
+BẢNG 1.2 — DỮ LIỆU BOT (30 BOT)
+--------------------------------------------------------------------------------------------------------------------------------------------
+SLOT       VAI       BOT                  LỆNH  /ASSET VỊ THẾ THIẾU inst TUẦN  HỒ SƠ  HOẠT ĐỘNG  CHẶN / GHI CHÚ
+--------------------------------------------------------------------------------------------------------------------------------------------
+CEX/BTC    CHẠY NGON 脚本test             500   73     10     10         12    có     3.2d       2/500 lệnh trống closeTime
+CEX/BTC    YẾU HƠN   Pure-Symbol-Yarrow   500   56     3      3          12    có     0.8d       ✓ đủ
+CEX/ETH    CHẠY NGON FJ Investment        76    6      5      5          12    có     4.8d       1/76 lệnh trống closeTime
+CEX/ETH    YẾU HƠN   xiaomijiahanyangzao  135   36     8      0          12    có     2.7d       2/135 lệnh trống closeTime
+CEX/SOL    CHẠY NGON RuiJie               300   16     24     0          12    có     2.4d       ✓ đủ
+CEX/SOL    YẾU HƠN   FrontierQuantTrader  77    7      0      0          12    có     2.2d       ✓ đủ
+CEX/XRP    CHẠY NGON Milies L             74    4      25     0          12    có     0.8d       ✓ đủ
+CEX/XRP    YẾU HƠN   HaveARestin          145   27     95     0          12    có     1.4d       2/145 lệnh trống closeTime
+CEX/DOGE   CHẠY NGON Bare-Payee-Fox       81    11     28     28         12    có     2.2d       ✓ đủ
+CEX/DOGE   YẾU HƠN   Zs+++                217   7      22     0          12    có     2.5d       4/217 lệnh trống closeTime
+CEX/ADA    CHẠY NGON AI 量化新星 - 趋势策…71    5      1      0          12    có     2.4d       ✓ đủ
+CEX/ADA    YẾU HƠN   BTC策略              500   19     91     91         12    có     1.0d       1/500 lệnh trống closeTime
+CEX/AVAX   CHẠY NGON Fly-000              93    2      100    0          12    có     3.8d       ✓ đủ
+CEX/AVAX   YẾU HƠN   Linxixi              68    1      3      3          12    có     2.7d       ✓ đủ
+CEX/BNB    CHẠY NGON Quaint-SegWit-Laurel 33    2      8      0          12    có     1.0d       ✓ đủ
+CEX/BNB    YẾU HƠN   ChinatownOG          82    1      37     0          12    có     2.7d       1/82 lệnh trống closeTime
+CEX/LINK   CHẠY NGON Shallow-Pair-Frog    429   28     67     0          12    có     2.7d       1/429 lệnh trống closeTime
+CEX/LINK   YẾU HƠN   0xleek.eth           55    5      2      2          12    có     6.6d       ✓ đủ
+CEX/SUI    CHẠY NGON 01pp                 304   13     6      0          12    có     2.0d       ✓ đủ
+CEX/SUI    YẾU HƠN   Proud-Peg-Basil      58    8      18     18         12    có     3.7d       ✓ đủ
+DEX/WBTC   CHẠY NGON King_GG              268   75     2      2          12    có     0.8d       ✓ đủ
+DEX/WBTC   YẾU HƠN   k001                 209   57     11     0          12    có     2.7d       2/209 lệnh trống closeTime
+DEX/WETH   CHẠY NGON xiaojian888999       311   71     16     16         12    có     0.7d       ✓ đủ
+DEX/WETH   YẾU HƠN   亿难贫               500   126    42     0          12    có     0.9d       1/500 lệnh trống closeTime
+DEX/SOL    CHẠY NGON SharpMine            77    4      9      0          12    có     2.5d       ✓ đủ
+DEX/SOL    YẾU HƠN   Valid-Launch-Monkey  54    7      5      0          12    có     3.7d       ✓ đủ
+DEX/UNI    CHẠY NGON 01014588             167   13     2      0          12    có     1.1d       ✓ đủ
+DEX/UNI    YẾU HƠN   Ail.Wang             500   11     67     0          12    có     0.8d       3/500 lệnh trống closeTime
+DEX/PEPE   CHẠY NGON Dark-Wood-Dahlia     333   12     40     40         12    có     1.0d       7/333 lệnh trống closeTime
+DEX/PEPE   YẾU HƠN   Rude-Gems-Leopard    152   4      0      0          12    có     2.5d       ✓ đủ
+--------------------------------------------------------------------------------------------------------------------------------------------
+· Bước này chỉ kiểm kê dữ liệu; mọi diễn giải nằm ở bước 2.
+· CHẶN = thiếu thứ mà phép tính rủi ro không chạy được nếu không có.
+· GHI CHÚ = khiếm khuyết OKX để trống, ghi rõ số lượng, không tự điền.
+
+=======================================================================================================================================
+BƯỚC 2.1 — PHÂN TÍCH THỊ TRƯỜNG (CHẾ ĐỘ VÀ TƯ THẾ)
+14/09/2026 07:43 UTC | Quan sát 19 thị trường | Đạt điều kiện giám sát 19
+=======================================================================================================================================
+ASSET        TƯ THẾ           CHẾ ĐỘ THỊ TRƯỜNG              THANH KHOẢN   DÒNG TIỀN      ATR%    VỊ TRÍ BIÊN  CHẤT LƯỢNG  BOT  ĐỦ ĐK  
+---------------------------------------------------------------------------------------------------------------------------------------
+ETH/CEX      ỔN ĐỊNH          Giảm, biến động bình thường    ADEQUATE      NEUTRAL        0.54    14           100         50   có     
+WETH/DEX     ỔN ĐỊNH          Giảm, biến động bình thường    DEEP          SELL_PRESSURE  0.53    14           100         50   có     
+BTC/CEX      ỔN ĐỊNH          Tăng, biến động bình thường    ADEQUATE      NEUTRAL        0.28    18           100         46   có     
+WBTC/DEX     ĐANG PHÁT TRIỂN  Tăng, biến động bình thường    DEEP          BUY_PRESSURE   0.28    18           100         46   có     
+SOL/CEX      ỔN ĐỊNH          Giảm, biến động bình thường    ADEQUATE      NEUTRAL        0.60    18           100         34   có     
+SOL/DEX      ỔN ĐỊNH          Giảm, biến động bình thường    DEEP          BUY_PRESSURE   0.59    17           100         34   có     
+SNDK/CEX     ỔN ĐỊNH          Giảm, biến động nén            ADEQUATE      NEUTRAL        0.17    11           79          22   có     
+HYPE/CEX     ĐANG PHÁT TRIỂN  Tăng, biến động nén            ADEQUATE      BUY_PRESSURE   0.59    35           79          20   có     
+DOGE/CEX     RỦI RO           Giảm, biến động bình thường    ADEQUATE      BUY_PRESSURE   0.56    14           100         19   có     
+XRP/CEX      RỦI RO           Giảm, biến động bình thường    ADEQUATE      BUY_PRESSURE   0.56    16           100         19   có     
+SKHYNIX/CEX  ỔN ĐỊNH          Tăng, biến động nén            ADEQUATE      NEUTRAL        0.23    72           79          16   có     
+MU/CEX       RỦI RO           Tăng, biến động nén            ADEQUATE      SELL_PRESSURE  0.11    24           79          14   có     
+SUI/CEX      RỦI RO           Giảm, biến động bình thường    ADEQUATE      BUY_PRESSURE   0.86    18           100         11   có     
+UNI/DEX      ĐANG PHÁT TRIỂN  Tăng, biến động bình thường    DEEP          SELL_PRESSURE  1.35    63           100         10   có     
+LINK/CEX     RỦI RO           Giảm, biến động bình thường    ADEQUATE      BUY_PRESSURE   0.71    12           100         9    có     
+BNB/CEX      ỔN ĐỊNH          Giảm, biến động bình thường    ADEQUATE      BUY_PRESSURE   0.39    21           100         8    có     
+ADA/CEX      ỔN ĐỊNH          Tăng, biến động bình thường    ADEQUATE      NEUTRAL        0.85    33           100         7    có     
+PEPE/DEX     ĐANG PHÁT TRIỂN  Tăng, biến động bình thường    DEEP          BUY_PRESSURE   1.13    19           100         4    có     
+AVAX/CEX     ĐANG PHÁT TRIỂN  Tăng, biến động bình thường    ADEQUATE      BUY_PRESSURE   0.70    22           100         2    có     
+---------------------------------------------------------------------------------------------------------------------------------------
+Phân bố tư thế: ỔN ĐỊNH: 9 | ĐANG PHÁT TRIỂN: 5 | RỦI RO: 5
+Phân bố chế độ: Giảm, biến động bình thường: 9 | Tăng, biến động bình thường: 6 | Tăng, biến động nén: 3 | Giảm, biến động nén: 1
+
+DIỄN GIẢI TỪNG THỊ TRƯỜNG
+=======================================================================================================================================
+[ETH/CEX] Giá 2,488, giảm, biến động bình thường, thanh khoản đủ, dòng tiền cân bằng.
+    ỔN ĐỊNH vì: biến động thấp (phân vị 5); sổ lệnh dày (3,883,316 USD trong ±0,2%); dòng tiền hai chiều cân bằng
+[WETH/DEX] Giá 2,488, giảm, biến động bình thường, thanh khoản sâu, áp lực bán.
+    ỔN ĐỊNH vì: biến động thấp (phân vị 5); sổ lệnh dày (1,689,337 USD trong ±0,2%)
+[BTC/CEX] Giá 7.705e+04, tăng, biến động bình thường, thanh khoản đủ, dòng tiền cân bằng.
+    ỔN ĐỊNH vì: biến động thấp (phân vị 3); sổ lệnh dày (1,900,509 USD trong ±0,2%); dòng tiền hai chiều cân bằng
+[WBTC/DEX] Giá 7.705e+04, tăng, biến động bình thường, thanh khoản sâu, áp lực mua.
+    ĐANG PHÁT TRIỂN vì: xu hướng tăng; dòng tiền chủ động mua
+[SOL/CEX] Giá 100.5, giảm, biến động bình thường, thanh khoản đủ, dòng tiền cân bằng.
+    ỔN ĐỊNH vì: biến động thấp (phân vị 6); sổ lệnh dày (6,648,955 USD trong ±0,2%); dòng tiền hai chiều cân bằng
+[SOL/DEX] Giá 100.4, giảm, biến động bình thường, thanh khoản sâu, áp lực mua.
+    ỔN ĐỊNH vì: biến động thấp (phân vị 6)
+[SNDK/CEX] Giá 1,633, giảm, biến động nén, thanh khoản đủ, dòng tiền cân bằng.
+    ỔN ĐỊNH vì: biến động thấp (phân vị 3); dòng tiền hai chiều cân bằng
+    Nguồn còn thiếu: macro
+[HYPE/CEX] Giá 80.12, tăng, biến động nén, thanh khoản đủ, áp lực mua.
+    ĐANG PHÁT TRIỂN vì: xu hướng tăng; dòng tiền chủ động mua
+    Nguồn còn thiếu: macro
+[DOGE/CEX] Giá 0.08358, giảm, biến động bình thường, thanh khoản đủ, áp lực mua.
+    RỦI RO vì: xu hướng giảm; giá sát biên khoảng (14% biên độ); vị thế dồn một phía (long, tỷ lệ L/S 4.56)
+[XRP/CEX] Giá 1.347, giảm, biến động bình thường, thanh khoản đủ, áp lực mua.
+    RỦI RO vì: xu hướng giảm; vị thế dồn một phía (long, tỷ lệ L/S 2.89); beta theo BTC cao (1.53), khuếch đại cú sốc chung
+[SKHYNIX/CEX] Giá 1,368, tăng, biến động nén, thanh khoản đủ, dòng tiền cân bằng.
+    ỔN ĐỊNH vì: biến động thấp (phân vị 5); dòng tiền hai chiều cân bằng
+    Nguồn còn thiếu: macro
+[MU/CEX] Giá 976.2, tăng, biến động nén, thanh khoản đủ, áp lực bán.
+    RỦI RO vì: dòng tiền chủ động bán; vị thế dồn một phía (long, tỷ lệ L/S 2.96)
+    Nguồn còn thiếu: macro
+[SUI/CEX] Giá 0.7149, giảm, biến động bình thường, thanh khoản đủ, áp lực mua.
+    RỦI RO vì: xu hướng giảm; vị thế dồn một phía (long, tỷ lệ L/S 3.52); beta theo BTC cao (1.55), khuếch đại cú sốc chung
+[UNI/DEX] Giá 6.33, tăng, biến động bình thường, thanh khoản sâu, áp lực bán.
+    ĐANG PHÁT TRIỂN vì: xu hướng tăng
+[LINK/CEX] Giá 11.3, giảm, biến động bình thường, thanh khoản đủ, áp lực mua.
+    RỦI RO vì: xu hướng giảm; giá sát biên khoảng (12% biên độ)
+[BNB/CEX] Giá 718.7, giảm, biến động bình thường, thanh khoản đủ, áp lực mua.
+    ỔN ĐỊNH vì: biến động thấp (phân vị 5); sổ lệnh dày (1,761,729 USD trong ±0,2%)
+[ADA/CEX] Giá 0.2071, tăng, biến động bình thường, thanh khoản đủ, dòng tiền cân bằng.
+    ỔN ĐỊNH vì: biến động thấp (phân vị 8); dòng tiền hai chiều cân bằng
+[PEPE/DEX] Giá 3.437e-06, tăng, biến động bình thường, thanh khoản sâu, áp lực mua.
+    ĐANG PHÁT TRIỂN vì: xu hướng tăng; dòng tiền chủ động mua
+[AVAX/CEX] Giá 7.394, tăng, biến động bình thường, thanh khoản đủ, áp lực mua.
+    ĐANG PHÁT TRIỂN vì: xu hướng tăng; dòng tiền chủ động mua
+
+======================================================================================================================
+BƯỚC 2.2 — PHÂN TÍCH VÀ MÔ PHỎNG TỪNG BOT
+14/09/2026 07:43 UTC | 15 asset | 30 bot phân tích được | Số liệu quan sát, chưa phải phán quyết rủi ro
+======================================================================================================================
+
+BẢNG A — HIỆU SUẤT ĐÃ THỰC HIỆN (15 ASSET · 30 BOT)
+---------------------------------------------------------------------------------------------------------------------------------------
+ASSET     VAI       BOT                 TRADE WIN% PROFIT      PF SỔ PF CHỐT MDD     SHARPE LỖ MỞ   HƯỚNG         KIỂU VÀO
+---------------------------------------------------------------------------------------------------------------------------------------
+CEX/BTC   CHẠY NGON 脚本test            498   62   156,508     6.28  3.85    100.0%* -1.05  21k$    hai chiều     thuận xu hướng
+          YẾU HƠN   Pure-Symbol-Yarrow  500   82   -10,424     0.78  0.76    16.6%   -2.15  1k$     hai chiều     nghịch xu hướng
+CEX/ETH   CHẠY NGON FJ Investment       75    35   59,240      1.96  2.50    100.0%* 0.91   0       hai chiều     nghịch xu hướng
+          YẾU HƠN   xiaomijiahanyangzao 133   74   76,076      3.94  1.05    1.8%    7.06   71k$    nghiêng long  thuận xu hướng
+CEX/SOL   CHẠY NGON RuiJie              300   93   172,313     41.52 9.99    0.2%    27.20  13k$    nghiêng long  thuận xu hướng
+          YẾU HƠN   FrontierQuantTrader 77    64   10,627      3.28  —       1.6%    3.22   0       nghiêng long  nghịch xu hướng
+CEX/XRP   CHẠY NGON Milies L            74    69   121,628     4.89  3.01    6.3%    6.54   23k$    chỉ long      pha trộn
+          YẾU HƠN   HaveARestin         143   92   9,583       11.12 0.16    0.5%    16.13  86k$    hai chiều     nghịch xu hướng
+CEX/DOGE  CHẠY NGON Bare-Payee-Fox      81    100  37,223      —     1.19    0.0%    26.78  53k$    nghiêng long  nghịch xu hướng
+          YẾU HƠN   Zs+++               213   55   -231,725    0.56  0.59    100.0%* -3.93  21k$    chỉ short     nghịch xu hướng
+CEX/ADA   CHẠY NGON AI 量化新星 - 趋势策…71    34   42,207      2.23  2.25    15.1%   5.43   0       nghiêng long  thuận xu hướng
+          YẾU HƠN   BTC策略             499   42   -4,032      0.83  0.81    3.4%    -9.03  3k$     chỉ long      thuận xu hướng
+CEX/AVAX  CHẠY NGON Fly-000             93    43   -154        0.95  13.43   2.4%    -0.84  0k$     hai chiều     nghịch xu hướng
+          YẾU HƠN   Linxixi             68    53   31,468      1.37  1.48    18.1%   1.57   0       nghiêng short nghịch xu hướng
+CEX/BNB   CHẠY NGON Quaint-SegWit-Laurel33    58   -12,708     0.33  0.29    21.4%   -3.86  4k$     nghiêng long  nghịch xu hướng
+          YẾU HƠN   ChinatownOG         81    79   41,299      13.89 0.71    3.0%    10.04  62k$    hai chiều     nghịch xu hướng
+CEX/LINK  CHẠY NGON Shallow-Pair-Frog   428   46   141,501     3.29  3.33    7.7%    3.40   1k$     hai chiều     pha trộn
+          YẾU HƠN   0xleek.eth          55    60   23,585      1.74  1.72    13.1%   2.30   0k$     hai chiều     nghịch xu hướng
+CEX/SUI   CHẠY NGON 01pp                304   64   133,112     1.73  1.86    50.9%   4.37   0       hai chiều     nghịch xu hướng
+          YẾU HƠN   Proud-Peg-Basil     58    66   18,958      2.52  1.09    1.7%    4.17   17k$    chỉ long      nghịch xu hướng
+DEX/WBTC  CHẠY NGON King_GG             268   55   895,540     1.68  1.31    62.9%   4.27   411k$   hai chiều     thuận xu hướng
+          YẾU HƠN   k001                207   56   -16,061     0.88  0.89    20.8%   -0.59  2k$     hai chiều     nghịch xu hướng
+DEX/WETH  CHẠY NGON xiaojian888999      311   73   385,509     3.18  2.78    7.8%    10.57  31k$    hai chiều     nghịch xu hướng
+          YẾU HƠN   亿难贫              499   73   953         4.03  2.37    0.0%    53.76  0k$     hai chiều     nghịch xu hướng
+DEX/SOL   CHẠY NGON SharpMine           77    27   -11,020     0.72  1.57    59.4%   1.70   20k$    hai chiều     nghịch xu hướng
+          YẾU HƠN   Valid-Launch-Monkey 54    72   213         1.09  0.26    1.2%    0.28   10k$    chỉ long      nghịch xu hướng
+DEX/UNI   CHẠY NGON 01014588            167   70   88,949      1.62  1.64    11.8%   3.72   0       hai chiều     nghịch xu hướng
+          YẾU HƠN   Ail.Wang            497   86   32,291      3.19  0.24    0.7%    20.25  244k$   chỉ short     nghịch xu hướng
+DEX/PEPE  CHẠY NGON Dark-Wood-Dahlia    326   46   20,663      1.41  1.50    4.7%    4.50   14k$    hai chiều     nghịch xu hướng
+          YẾU HƠN   Rude-Gems-Leopard   152   77   -135,428    0.64  —       100.0%* -2.28  0       nghiêng short nghịch xu hướng
+---------------------------------------------------------------------------------------------------------------------------------------
+PROFIT = PnL sổ đã chốt · PF CHỐT = profit factor nếu chốt hết vị thế đang mở · MDD có dấu * = vượt vốn ghi nhận nên là sàn
+
+BẢNG B — MÔ PHỎNG MONTE CARLO VÀ ĐÁNH GIÁ RỦI RO
+10.000 kịch bản/bot · stationary bootstrap (Politis-Romano 1994) · mỗi kịch bản replay đúng số lệnh của chính bot · chỉ lệnh ĐÃ CHỐT
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+ASSET     BOT                 LN xấu nhất LN t.vị  LN p95   CVaR95   DD t.vị  DD p95  MAR    P(lãi) P(cháy) PSR    DSR    MinTRL
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+CEX/BTC   脚本test            -23.8%      +114.4%  +321.1%  -7.1%    5%       11%     23.0   94%    0%      1.000? 0.999  49 (có 498)
+          Pure-Symbol-Yarrow  -82.9%      -10.4%   +9.6%    -46.0%   19%      43%     -0.6   22%    0%      0.178? 0.001  —
+CEX/ETH   FJ Investment       -55.8%      +40.9%   +152.6%  -35.9%   16%      34%     2.5    75%    0%      0.950? 0.272  75 (có 75)
+          xiaomijiahanyangzao -2.0%       +13.7%   +21.3%   +5.7%    1%       2%      13.0   100%   0%      1.000? 0.999  14 (có 133)
+CEX/SOL   RuiJie              +9.0%       +16.7%   +20.4%   +12.6%   0%       0%      96.5   100%   0%      1.000  1.000  5 (có 300)
+          FrontierQuantTrader -7.0%       +8.4%    +22.4%   -1.7%    1%       3%      5.6    93%    0%      0.997? 0.807  29 (có 77)
+CEX/XRP   Milies L            +3.2%       +46.6%   +71.8%   +20.2%   3%       5%      17.8   100%   0%      1.000? 1.000  9 (có 74)
+          HaveARestin         +3.9%       +7.3%    +8.6%    +5.5%    0%       0%      19.0   100%   0%      1.000? 0.998  20 (có 143)
+CEX/DOGE  Bare-Payee-Fox      +9.4%       +17.4%   +21.9%   +12.5%   0%       0%      —      100%   0%      1.000  1.000  3 (có 81)
+          Zs+++               -534.5%     -81.9%   +49.1%   -297.2%  100%     100%    -0.9   17%    50%     0.012  0.000  —
+CEX/ADA   AI 量化新星 - 趋势策…-30.7%      +29.3%   +73.6%   -12.1%   7%       15%     4.1    90%    0%      0.992  0.942  33 (có 71)
+          BTC策略             -9.2%       -1.6%    +1.9%    -5.7%    3%       6%      -0.6   23%    0%      0.085  0.013  —
+CEX/AVAX  Fly-000             -3.4%       -0.2%    +1.5%    -1.9%    1%       2%      -0.2   44%    0%      0.437  0.249  —
+          Linxixi             -54.7%      +10.3%   +42.9%   -24.3%   11%      25%     1.0    71%    0%      0.774? 0.591  322 (có 68)
+CEX/BNB   Quaint-SegWit-Laurel-25.0%      -7.5%    -0.7%    -17.0%   8%       15%     -0.9   3%     0%      0.010? 0.002  —
+          ChinatownOG         -0.8%       +36.5%   +62.6%   +13.6%   1%       3%      27.4   100%   0%      1.000? 1.000  5 (có 81)
+CEX/LINK  Shallow-Pair-Frog   -20.4%      +22.6%   +69.2%   -7.8%    4%       9%      5.6    83%    0%      1.000? 0.995  101 (có 428)
+          0xleek.eth          -37.3%      +15.8%   +57.0%   -19.8%   9%       21%     1.7    77%    0%      0.884? 0.634  103 (có 55)
+CEX/SUI   01pp                -55.5%      +84.8%   +146.5%  +7.0%    14%      29%     5.9    99%    0%      0.993  0.922  135 (có 304)
+          Proud-Peg-Basil     -4.9%       +3.7%    +8.0%    -1.3%    1%       3%      3.0    94%    0%      0.949? 0.720  59 (có 58)
+DEX/WBTC  King_GG             -147.8%     +146.1%  +312.9%  -27.6%   29%      66%     5.1    96%    1%      0.977? 0.395  181 (có 268)
+          k001                -51.6%      -3.3%    +17.0%   -29.5%   13%      28%     -0.3   39%    0%      0.293  0.002  —
+DEX/WETH  xiaojian888999      +5.5%       +77.3%   +116.2%  +35.0%   5%       9%      16.3   100%   0%      1.000  1.000  24 (có 311)
+          亿难贫              -0.0%       +0.4%    +0.7%    +0.2%    0%       0%      14.2   100%   0%      1.000? 1.000  18 (có 499)
+DEX/SOL   SharpMine           -56.3%      -8.5%    +9.7%    -34.9%   15%      32%     -0.6   23%    0%      0.237? 0.005  —
+          Valid-Launch-Monkey -3.0%       +0.2%    +1.4%    -1.6%    1%       2%      0.3    60%    0%      0.576? 0.048  3,889 (có 54)
+DEX/UNI   01014588            -20.6%      +22.2%   +41.8%   -2.6%    7%       14%     3.2    97%    0%      0.953  0.586  161 (có 167)
+          Ail.Wang            -0.9%       +3.1%    +4.7%    +1.0%    0%       1%      6.8    100%   0%      1.000? 0.998  73 (có 497)
+DEX/PEPE  Dark-Wood-Dahlia    -12.3%      +8.3%    +21.2%   -3.7%    3%       6%      2.6    92%    0%      0.947? 0.863  338 (có 326)
+          Rude-Gems-Leopard   -690.0%     -82.0%   +83.2%   -354.0%  100%     100%    -0.9   23%    56%     0.050  0.015  —
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+Tổng: 15 asset · 30 bot
+LN = lợi nhuận trên vốn · CVaR95 = lỗ trung bình trong 5% kịch bản tệ nhất · MAR = lợi nhuận chia sụt vốn
+PSR = xác suất Sharpe thật > 0 sau khi tính độ dài mẫu, độ lệch và đuôi dày; dấu ? = mô men do vài lệnh đơn lẻ chi phối nên không đáng tin
+DSR = PSR sau khi trừ việc bot được chọn là con tốt nhất trong pool ứng viên · MinTRL = số lệnh tối thiểu để Sharpe đủ tin ở mức 95%
+(Bailey & López de Prado 2012, 2014)
+
+CHI TIẾT TỪNG ASSET
+
+── CEX/BTC ── ỔN ĐỊNH · BULLISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: biến động thấp (phân vị 3); sổ lệnh dày (1,900,509 USD trong ±0,2%); dòng tiền hai chiều cân bằng
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON 脚本test             498   73     62    6.28   3.85    100.0%*  10     21k$     hai chiều, thuận xu hướng · phủ pha 99%
+   YẾU HƠN   Pure-Symbol-Yarrow   500   56     82    0.78   0.76    16.6%    3      1k$      hai chiều, nghịch xu hướng · phủ pha 65%
+   · 脚本test — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 314.27/lệnh · payoff 3.81 · lãi TB 600.47 / lỗ TB 157.65 · tổng PnL 156,508
+       hiệu chỉnh RR:  Sharpe -1.05 · Sortino -1.03 · Calmar 4.55 · hồi phục 12.37
+       nhịp giao dịch: 5.63 lệnh/ngày · giữ lệnh trung vị 37 phút · chuỗi thắng dài nhất 112 · chuỗi thua dài nhất 30
+       phân phối lệnh: trung vị 1 · độ lệch chuẩn 2,881 · skew 10.32 · kurtosis 110.64 · p05 -315 / p95 506 · KTC95 trung bình [61; 567]
+       vốn và sổ:      vốn tham chiếu 126,883 (WEEKLY_EQUITY_CURVE) · sổ phủ 88/118 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -14,819 · spread ×3 -9,607 · thanh khoản ½ -14,410 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        204 lệnh  win 81%  PnL 1,497         góp 4% lãi gộp
+       Giảm, động      9 lệnh    win 22%  PnL 898           góp 1% lãi gộp
+       Đi ngang, êm    42 lệnh   win 60%  PnL 12,084        góp 9% lãi gộp
+       Đi ngang, động  4 lệnh    win 50%  PnL -1,452        góp 0% lãi gộp nhưng lỗ ròng
+       Tăng, êm        61 lệnh   win 41%  PnL 60,481        góp 39% lãi gộp
+       Tăng, động      172 lệnh  win 49%  PnL 71,142        góp 41% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 498 lệnh = 4,980,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 21k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất -23.8% · p05 -1.6% · trung vị +114.4% · p95 +321.1% · tốt nhất +791.1%
+       sụt vốn:        P95 11.5% · xấu nhất 29.2% · xác suất cháy 0.0% · xác suất lỗ 6.0%
+       căn cứ kiểu vào lệnh: 330/435 lệnh mở thuận chiều biến động 24h trước đó
+   · Pure-Symbol-Yarrow — thông số đầy đủ:
+       hiệu suất:      kỳ vọng -20.85/lệnh · payoff 0.18 · lãi TB 90.37 / lỗ TB 514.10 · tổng PnL -10,424
+       hiệu chỉnh RR:  Sharpe -2.15 · Sortino -0.98 · Calmar -0.33 · hồi phục -0.63
+       nhịp giao dịch: 11.00 lệnh/ngày · giữ lệnh trung vị 20 phút · chuỗi thắng dài nhất 27 · chuỗi thua dài nhất 5
+       phân phối lệnh: trung vị 22 · độ lệch chuẩn 595 · skew -8.91 · kurtosis 110.65 · p05 -346 / p95 276 · KTC95 trung bình [-73; 31]
+       vốn và sổ:      vốn tham chiếu 89,911 (WEEKLY_EQUITY_CURVE) · sổ phủ 45/172 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -23,648 · spread ×3 -11,660 · thanh khoản ½ -17,489 → VULNERABLE
+     theo pha thị trường:
+       Giảm, êm        27 lệnh   win 78%  PnL 606           góp 3% lãi gộp
+       Giảm, động      20 lệnh   win 80%  PnL 345           góp 3% lãi gộp
+       Đi ngang, êm    50 lệnh   win 84%  PnL 775           góp 5% lãi gộp
+       Đi ngang, động  38 lệnh   win 79%  PnL -793          góp 10% lãi gộp nhưng lỗ ròng
+       Tăng, êm        54 lệnh   win 76%  PnL 708           góp 12% lãi gộp
+       Tăng, động      134 lệnh  win 81%  PnL -11,043       góp 44% lãi gộp nhưng lỗ ròng
+       Monte Carlo: 10,000 kịch bản × 500 lệnh = 5,000,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -82.9% · p05 -37.8% · trung vị -10.4% · p95 +9.6% · tốt nhất +26.9%
+       sụt vốn:        P95 43.3% · xấu nhất 87.6% · xác suất cháy 0.0% · xác suất lỗ 78.0%
+       căn cứ kiểu vào lệnh: 71/225 lệnh mở thuận chiều biến động 24h trước đó
+   → Profit factor 脚本test 6.28 so với Pure-Symbol-Yarrow 0.78.
+   → 脚本test: mức sụt vốn vượt vốn ghi nhận tại thời điểm đó nên con số phần trăm là sàn, không phải đo được.
+
+── CEX/ETH ── ỔN ĐỊNH · BEARISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: biến động thấp (phân vị 5); sổ lệnh dày (3,883,316 USD trong ±0,2%); dòng tiền hai chiều cân bằng
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON FJ Investment        75    6      35    1.96   2.50    100.0%*  5      0        hai chiều, nghịch xu hướng · phủ pha 100%
+   YẾU HƠN   xiaomijiahanyangzao  133   36     74    3.94   1.05    1.8%     8      71k$     nghiêng long, thuận xu hướng · phủ pha 80%
+   · FJ Investment — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 789.86/lệnh · payoff 3.69 · lãi TB 4,660.57 / lỗ TB 1,263.98 · tổng PnL 59,240
+       hiệu chỉnh RR:  Sharpe 0.91 · Sortino 1.60 · Calmar 1.41 · hồi phục 2.53
+       nhịp giao dịch: 0.89 lệnh/ngày · giữ lệnh trung vị 805 phút · chuỗi thắng dài nhất 5 · chuỗi thua dài nhất 9
+       phân phối lệnh: trung vị -600 · độ lệch chuẩn 5,537 · skew 3.71 · kurtosis 14.60 · p05 -2,775 / p95 8,482 · KTC95 trung bình [-463; 2,043]
+       vốn và sổ:      vốn tham chiếu 125,073 (WEEKLY_EQUITY_CURVE) · sổ phủ 84/903 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -30,968 · spread ×3 -8,888 · thanh khoản ½ -13,332 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        13 lệnh   win 38%  PnL 6,173         góp 9% lãi gộp
+       Giảm, động      9 lệnh    win 33%  PnL -3,881        góp 1% lãi gộp nhưng lỗ ròng
+       Đi ngang, êm    19 lệnh   win 21%  PnL -13,085       góp 5% lãi gộp nhưng lỗ ròng
+       Đi ngang, động  2 lệnh    win 0%   PnL -1,704        góp 0% lãi gộp nhưng lỗ ròng
+       Tăng, êm        15 lệnh   win 47%  PnL 51,600        góp 49% lãi gộp
+       Tăng, động      17 lệnh   win 41%  PnL 20,136        góp 35% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 75 lệnh = 750,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -55.8% · p05 -29.0% · trung vị +40.9% · p95 +152.6% · tốt nhất +317.6%
+       sụt vốn:        P95 34.0% · xấu nhất 59.6% · xác suất cháy 0.0% · xác suất lỗ 25.2%
+       căn cứ kiểu vào lệnh: 15/43 lệnh mở thuận chiều biến động 24h trước đó
+   · xiaomijiahanyangzao — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 572.00/lệnh · payoff 1.35 · lãi TB 1,029.69 / lỗ TB 760.70 · tổng PnL 76,076
+       hiệu chỉnh RR:  Sharpe 7.06 · Sortino 10.16 · Calmar 5.67 · hồi phục 11.46
+       nhịp giao dịch: 1.47 lệnh/ngày · giữ lệnh trung vị 2,602 phút · chuỗi thắng dài nhất 15 · chuỗi thua dài nhất 6
+       phân phối lệnh: trung vị 196 · độ lệch chuẩn 1,851 · skew 3.31 · kurtosis 17.77 · p05 -1,457 / p95 3,064 · KTC95 trung bình [257; 887]
+       vốn và sổ:      vốn tham chiếu 546,002 (WEEKLY_EQUITY_CURVE) · sổ phủ 91/367 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -12,932 · spread ×3 -4,370 · thanh khoản ½ -6,554 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        20 lệnh   win 65%  PnL 4,420         góp 7% lãi gộp
+       Giảm, động      4 lệnh    win 50%  PnL 2,859         góp 3% lãi gộp
+       Đi ngang, êm    10 lệnh   win 50%  PnL 8,938         góp 11% lãi gộp
+       Đi ngang, động  2 lệnh    win 0%   PnL -1,271        góp 0% lãi gộp nhưng lỗ ròng
+       Tăng, êm        31 lệnh   win 90%  PnL 24,776        góp 25% lãi gộp
+       Tăng, động      39 lệnh   win 79%  PnL 33,146        góp 39% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 133 lệnh = 1,330,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 71k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất -2.0% · p05 +7.1% · trung vị +13.7% · p95 +21.3% · tốt nhất +34.0%
+       sụt vốn:        P95 1.9% · xấu nhất 3.5% · xác suất cháy 0.0% · xác suất lỗ 0.0%
+       căn cứ kiểu vào lệnh: 64/87 lệnh mở thuận chiều biến động 24h trước đó
+   → Profit factor FJ Investment 1.96 so với xiaomijiahanyangzao 3.94.
+   → FJ Investment: mức sụt vốn vượt vốn ghi nhận tại thời điểm đó nên con số phần trăm là sàn, không phải đo được.
+
+── CEX/SOL ── ỔN ĐỊNH · BEARISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: biến động thấp (phân vị 6); sổ lệnh dày (6,648,955 USD trong ±0,2%); dòng tiền hai chiều cân bằng
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON RuiJie               300   16     93    41.52  9.99    0.2%     24     13k$     nghiêng long, thuận xu hướng · phủ pha 78%
+   YẾU HƠN   FrontierQuantTrader  77    7      64    3.28   —       1.6%     0      0        nghiêng long, nghịch xu hướng · phủ pha 100%
+   · RuiJie — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 574.38/lệnh · payoff 2.97 · lãi TB 630.59 / lỗ TB 212.63 · tổng PnL 172,313
+       hiệu chỉnh RR:  Sharpe 27.20 · Sortino 98.00 · Calmar 110.93 · hồi phục 78.60
+       nhịp giao dịch: 5.03 lệnh/ngày · giữ lệnh trung vị 488 phút · chuỗi thắng dài nhất 65 · chuỗi thua dài nhất 4
+       phân phối lệnh: trung vị 316 · độ lệch chuẩn 782 · skew 2.56 · kurtosis 10.07 · p05 -38 / p95 2,022 · KTC95 trung bình [486; 663]
+       vốn và sổ:      vốn tham chiếu 1,024,810 (WEEKLY_EQUITY_CURVE) · sổ phủ 60/640 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -2,126 · spread ×3 -14,317 · thanh khoản ½ -21,476 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        2 lệnh    win 100% PnL 4,684         góp 3% lãi gộp
+       Giảm, động      3 lệnh    win 100% PnL 1,257         góp 1% lãi gộp
+       Đi ngang, êm    15 lệnh   win 100% PnL 19,977        góp 11% lãi gộp
+       Đi ngang, động  10 lệnh   win 100% PnL 3,875         góp 2% lãi gộp
+       Tăng, êm        83 lệnh   win 95%  PnL 37,282        góp 21% lãi gộp
+       Tăng, động      120 lệnh  win 89%  PnL 82,854        góp 49% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 300 lệnh = 3,000,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất +9.0% · p05 +13.4% · trung vị +16.7% · p95 +20.4% · tốt nhất +24.2%
+       sụt vốn:        P95 0.2% · xấu nhất 0.5% · xác suất cháy 0.0% · xác suất lỗ 0.0%
+       căn cứ kiểu vào lệnh: 98/158 lệnh mở thuận chiều biến động 24h trước đó
+   · FrontierQuantTrader — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 138.02/lệnh · payoff 1.88 · lãi TB 311.94 / lỗ TB 166.35 · tổng PnL 10,627
+       hiệu chỉnh RR:  Sharpe 3.22 · Sortino 7.78 · Calmar 5.53 · hồi phục 6.51
+       nhịp giao dịch: 0.87 lệnh/ngày · giữ lệnh trung vị 90 phút · chuỗi thắng dài nhất 22 · chuỗi thua dài nhất 9
+       phân phối lệnh: trung vị 47 · độ lệch chuẩn 763 · skew 5.21 · kurtosis 32.24 · p05 -259 / p95 534 · KTC95 trung bình [-32; 308]
+       vốn và sổ:      vốn tham chiếu 116,118 (WEEKLY_EQUITY_CURVE) · sổ phủ 88/318 ngày dẫn · đối soát RECONCILED · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -2,329 · spread ×3 -1,543 · thanh khoản ½ -2,315 → SURVIVED
+     theo pha thị trường:
+       Giảm, động      6 lệnh    win 100% PnL 735           góp 5% lãi gộp
+       Đi ngang, động  3 lệnh    win 0%   PnL -1,740        góp 0% lãi gộp nhưng lỗ ròng
+       Tăng, êm        1 lệnh    win 0%   PnL -221          góp 0% lãi gộp nhưng lỗ ròng
+       Tăng, động      67 lệnh   win 64%  PnL 11,852        góp 95% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 77 lệnh = 770,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -7.0% · p05 -0.6% · trung vị +8.4% · p95 +22.4% · tốt nhất +48.0%
+       sụt vốn:        P95 3.1% · xấu nhất 7.1% · xác suất cháy 0.0% · xác suất lỗ 7.0%
+       căn cứ kiểu vào lệnh: 26/68 lệnh mở thuận chiều biến động 24h trước đó
+       pha thị trường đã có nhưng bot chưa từng trải: Giảm, êm, Đi ngang, êm
+   → Profit factor RuiJie 41.52 so với FrontierQuantTrader 3.28.
+   → RuiJie chưa có đủ lệnh nào trong pha giảm — chiến lược chưa được thử ở chiều xuống.
+   → FrontierQuantTrader lấy 95% lợi nhuận từ riêng pha Tăng, động; đổi chế độ là mất lợi thế.
+
+── CEX/XRP ── RỦI RO · BEARISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: xu hướng giảm; vị thế dồn một phía (long, tỷ lệ L/S 2.89); beta theo BTC cao (1.53), khuếch đại cú sốc chung
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON Milies L             74    4      69    4.89   3.01    6.3%     25     23k$     chỉ long, pha trộn · phủ pha 62%
+   YẾU HƠN   HaveARestin          143   27     92    11.12  0.16    0.5%     95     86k$     hai chiều, nghịch xu hướng · phủ pha 83%
+   · Milies L — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 1,643.62/lệnh · payoff 2.21 · lãi TB 2,997.62 / lỗ TB 1,358.74 · tổng PnL 121,628
+       hiệu chỉnh RR:  Sharpe 6.54 · Sortino 10.73 · Calmar 8.17 · hồi phục 13.53
+       nhịp giao dịch: 0.84 lệnh/ngày · giữ lệnh trung vị 4,994 phút · chuỗi thắng dài nhất 14 · chuỗi thua dài nhất 5
+       phân phối lệnh: trung vị 705 · độ lệch chuẩn 3,984 · skew 1.97 · kurtosis 4.71 · p05 -2,617 / p95 10,968 · KTC95 trung bình [736; 2,551]
+       vốn và sổ:      vốn tham chiếu 255,853 (WEEKLY_EQUITY_CURVE) · sổ phủ 88/1060 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -15,626 · spread ×3 -3,806 · thanh khoản ½ -5,709 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        7 lệnh    win 71%  PnL 13,206        góp 11% lãi gộp
+       Giảm, động      13 lệnh   win 54%  PnL 19,431        góp 14% lãi gộp
+       Đi ngang, êm    1 lệnh    win 100% PnL 2,208         góp 1% lãi gộp
+       Đi ngang, động  2 lệnh    win 100% PnL 7,233         góp 5% lãi gộp
+       Tăng, êm        3 lệnh    win 67%  PnL 14,922        góp 12% lãi gộp
+       Tăng, động      20 lệnh   win 60%  PnL 33,454        góp 29% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 74 lệnh = 740,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất +3.2% · p05 +25.0% · trung vị +46.6% · p95 +71.8% · tốt nhất +106.6%
+       sụt vốn:        P95 4.8% · xấu nhất 10.8% · xác suất cháy 0.0% · xác suất lỗ 0.0%
+       căn cứ kiểu vào lệnh: 24/45 lệnh mở thuận chiều biến động 24h trước đó
+   · HaveARestin — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 67.01/lệnh · payoff 1.02 · lãi TB 80.38 / lỗ TB 78.93 · tổng PnL 9,583
+       hiệu chỉnh RR:  Sharpe 16.13 · Sortino 9.65 · Calmar 12.31 · hồi phục 17.62
+       nhịp giao dịch: 1.56 lệnh/ngày · giữ lệnh trung vị 1,475 phút · chuỗi thắng dài nhất 34 · chuỗi thua dài nhất 3
+       phân phối lệnh: trung vị 58 · độ lệch chuẩn 94 · skew -0.10 · kurtosis 18.05 · p05 -27 / p95 198 · KTC95 trung bình [52; 82]
+       vốn và sổ:      vốn tham chiếu 131,958 (WEEKLY_EQUITY_CURVE) · sổ phủ 92/580 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -474 · spread ×3 -488 · thanh khoản ½ -732 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        11 lệnh   win 100% PnL 1,239         góp 12% lãi gộp
+       Giảm, động      1 lệnh    win 100% PnL 53            góp 1% lãi gộp
+       Đi ngang, êm    17 lệnh   win 94%  PnL 959           góp 10% lãi gộp
+       Đi ngang, động  5 lệnh    win 100% PnL 234           góp 2% lãi gộp
+       Tăng, êm        24 lệnh   win 96%  PnL 2,056         góp 20% lãi gộp
+       Tăng, động      60 lệnh   win 90%  PnL 3,877         góp 39% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 143 lệnh = 1,430,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 86k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất +3.9% · p05 +5.8% · trung vị +7.3% · p95 +8.6% · tốt nhất +10.3%
+       sụt vốn:        P95 0.4% · xấu nhất 1.1% · xác suất cháy 0.0% · xác suất lỗ 0.0%
+       căn cứ kiểu vào lệnh: 20/94 lệnh mở thuận chiều biến động 24h trước đó
+   → Profit factor Milies L 4.89 so với HaveARestin 11.12.
+   → HaveARestin chỉ lãi trên sổ đã chốt: tính cả vị thế mở thì profit factor rơi xuống 0.16.
+
+── CEX/DOGE ── RỦI RO · BEARISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: xu hướng giảm; giá sát biên khoảng (14% biên độ); vị thế dồn một phía (long, tỷ lệ L/S 4.56)
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON Bare-Payee-Fox       81    11     100   —      1.19    0.0%     28     53k$     nghiêng long, nghịch xu hướng · phủ pha 83%
+   YẾU HƠN   Zs+++                213   7      55    0.56   0.59    100.0%*  22     21k$     chỉ short, nghịch xu hướng · phủ pha 73%
+   · Bare-Payee-Fox — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 459.54/lệnh · payoff — · lãi TB 459.54 / lỗ TB — · tổng PnL 37,223
+       hiệu chỉnh RR:  Sharpe 26.78 · Sortino — · Calmar — · hồi phục —
+       nhịp giao dịch: 0.89 lệnh/ngày · giữ lệnh trung vị 741 phút · chuỗi thắng dài nhất 81 · chuỗi thua dài nhất 0
+       phân phối lệnh: trung vị 365 · độ lệch chuẩn 382 · skew 1.68 · kurtosis 4.08 · p05 44 / p95 1,255 · KTC95 trung bình [376; 543]
+       vốn và sổ:      vốn tham chiếu 212,784 (WEEKLY_EQUITY_CURVE) · sổ phủ 91/231 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 0 · spread ×3 -1,656 · thanh khoản ½ -2,485 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        15 lệnh   win 100% PnL 3,388         góp 9% lãi gộp
+       Giảm, động      7 lệnh    win 100% PnL 3,805         góp 10% lãi gộp
+       Đi ngang, êm    15 lệnh   win 100% PnL 4,144         góp 11% lãi gộp
+       Đi ngang, động  1 lệnh    win 100% PnL 665           góp 2% lãi gộp
+       Tăng, êm        14 lệnh   win 100% PnL 5,145         góp 14% lãi gộp
+       Tăng, động      15 lệnh   win 100% PnL 11,553        góp 31% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 81 lệnh = 810,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 53k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất +9.4% · p05 +13.4% · trung vị +17.4% · p95 +21.9% · tốt nhất +28.9%
+       sụt vốn:        P95 0.0% · xấu nhất 0.0% · xác suất cháy 0.0% · xác suất lỗ 0.0%
+       căn cứ kiểu vào lệnh: 16/49 lệnh mở thuận chiều biến động 24h trước đó
+   · Zs+++ — thông số đầy đủ:
+       hiệu suất:      kỳ vọng -1,087.91/lệnh · payoff 0.46 · lãi TB 2,518.82 / lỗ TB 5,483.61 · tổng PnL -231,725
+       hiệu chỉnh RR:  Sharpe -3.93 · Sortino -2.99 · Calmar 0.03 · hồi phục -0.49
+       nhịp giao dịch: 2.40 lệnh/ngày · giữ lệnh trung vị 2,756 phút · chuỗi thắng dài nhất 22 · chuỗi thua dài nhất 29
+       phân phối lệnh: trung vị 44 · độ lệch chuẩn 8,143 · skew -2.40 · kurtosis 14.31 · p05 -13,370 / p95 6,973 · KTC95 trung bình [-2,182; 6]
+       vốn và sổ:      vốn tham chiếu 263,306 (WEEKLY_EQUITY_CURVE) · sổ phủ 89/21 ngày dẫn · đối soát UNVERIFIED_REFERENCE · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -263,213 · spread ×3 -20,489 · thanh khoản ½ -30,733 → LIQUIDATED
+     theo pha thị trường:
+       Giảm, êm        39 lệnh   win 59%  PnL -67,891       góp 5% lãi gộp nhưng lỗ ròng
+       Giảm, động      13 lệnh   win 69%  PnL -4,371        góp 1% lãi gộp nhưng lỗ ròng
+       Đi ngang, êm    14 lệnh   win 64%  PnL -43,551       góp 8% lãi gộp nhưng lỗ ròng
+       Đi ngang, động  6 lệnh    win 50%  PnL -50,230       góp 2% lãi gộp nhưng lỗ ròng
+       Tăng, êm        33 lệnh   win 55%  PnL -47,177       góp 14% lãi gộp nhưng lỗ ròng
+       Tăng, động      51 lệnh   win 39%  PnL -109,882      góp 17% lãi gộp nhưng lỗ ròng
+       Monte Carlo: 10,000 kịch bản × 213 lệnh = 2,130,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -534.5% · p05 -249.1% · trung vị -81.9% · p95 +49.1% · tốt nhất +151.7%
+       sụt vốn:        P95 100.0% · xấu nhất 100.0% · xác suất cháy 50.3% · xác suất lỗ 83.4%
+       căn cứ kiểu vào lệnh: 9/133 lệnh mở thuận chiều biến động 24h trước đó
+   → Zs+++ lỗ ở 6/6 pha thị trường, không chỉ riêng một chế độ.
+   → Zs+++: mức sụt vốn vượt vốn ghi nhận tại thời điểm đó nên con số phần trăm là sàn, không phải đo được.
+
+── CEX/ADA ── ỔN ĐỊNH · BULLISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: biến động thấp (phân vị 8); dòng tiền hai chiều cân bằng
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON AI 量化新星 - 趋势策…71    5      34    2.23   2.25    15.1%    1      0        nghiêng long, thuận xu hướng · phủ pha 92%
+   YẾU HƠN   BTC策略              499   19     42    0.83   0.81    3.4%     91     3k$      chỉ long, thuận xu hướng · phủ pha 70%
+   · AI 量化新星 - 趋势策略 — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 594.47/lệnh · payoff 4.37 · lãi TB 3,184.37 / lỗ TB 728.04 · tổng PnL 42,207
+       hiệu chỉnh RR:  Sharpe 5.43 · Sortino 20.70 · Calmar 2.94 · hồi phục 3.22
+       nhịp giao dịch: 1.41 lệnh/ngày · giữ lệnh trung vị 1,665 phút · chuỗi thắng dài nhất 7 · chuỗi thua dài nhất 8
+       phân phối lệnh: trung vị -615 · độ lệch chuẩn 2,669 · skew 2.15 · kurtosis 3.84 · p05 -1,145 / p95 6,717 · KTC95 trung bình [-26; 1,215]
+       vốn và sổ:      vốn tham chiếu 136,684 (WEEKLY_EQUITY_CURVE) · sổ phủ 50/52 ngày dẫn · đối soát RECONCILED · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -17,109 · spread ×3 -2,032 · thanh khoản ½ -3,048 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        9 lệnh    win 33%  PnL -2,094        góp 2% lãi gộp nhưng lỗ ròng
+       Giảm, động      7 lệnh    win 14%  PnL -3,588        góp 0% lãi gộp nhưng lỗ ròng
+       Đi ngang, êm    1 lệnh    win 0%   PnL -737          góp 0% lãi gộp nhưng lỗ ròng
+       Đi ngang, động  5 lệnh    win 20%  PnL 3,463         góp 8% lãi gộp
+       Tăng, êm        1 lệnh    win 0%   PnL -741          góp 0% lãi gộp nhưng lỗ ròng
+       Tăng, động      42 lệnh   win 38%  PnL 43,588        góp 83% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 71 lệnh = 710,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -30.7% · p05 -6.4% · trung vị +29.3% · p95 +73.6% · tốt nhất +137.7%
+       sụt vốn:        P95 14.8% · xấu nhất 30.7% · xác suất cháy 0.0% · xác suất lỗ 9.6%
+       căn cứ kiểu vào lệnh: 64/65 lệnh mở thuận chiều biến động 24h trước đó
+   · BTC策略 — thông số đầy đủ:
+       hiệu suất:      kỳ vọng -8.08/lệnh · payoff 1.12 · lãi TB 90.89 / lỗ TB 81.19 · tổng PnL -4,032
+       hiệu chỉnh RR:  Sharpe -9.03 · Sortino -9.39 · Calmar 0.46 · hồi phục -0.43
+       nhịp giao dịch: 61.00 lệnh/ngày · giữ lệnh trung vị 978 phút · chuỗi thắng dài nhất 33 · chuỗi thua dài nhất 33
+       phân phối lệnh: trung vị -11 · độ lệch chuẩn 131 · skew -0.18 · kurtosis 12.25 · p05 -193 / p95 153 · KTC95 trung bình [-20; 3]
+       vốn và sổ:      vốn tham chiếu 264,850 (WEEKLY_EQUITY_CURVE) · sổ phủ 8/714 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -11,651 · spread ×3 -1,295 · thanh khoản ½ -1,942 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        32 lệnh   win 50%  PnL 189           góp 4% lãi gộp
+       Giảm, động      14 lệnh   win 36%  PnL -485          góp 2% lãi gộp nhưng lỗ ròng
+       Đi ngang, êm    36 lệnh   win 78%  PnL 1,134         góp 13% lãi gộp
+       Đi ngang, động  5 lệnh    win 100% PnL 765           góp 4% lãi gộp
+       Tăng, êm        84 lệnh   win 43%  PnL -272          góp 14% lãi gộp nhưng lỗ ròng
+       Tăng, động      177 lệnh  win 37%  PnL -3,873        góp 35% lãi gộp nhưng lỗ ròng
+       Monte Carlo: 10,000 kịch bản × 499 lệnh = 4,990,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -9.2% · p05 -4.9% · trung vị -1.6% · p95 +1.9% · tốt nhất +6.0%
+       sụt vốn:        P95 5.5% · xấu nhất 9.3% · xác suất cháy 0.0% · xác suất lỗ 77.4%
+       căn cứ kiểu vào lệnh: 216/303 lệnh mở thuận chiều biến động 24h trước đó
+   → Profit factor AI 量化新星 - 趋势策略 2.23 so với BTC策略 0.83.
+   → AI 量化新星 - 趋势策略 lấy 83% lợi nhuận từ riêng pha Tăng, động; đổi chế độ là mất lợi thế.
+
+── CEX/AVAX ── ĐANG PHÁT TRIỂN · BULLISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: xu hướng tăng; dòng tiền chủ động mua
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON Fly-000              93    2      43    0.95   13.43   2.4%     100    0k$      hai chiều, nghịch xu hướng · phủ pha 60%
+   YẾU HƠN   Linxixi              68    1      53    1.37   1.48    18.1%    3      0        nghiêng short, nghịch xu hướng · phủ pha 93%
+   · Fly-000 — thông số đầy đủ:
+       hiệu suất:      kỳ vọng -1.66/lệnh · payoff 1.26 · lãi TB 78.07 / lỗ TB 61.83 · tổng PnL -154
+       hiệu chỉnh RR:  Sharpe -0.84 · Sortino -0.96 · Calmar 31.08 · hồi phục -0.13
+       nhịp giao dịch: 1.10 lệnh/ngày · giữ lệnh trung vị 494 phút · chuỗi thắng dài nhất 6 · chuỗi thua dài nhất 11
+       phân phối lệnh: trung vị -5 · độ lệch chuẩn 99 · skew 1.18 · kurtosis 3.83 · p05 -155 / p95 147 · KTC95 trung bình [-22; 18]
+       vốn và sổ:      vốn tham chiếu 128,172 (WEEKLY_EQUITY_CURVE) · sổ phủ 85/602 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -1,639 · spread ×3 -164 · thanh khoản ½ -246 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        14 lệnh   win 50%  PnL -31           góp 14% lãi gộp nhưng lỗ ròng
+       Giảm, động      9 lệnh    win 33%  PnL -132          góp 8% lãi gộp nhưng lỗ ròng
+       Đi ngang, êm    2 lệnh    win 0%   PnL -61           góp 0% lãi gộp nhưng lỗ ròng
+       Đi ngang, động  1 lệnh    win 100% PnL 8             góp 0% lãi gộp
+       Tăng, êm        3 lệnh    win 0%   PnL -310          góp 0% lãi gộp nhưng lỗ ròng
+       Tăng, động      27 lệnh   win 37%  PnL -414          góp 21% lãi gộp nhưng lỗ ròng
+       Monte Carlo: 10,000 kịch bản × 93 lệnh = 930,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -3.4% · p05 -1.6% · trung vị -0.2% · p95 +1.5% · tốt nhất +3.6%
+       sụt vốn:        P95 1.9% · xấu nhất 3.4% · xác suất cháy 0.0% · xác suất lỗ 55.9%
+       căn cứ kiểu vào lệnh: 3/53 lệnh mở thuận chiều biến động 24h trước đó
+   · Linxixi — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 462.77/lệnh · payoff 1.21 · lãi TB 3,266.62 / lỗ TB 2,691.57 · tổng PnL 31,468
+       hiệu chỉnh RR:  Sharpe 1.57 · Sortino 2.61 · Calmar 0.92 · hồi phục 0.71
+       nhịp giao dịch: 0.78 lệnh/ngày · giữ lệnh trung vị 1,356 phút · chuỗi thắng dài nhất 8 · chuỗi thua dài nhất 6
+       phân phối lệnh: trung vị 103 · độ lệch chuẩn 5,966 · skew 4.24 · kurtosis 27.39 · p05 -6,429 / p95 5,683 · KTC95 trung bình [-955; 1,881]
+       vốn và sổ:      vốn tham chiếu 287,528 (WEEKLY_EQUITY_CURVE) · sổ phủ 87/545 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -43,065 · spread ×3 -8,941 · thanh khoản ½ -13,411 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        9 lệnh    win 78%  PnL 9,415         góp 16% lãi gộp
+       Giảm, động      15 lệnh   win 53%  PnL 32,548        góp 47% lãi gộp
+       Đi ngang, êm    5 lệnh    win 60%  PnL 1,933         góp 8% lãi gộp
+       Đi ngang, động  4 lệnh    win 25%  PnL -10,194       góp 4% lãi gộp nhưng lỗ ròng
+       Tăng, êm        12 lệnh   win 58%  PnL -4,665        góp 11% lãi gộp nhưng lỗ ròng
+       Tăng, động      18 lệnh   win 50%  PnL 6,656         góp 15% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 68 lệnh = 680,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -54.7% · p05 -18.0% · trung vị +10.3% · p95 +42.9% · tốt nhất +95.8%
+       sụt vốn:        P95 24.7% · xấu nhất 55.3% · xác suất cháy 0.0% · xác suất lỗ 29.1%
+       căn cứ kiểu vào lệnh: 22/55 lệnh mở thuận chiều biến động 24h trước đó
+   → Profit factor Fly-000 0.95 so với Linxixi 1.37.
+
+── CEX/BNB ── ỔN ĐỊNH · BEARISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: biến động thấp (phân vị 5); sổ lệnh dày (1,761,729 USD trong ±0,2%)
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON Quaint-SegWit-Laurel 33    2      58    0.33   0.29    21.4%    8      4k$      nghiêng long, nghịch xu hướng · phủ pha 100%
+   YẾU HƠN   ChinatownOG          81    1      79    13.89  0.71    3.0%     37     62k$     hai chiều, nghịch xu hướng · phủ pha 63%
+   · Quaint-SegWit-Laurel — thông số đầy đủ:
+       hiệu suất:      kỳ vọng -385.08/lệnh · payoff 0.24 · lãi TB 325.39 / lỗ TB 1,349.28 · tổng PnL -12,708
+       hiệu chỉnh RR:  Sharpe -3.86 · Sortino -2.55 · Calmar 2.49 · hồi phục -0.86
+       nhịp giao dịch: 0.37 lệnh/ngày · giữ lệnh trung vị 1,702 phút · chuỗi thắng dài nhất 6 · chuỗi thua dài nhất 4
+       phân phối lệnh: trung vị 56 · độ lệch chuẩn 1,129 · skew -1.15 · kurtosis 0.44 · p05 -2,366 / p95 678 · KTC95 trung bình [-770; 0]
+       vốn và sổ:      vốn tham chiếu 166,769 (WEEKLY_EQUITY_CURVE) · sổ phủ 89/134 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -9,445 · spread ×3 -230 · thanh khoản ½ -345 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        12 lệnh   win 67%  PnL 539           góp 55% lãi gộp
+       Giảm, động      5 lệnh    win 0%   PnL -5,453        góp 0% lãi gộp nhưng lỗ ròng
+       Đi ngang, êm    3 lệnh    win 67%  PnL -1,838        góp 3% lãi gộp nhưng lỗ ròng
+       Đi ngang, động  1 lệnh    win 0%   PnL -1,970        góp 0% lãi gộp nhưng lỗ ròng
+       Tăng, êm        4 lệnh    win 75%  PnL -2,209        góp 7% lãi gộp nhưng lỗ ròng
+       Tăng, động      8 lệnh    win 75%  PnL -1,776        góp 35% lãi gộp nhưng lỗ ròng
+       Monte Carlo: 10,000 kịch bản × 33 lệnh = 330,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -25.0% · p05 -14.9% · trung vị -7.5% · p95 -0.7% · tốt nhất +5.4%
+       sụt vốn:        P95 15.4% · xấu nhất 25.2% · xác suất cháy 0.0% · xác suất lỗ 96.6%
+       căn cứ kiểu vào lệnh: 3/32 lệnh mở thuận chiều biến động 24h trước đó
+   · ChinatownOG — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 509.86/lệnh · payoff 3.69 · lãi TB 695.35 / lỗ TB 188.45 · tổng PnL 41,299
+       hiệu chỉnh RR:  Sharpe 10.04 · Sortino 59.36 · Calmar -4.64 · hồi phục 15.02
+       nhịp giao dịch: 2.00 lệnh/ngày · giữ lệnh trung vị 1,131 phút · chuỗi thắng dài nhất 23 · chuỗi thua dài nhất 5
+       phân phối lệnh: trung vị 63 · độ lệch chuẩn 1,490 · skew 4.52 · kurtosis 22.52 · p05 -169 / p95 2,174 · KTC95 trung bình [185; 834]
+       vốn và sổ:      vốn tham chiếu 109,753 (WEEKLY_EQUITY_CURVE) · sổ phủ 41/43 ngày dẫn · đối soát UNVERIFIED_REFERENCE · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -1,602 · spread ×3 -4,717 · thanh khoản ½ -7,075 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        9 lệnh    win 100% PnL 846           góp 2% lãi gộp
+       Đi ngang, êm    11 lệnh   win 100% PnL 4,390         góp 10% lãi gộp
+       Đi ngang, động  1 lệnh    win 100% PnL 1,477         góp 3% lãi gộp
+       Tăng, êm        11 lệnh   win 45%  PnL 9,522         góp 22% lãi gộp
+       Tăng, động      19 lệnh   win 53%  PnL 15,303        góp 41% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 81 lệnh = 810,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 62k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất -0.8% · p05 +17.1% · trung vị +36.5% · p95 +62.6% · tốt nhất +103.2%
+       sụt vốn:        P95 2.8% · xấu nhất 8.2% · xác suất cháy 0.0% · xác suất lỗ 0.0%
+       căn cứ kiểu vào lệnh: 8/28 lệnh mở thuận chiều biến động 24h trước đó
+       pha thị trường đã có nhưng bot chưa từng trải: Giảm, động
+   → Profit factor Quaint-SegWit-Laurel 0.33 so với ChinatownOG 13.89.
+   → ChinatownOG chỉ lãi trên sổ đã chốt: tính cả vị thế mở thì profit factor rơi xuống 0.71.
+
+── CEX/LINK ── RỦI RO · BEARISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: xu hướng giảm; giá sát biên khoảng (12% biên độ)
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON Shallow-Pair-Frog    428   28     46    3.29   3.33    7.7%     67     1k$      hai chiều, pha trộn · phủ pha 89%
+   YẾU HƠN   0xleek.eth           55    5      60    1.74   1.72    13.1%    2      0k$      hai chiều, nghịch xu hướng · phủ pha 56%
+   · Shallow-Pair-Frog — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 330.61/lệnh · payoff 3.93 · lãi TB 1,042.43 / lỗ TB 265.12 · tổng PnL 141,501
+       hiệu chỉnh RR:  Sharpe 3.40 · Sortino 19.16 · Calmar 4.36 · hồi phục 4.41
+       nhịp giao dịch: 4.77 lệnh/ngày · giữ lệnh trung vị 3,709 phút · chuỗi thắng dài nhất 27 · chuỗi thua dài nhất 38
+       phân phối lệnh: trung vị -0 · độ lệch chuẩn 4,105 · skew 14.01 · kurtosis 224.98 · p05 -760 / p95 800 · KTC95 trung bình [-58; 720]
+       vốn và sổ:      vốn tham chiếu 579,369 (WEEKLY_EQUITY_CURVE) · sổ phủ 90/1032 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -30,887 · spread ×3 -4,085 · thanh khoản ½ -6,128 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        90 lệnh   win 43%  PnL -358          góp 4% lãi gộp nhưng lỗ ròng
+       Giảm, động      39 lệnh   win 74%  PnL 479           góp 7% lãi gộp
+       Đi ngang, êm    40 lệnh   win 55%  PnL 37,589        góp 22% lãi gộp
+       Đi ngang, động  23 lệnh   win 48%  PnL 72,817        góp 37% lãi gộp
+       Tăng, êm        127 lệnh  win 42%  PnL 29,685        góp 25% lãi gộp
+       Tăng, động      64 lệnh   win 36%  PnL 2,463         góp 4% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 428 lệnh = 4,280,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -20.4% · p05 -5.4% · trung vị +22.6% · p95 +69.2% · tốt nhất +158.6%
+       sụt vốn:        P95 8.6% · xấu nhất 20.5% · xác suất cháy 0.0% · xác suất lỗ 16.9%
+       căn cứ kiểu vào lệnh: 172/347 lệnh mở thuận chiều biến động 24h trước đó
+   · 0xleek.eth — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 428.82/lệnh · payoff 1.16 · lãi TB 1,680.16 / lỗ TB 1,448.19 · tổng PnL 23,585
+       hiệu chỉnh RR:  Sharpe 2.30 · Sortino 3.39 · Calmar 1.89 · hồi phục 1.31
+       nhịp giao dịch: 0.71 lệnh/ngày · giữ lệnh trung vị 1,219 phút · chuỗi thắng dài nhất 11 · chuỗi thua dài nhất 6
+       phân phối lệnh: trung vị 66 · độ lệch chuẩn 3,052 · skew 2.10 · kurtosis 6.65 · p05 -2,763 / p95 7,607 · KTC95 trung bình [-378; 1,235]
+       vốn và sổ:      vốn tham chiếu 133,909 (WEEKLY_EQUITY_CURVE) · sổ phủ 77/298 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -15,930 · spread ×3 -1,293 · thanh khoản ½ -1,939 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        2 lệnh    win 50%  PnL 3,952         góp 10% lãi gộp
+       Giảm, động      2 lệnh    win 100% PnL 2,007         góp 4% lãi gộp
+       Đi ngang, êm    1 lệnh    win 0%   PnL -1,366        góp 0% lãi gộp nhưng lỗ ròng
+       Đi ngang, động  1 lệnh    win 0%   PnL -3,182        góp 0% lãi gộp nhưng lỗ ròng
+       Tăng, êm        5 lệnh    win 80%  PnL 817           góp 2% lãi gộp
+       Tăng, động      20 lệnh   win 50%  PnL 12,470        góp 61% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 55 lệnh = 550,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -37.3% · p05 -14.5% · trung vị +15.8% · p95 +57.0% · tốt nhất +110.9%
+       sụt vốn:        P95 20.6% · xấu nhất 40.1% · xác suất cháy 0.0% · xác suất lỗ 23.1%
+       căn cứ kiểu vào lệnh: 4/25 lệnh mở thuận chiều biến động 24h trước đó
+   → Profit factor Shallow-Pair-Frog 3.29 so với 0xleek.eth 1.74.
+   → 0xleek.eth chưa có đủ lệnh nào trong pha giảm — chiến lược chưa được thử ở chiều xuống.
+
+── CEX/SUI ── RỦI RO · BEARISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: xu hướng giảm; vị thế dồn một phía (long, tỷ lệ L/S 3.52); beta theo BTC cao (1.55), khuếch đại cú sốc chung
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON 01pp                 304   13     64    1.73   1.86    50.9%    6      0        hai chiều, nghịch xu hướng · phủ pha 91%
+   YẾU HƠN   Proud-Peg-Basil      58    8      66    2.52   1.09    1.7%     18     17k$     chỉ long, nghịch xu hướng · phủ pha 76%
+   · 01pp — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 437.87/lệnh · payoff 0.97 · lãi TB 1,618.94 / lỗ TB 1,675.06 · tổng PnL 133,112
+       hiệu chỉnh RR:  Sharpe 4.37 · Sortino 5.07 · Calmar 1.79 · hồi phục 4.92
+       nhịp giao dịch: 4.13 lệnh/ngày · giữ lệnh trung vị 1,154 phút · chuỗi thắng dài nhất 17 · chuỗi thua dài nhất 17
+       phân phối lệnh: trung vị 159 · độ lệch chuẩn 3,300 · skew 1.48 · kurtosis 13.83 · p05 -2,993 / p95 5,186 · KTC95 trung bình [67; 809]
+       vốn và sổ:      vốn tham chiếu 157,074 (WEEKLY_EQUITY_CURVE) · sổ phủ 74/195 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -91,291 · spread ×3 -29,183 · thanh khoản ½ -43,775 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        51 lệnh   win 71%  PnL 50,560        góp 23% lãi gộp
+       Giảm, động      14 lệnh   win 79%  PnL 3,983         góp 2% lãi gộp
+       Đi ngang, êm    30 lệnh   win 47%  PnL -11,894       góp 3% lãi gộp nhưng lỗ ròng
+       Đi ngang, động  10 lệnh   win 80%  PnL 24,078        góp 11% lãi gộp
+       Tăng, êm        50 lệnh   win 60%  PnL 49,534        góp 21% lãi gộp
+       Tăng, động      122 lệnh  win 66%  PnL 11,177        góp 33% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 304 lệnh = 3,040,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -55.5% · p05 +22.0% · trung vị +84.8% · p95 +146.5% · tốt nhất +256.1%
+       sụt vốn:        P95 29.5% · xấu nhất 74.1% · xác suất cháy 0.0% · xác suất lỗ 1.2%
+       căn cứ kiểu vào lệnh: 70/213 lệnh mở thuận chiều biến động 24h trước đó
+   · Proud-Peg-Basil — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 326.86/lệnh · payoff 1.33 · lãi TB 827.17 / lỗ TB 623.73 · tổng PnL 18,958
+       hiệu chỉnh RR:  Sharpe 4.17 · Sortino 3.91 · Calmar 1.47 · hồi phục 2.25
+       nhịp giao dịch: 0.68 lệnh/ngày · giữ lệnh trung vị 2,737 phút · chuỗi thắng dài nhất 17 · chuỗi thua dài nhất 6
+       phân phối lệnh: trung vị 141 · độ lệch chuẩn 1,256 · skew -1.04 · kurtosis 8.49 · p05 -782 / p95 2,039 · KTC95 trung bình [4; 650]
+       vốn và sổ:      vốn tham chiếu 500,199 (WEEKLY_EQUITY_CURVE) · sổ phủ 85/733 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -6,237 · spread ×3 -902 · thanh khoản ½ -1,353 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        16 lệnh   win 62%  PnL 452           góp 28% lãi gộp
+       Giảm, động      7 lệnh    win 71%  PnL 3,664         góp 14% lãi gộp
+       Tăng, êm        2 lệnh    win 100% PnL 7,471         góp 24% lãi gộp
+       Tăng, động      19 lệnh   win 53%  PnL 2,597         góp 14% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 58 lệnh = 580,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 17k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất -4.9% · p05 -0.3% · trung vị +3.7% · p95 +8.0% · tốt nhất +13.6%
+       sụt vốn:        P95 2.7% · xấu nhất 6.0% · xác suất cháy 0.0% · xác suất lỗ 6.4%
+       căn cứ kiểu vào lệnh: 2/41 lệnh mở thuận chiều biến động 24h trước đó
+       pha thị trường đã có nhưng bot chưa từng trải: Đi ngang, êm, Đi ngang, động
+   → Profit factor 01pp 1.73 so với Proud-Peg-Basil 2.52.
+
+── DEX/WBTC ── ĐANG PHÁT TRIỂN · BULLISH/NORMAL · thanh khoản DEEP · chất lượng dữ liệu 1.00
+   Vì: xu hướng tăng; dòng tiền chủ động mua
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON King_GG              268   75     55    1.68   1.31    62.9%    2      411k$    hai chiều, thuận xu hướng · phủ pha 60%
+   YẾU HƠN   k001                 207   57     56    0.88   0.89    20.8%    11     2k$      hai chiều, nghịch xu hướng · phủ pha 100%
+   · King_GG — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 3,341.57/lệnh · payoff 1.38 · lãi TB 15,059.49 / lỗ TB 10,894.26 · tổng PnL 895,540
+       hiệu chỉnh RR:  Sharpe 4.27 · Sortino 7.41 · Calmar 7.12 · hồi phục 3.64
+       nhịp giao dịch: 3.67 lệnh/ngày · giữ lệnh trung vị 143 phút · chuỗi thắng dài nhất 15 · chuỗi thua dài nhất 12
+       phân phối lệnh: trung vị 198 · độ lệch chuẩn 37,368 · skew 6.66 · kurtosis 61.83 · p05 -25,406 / p95 26,899 · KTC95 trung bình [-1,132; 7,816]
+       vốn và sổ:      vốn tham chiếu 597,758 (WEEKLY_EQUITY_CURVE) · sổ phủ 73/73 ngày dẫn · đối soát UNVERIFIED_REFERENCE · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -659,103 · spread ×3 -349,852 · thanh khoản ½ -524,778 → LIQUIDATED
+     theo pha thị trường:
+       Giảm, êm        13 lệnh   win 62%  PnL 68,069        góp 5% lãi gộp
+       Giảm, động      7 lệnh    win 43%  PnL -12,181       góp 1% lãi gộp nhưng lỗ ròng
+       Đi ngang, êm    13 lệnh   win 31%  PnL 357,564       góp 19% lãi gộp
+       Đi ngang, động  2 lệnh    win 50%  PnL 23,085        góp 2% lãi gộp
+       Tăng, êm        45 lệnh   win 40%  PnL -84,697       góp 5% lãi gộp nhưng lỗ ròng
+       Tăng, động      81 lệnh   win 58%  PnL 400,525       góp 49% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 268 lệnh = 2,680,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 411k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất -147.8% · p05 +6.8% · trung vị +146.1% · p95 +312.9% · tốt nhất +600.0%
+       sụt vốn:        P95 66.4% · xấu nhất 100.0% · xác suất cháy 0.8% · xác suất lỗ 4.3%
+       căn cứ kiểu vào lệnh: 82/124 lệnh mở thuận chiều biến động 24h trước đó
+   · k001 — thông số đầy đủ:
+       hiệu suất:      kỳ vọng -77.59/lệnh · payoff 0.69 · lãi TB 1,048.53 / lỗ TB 1,513.08 · tổng PnL -16,061
+       hiệu chỉnh RR:  Sharpe -0.59 · Sortino -0.51 · Calmar 0.44 · hồi phục -0.20
+       nhịp giao dịch: 2.32 lệnh/ngày · giữ lệnh trung vị 6,769 phút · chuỗi thắng dài nhất 19 · chuỗi thua dài nhất 19
+       phân phối lệnh: trung vị 148 · độ lệch chuẩn 2,095 · skew -1.55 · kurtosis 12.72 · p05 -3,132 / p95 2,222 · KTC95 trung bình [-363; 208]
+       vốn và sổ:      vốn tham chiếu 444,306 (WEEKLY_EQUITY_CURVE) · sổ phủ 89/158 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -68,845 · spread ×3 -9,131 · thanh khoản ½ -13,696 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        37 lệnh   win 68%  PnL -14,580       góp 13% lãi gộp nhưng lỗ ròng
+       Giảm, động      16 lệnh   win 56%  PnL 1,454         góp 5% lãi gộp
+       Đi ngang, êm    32 lệnh   win 59%  PnL 16,816        góp 24% lãi gộp
+       Đi ngang, động  11 lệnh   win 45%  PnL -10,823       góp 2% lãi gộp nhưng lỗ ròng
+       Tăng, êm        51 lệnh   win 53%  PnL -3,407        góp 25% lãi gộp nhưng lỗ ròng
+       Tăng, động      60 lệnh   win 52%  PnL -5,521        góp 31% lãi gộp nhưng lỗ ròng
+       Monte Carlo: 10,000 kịch bản × 207 lệnh = 2,070,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -51.6% · p05 -24.1% · trung vị -3.3% · p95 +17.0% · tốt nhất +41.2%
+       sụt vốn:        P95 27.8% · xấu nhất 52.2% · xác suất cháy 0.0% · xác suất lỗ 60.7%
+       căn cứ kiểu vào lệnh: 24/169 lệnh mở thuận chiều biến động 24h trước đó
+   → Profit factor King_GG 1.68 so với k001 0.88.
+   → k001 lỗ ở 4/6 pha thị trường, không chỉ riêng một chế độ.
+
+── DEX/WETH ── ỔN ĐỊNH · BEARISH/NORMAL · thanh khoản DEEP · chất lượng dữ liệu 1.00
+   Vì: biến động thấp (phân vị 5); sổ lệnh dày (1,689,337 USD trong ±0,2%)
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON xiaojian888999       311   71     73    3.18   2.78    7.8%     16     31k$     hai chiều, nghịch xu hướng · phủ pha 76%
+   YẾU HƠN   亿难贫               499   126    73    4.03   2.37    0.0%     42     0k$      hai chiều, nghịch xu hướng · phủ pha 100%
+   · xiaojian888999 — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 1,239.58/lệnh · payoff 1.16 · lãi TB 2,467.71 / lỗ TB 2,134.07 · tổng PnL 385,509
+       hiệu chỉnh RR:  Sharpe 10.57 · Sortino 13.24 · Calmar 14.11 · hồi phục 10.41
+       nhịp giao dịch: 3.38 lệnh/ngày · giữ lệnh trung vị 912 phút · chuỗi thắng dài nhất 20 · chuỗi thua dài nhất 13
+       phân phối lệnh: trung vị 502 · độ lệch chuẩn 4,223 · skew 1.86 · kurtosis 10.71 · p05 -3,126 / p95 7,884 · KTC95 trung bình [770; 1,709]
+       vốn và sổ:      vốn tham chiếu 490,951 (WEEKLY_EQUITY_CURVE) · sổ phủ 92/172 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -88,564 · spread ×3 -35,331 · thanh khoản ½ -52,996 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        15 lệnh   win 67%  PnL 16,628        góp 5% lãi gộp
+       Giảm, động      11 lệnh   win 100% PnL 34,763        góp 6% lãi gộp
+       Đi ngang, êm    25 lệnh   win 88%  PnL 47,924        góp 10% lãi gộp
+       Đi ngang, động  12 lệnh   win 67%  PnL 6,735         góp 3% lãi gộp
+       Tăng, êm        57 lệnh   win 75%  PnL 175,276       góp 33% lãi gộp
+       Tăng, động      117 lệnh  win 72%  PnL 45,968        góp 18% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 311 lệnh = 3,110,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất +5.5% · p05 +43.1% · trung vị +77.3% · p95 +116.2% · tốt nhất +160.4%
+       sụt vốn:        P95 8.7% · xấu nhất 18.4% · xác suất cháy 0.0% · xác suất lỗ 0.0%
+       căn cứ kiểu vào lệnh: 51/153 lệnh mở thuận chiều biến động 24h trước đó
+   · 亿难贫 — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 1.91/lệnh · payoff 1.46 · lãi TB 3.46 / lỗ TB 2.36 · tổng PnL 953
+       hiệu chỉnh RR:  Sharpe 53.76 · Sortino 99.42 · Calmar 286.59 · hồi phục 14.27
+       nhịp giao dịch: 131.43 lệnh/ngày · giữ lệnh trung vị 63 phút · chuỗi thắng dài nhất 68 · chuỗi thua dài nhất 25
+       phân phối lệnh: trung vị 1 · độ lệch chuẩn 8 · skew 5.95 · kurtosis 53.00 · p05 -3 / p95 12 · KTC95 trung bình [1; 3]
+       vốn và sổ:      vốn tham chiếu 207,569 (WEEKLY_EQUITY_CURVE) · sổ phủ 4/427 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -157 · spread ×3 -154 · thanh khoản ½ -230 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        11 lệnh   win 18%  PnL -11           góp 0% lãi gộp nhưng lỗ ròng
+       Giảm, động      45 lệnh   win 73%  PnL 12            góp 2% lãi gộp
+       Đi ngang, êm    35 lệnh   win 49%  PnL 251           góp 24% lãi gộp
+       Đi ngang, động  14 lệnh   win 71%  PnL 18            góp 5% lãi gộp
+       Tăng, êm        50 lệnh   win 60%  PnL -43           góp 4% lãi gộp nhưng lỗ ròng
+       Tăng, động      342 lệnh  win 80%  PnL 725           góp 66% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 499 lệnh = 4,990,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -0.0% · p05 +0.2% · trung vị +0.4% · p95 +0.7% · tốt nhất +1.2%
+       sụt vốn:        P95 0.1% · xấu nhất 0.1% · xác suất cháy 0.0% · xác suất lỗ 0.0%
+       căn cứ kiểu vào lệnh: 110/435 lệnh mở thuận chiều biến động 24h trước đó
+   → Profit factor xiaojian888999 3.18 so với 亿难贫 4.03.
+
+── DEX/SOL ── ỔN ĐỊNH · BEARISH/NORMAL · thanh khoản DEEP · chất lượng dữ liệu 1.00
+   Vì: biến động thấp (phân vị 6)
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON SharpMine            77    4      27    0.72   1.57    59.4%    9      20k$     hai chiều, nghịch xu hướng · phủ pha 43%
+   YẾU HƠN   Valid-Launch-Monkey  54    7      72    1.09   0.26    1.2%     5      10k$     chỉ long, nghịch xu hướng · phủ pha 100%
+   · SharpMine — thông số đầy đủ:
+       hiệu suất:      kỳ vọng -143.12/lệnh · payoff 1.92 · lãi TB 1,359.14 / lỗ TB 706.47 · tổng PnL -11,020
+       hiệu chỉnh RR:  Sharpe 1.70 · Sortino 3.41 · Calmar 0.36 · hồi phục -0.66
+       nhịp giao dịch: 2.22 lệnh/ngày · giữ lệnh trung vị 105 phút · chuỗi thắng dài nhất 4 · chuỗi thua dài nhất 10
+       phân phối lệnh: trung vị -143 · độ lệch chuẩn 1,577 · skew 2.14 · kurtosis 12.61 · p05 -2,624 / p95 1,810 · KTC95 trung bình [-495; 209]
+       vốn và sổ:      vốn tham chiếu 123,281 (WEEKLY_EQUITY_CURVE) · sổ phủ 35/642 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -19,781 · spread ×3 -3,213 · thanh khoản ½ -4,819 → VULNERABLE
+     theo pha thị trường:
+       Giảm, êm        6 lệnh    win 50%  PnL 1,263         góp 5% lãi gộp
+       Giảm, động      1 lệnh    win 0%   PnL -167          góp 0% lãi gộp nhưng lỗ ròng
+       Đi ngang, êm    4 lệnh    win 50%  PnL 1,466         góp 8% lãi gộp
+       Đi ngang, động  2 lệnh    win 50%  PnL -1,371        góp 10% lãi gộp nhưng lỗ ròng
+       Tăng, êm        2 lệnh    win 50%  PnL -1,490        góp 2% lãi gộp nhưng lỗ ròng
+       Tăng, động      18 lệnh   win 17%  PnL -9,694        góp 49% lãi gộp nhưng lỗ ròng
+       Monte Carlo: 10,000 kịch bản × 77 lệnh = 770,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 20k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất -56.3% · p05 -29.0% · trung vị -8.5% · p95 +9.7% · tốt nhất +36.5%
+       sụt vốn:        P95 32.2% · xấu nhất 61.8% · xác suất cháy 0.0% · xác suất lỗ 76.9%
+       căn cứ kiểu vào lệnh: 3/30 lệnh mở thuận chiều biến động 24h trước đó
+   · Valid-Launch-Monkey — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 3.94/lệnh · payoff 0.42 · lãi TB 64.98 / lỗ TB 154.77 · tổng PnL 213
+       hiệu chỉnh RR:  Sharpe 0.28 · Sortino 0.18 · Calmar 2.58 · hồi phục 0.17
+       nhịp giao dịch: 1.01 lệnh/ngày · giữ lệnh trung vị 283 phút · chuỗi thắng dài nhất 12 · chuỗi thua dài nhất 3
+       phân phối lệnh: trung vị 27 · độ lệch chuẩn 146 · skew -1.64 · kurtosis 3.52 · p05 -356 / p95 156 · KTC95 trung bình [-35; 43]
+       vốn và sổ:      vốn tham chiếu 141,915 (WEEKLY_EQUITY_CURVE) · sổ phủ 53/562 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -1,161 · spread ×3 -517 · thanh khoản ½ -776 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        8 lệnh    win 88%  PnL 487           góp 19% lãi gộp
+       Giảm, động      2 lệnh    win 100% PnL 69            góp 3% lãi gộp
+       Đi ngang, êm    11 lệnh   win 91%  PnL 647           góp 26% lãi gộp
+       Đi ngang, động  2 lệnh    win 100% PnL 248           góp 10% lãi gộp
+       Tăng, êm        15 lệnh   win 60%  PnL 2             góp 23% lãi gộp
+       Tăng, động      16 lệnh   win 56%  PnL -1,241        góp 20% lãi gộp nhưng lỗ ròng
+       Monte Carlo: 10,000 kịch bản × 54 lệnh = 540,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 10k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất -3.0% · p05 -1.2% · trung vị +0.2% · p95 +1.4% · tốt nhất +2.5%
+       sụt vốn:        P95 1.7% · xấu nhất 3.3% · xác suất cháy 0.0% · xác suất lỗ 40.0%
+       căn cứ kiểu vào lệnh: 15/40 lệnh mở thuận chiều biến động 24h trước đó
+   → Profit factor SharpMine 0.72 so với Valid-Launch-Monkey 1.09.
+   → Valid-Launch-Monkey chỉ lãi trên sổ đã chốt: tính cả vị thế mở thì profit factor rơi xuống 0.26.
+
+── DEX/UNI ── ĐANG PHÁT TRIỂN · BULLISH/NORMAL · thanh khoản DEEP · chất lượng dữ liệu 1.00
+   Vì: xu hướng tăng
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON 01014588             167   13     70    1.62   1.64    11.8%    2      0        hai chiều, nghịch xu hướng · phủ pha 77%
+   YẾU HƠN   Ail.Wang             497   11     86    3.19   0.24    0.7%     67     244k$    chỉ short, nghịch xu hướng · phủ pha 54%
+   · 01014588 — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 532.63/lệnh · payoff 0.69 · lãi TB 1,978.68 / lỗ TB 2,851.14 · tổng PnL 88,949
+       hiệu chỉnh RR:  Sharpe 3.72 · Sortino 2.97 · Calmar 3.38 · hồi phục 2.08
+       nhịp giao dịch: 2.03 lệnh/ngày · giữ lệnh trung vị 1,268 phút · chuỗi thắng dài nhất 15 · chuỗi thua dài nhất 9
+       phân phối lệnh: trung vị 423 · độ lệch chuẩn 3,852 · skew -0.67 · kurtosis 5.42 · p05 -6,957 / p95 5,304 · KTC95 trung bình [-52; 1,117]
+       vốn và sổ:      vốn tham chiếu 403,694 (WEEKLY_EQUITY_CURVE) · sổ phủ 82/381 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -71,278 · spread ×3 -20,889 · thanh khoản ½ -31,334 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        24 lệnh   win 62%  PnL 35,197        góp 21% lãi gộp
+       Giảm, động      2 lệnh    win 100% PnL 6,578         góp 3% lãi gộp
+       Đi ngang, êm    7 lệnh    win 71%  PnL 7,605         góp 3% lãi gộp
+       Đi ngang, động  2 lệnh    win 50%  PnL 3,965         góp 6% lãi gộp
+       Tăng, êm        20 lệnh   win 80%  PnL 23,298        góp 12% lãi gộp
+       Tăng, động      74 lệnh   win 66%  PnL 7,423         góp 48% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 167 lệnh = 1,670,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -20.6% · p05 +2.2% · trung vị +22.2% · p95 +41.8% · tốt nhất +77.4%
+       sụt vốn:        P95 13.7% · xấu nhất 33.2% · xác suất cháy 0.0% · xác suất lỗ 3.2%
+       căn cứ kiểu vào lệnh: 23/90 lệnh mở thuận chiều biến động 24h trước đó
+   · Ail.Wang — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 64.97/lệnh · payoff 0.52 · lãi TB 110.08 / lỗ TB 210.18 · tổng PnL 32,291
+       hiệu chỉnh RR:  Sharpe 20.25 · Sortino 16.00 · Calmar 23.27 · hồi phục 4.31
+       nhịp giao dịch: 23.39 lệnh/ngày · giữ lệnh trung vị 336 phút · chuỗi thắng dài nhất 69 · chuỗi thua dài nhất 24
+       phân phối lệnh: trung vị 35 · độ lệch chuẩn 341 · skew 4.25 · kurtosis 83.64 · p05 -127 / p95 298 · KTC95 trung bình [35; 95]
+       vốn và sổ:      vốn tham chiếu 1,057,346 (WEEKLY_EQUITY_CURVE) · sổ phủ 21/972 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -7,356 · spread ×3 -2,781 · thanh khoản ½ -4,171 → SURVIVED
+     theo pha thị trường:
+       Giảm, động      10 lệnh   win 40%  PnL -1,114        góp 6% lãi gộp nhưng lỗ ròng
+       Đi ngang, động  6 lệnh    win 33%  PnL 2,037         góp 7% lãi gộp
+       Tăng, êm        5 lệnh    win 100% PnL 1,184         góp 3% lãi gộp
+       Tăng, động      248 lệnh  win 82%  PnL 15,658        góp 51% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 497 lệnh = 4,970,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 244k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất -0.9% · p05 +1.5% · trung vị +3.1% · p95 +4.7% · tốt nhất +7.2%
+       sụt vốn:        P95 0.9% · xấu nhất 2.3% · xác suất cháy 0.0% · xác suất lỗ 0.1%
+       căn cứ kiểu vào lệnh: 3/267 lệnh mở thuận chiều biến động 24h trước đó
+       pha thị trường đã có nhưng bot chưa từng trải: Giảm, êm, Đi ngang, êm
+   → Profit factor 01014588 1.62 so với Ail.Wang 3.19.
+   → Ail.Wang chỉ lãi trên sổ đã chốt: tính cả vị thế mở thì profit factor rơi xuống 0.24.
+
+── DEX/PEPE ── ĐANG PHÁT TRIỂN · BULLISH/NORMAL · thanh khoản DEEP · chất lượng dữ liệu 1.00
+   Vì: xu hướng tăng; dòng tiền chủ động mua
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   CHẠY NGON Dark-Wood-Dahlia     326   12     46    1.41   1.50    4.7%     40     14k$     hai chiều, nghịch xu hướng · phủ pha 42%
+   YẾU HƠN   Rude-Gems-Leopard    152   4      77    0.64   —       100.0%*  0      0        nghiêng short, nghịch xu hướng · phủ pha 100%
+   · Dark-Wood-Dahlia — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 63.38/lệnh · payoff 1.67 · lãi TB 478.95 / lỗ TB 286.44 · tổng PnL 20,663
+       hiệu chỉnh RR:  Sharpe 4.50 · Sortino 6.99 · Calmar 3.19 · hồi phục 2.61
+       nhịp giao dịch: 8.78 lệnh/ngày · giữ lệnh trung vị 1,008 phút · chuỗi thắng dài nhất 6 · chuỗi thua dài nhất 9
+       phân phối lệnh: trung vị -25 · độ lệch chuẩn 819 · skew 4.21 · kurtosis 46.28 · p05 -591 / p95 862 · KTC95 trung bình [-26; 152]
+       vốn và sổ:      vốn tham chiếu 235,783 (WEEKLY_EQUITY_CURVE) · sổ phủ 37/37 ngày dẫn · đối soát UNVERIFIED_REFERENCE · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -25,350 · spread ×3 -5,482 · thanh khoản ½ -8,223 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        10 lệnh   win 80%  PnL -247          góp 4% lãi gộp nhưng lỗ ròng
+       Giảm, động      14 lệnh   win 50%  PnL 6,576         góp 11% lãi gộp
+       Đi ngang, êm    7 lệnh    win 86%  PnL 245           góp 1% lãi gộp
+       Đi ngang, động  10 lệnh   win 60%  PnL 11,364        góp 17% lãi gộp
+       Tăng, êm        14 lệnh   win 29%  PnL -5,246        góp 2% lãi gộp nhưng lỗ ròng
+       Tăng, động      82 lệnh   win 45%  PnL 3,931         góp 26% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 326 lệnh = 3,260,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -12.3% · p05 -1.6% · trung vị +8.3% · p95 +21.2% · tốt nhất +45.4%
+       sụt vốn:        P95 6.4% · xấu nhất 13.1% · xác suất cháy 0.0% · xác suất lỗ 8.4%
+       căn cứ kiểu vào lệnh: 46/119 lệnh mở thuận chiều biến động 24h trước đó
+   · Rude-Gems-Leopard — thông số đầy đủ:
+       hiệu suất:      kỳ vọng -890.98/lệnh · payoff 0.19 · lãi TB 2,037.71 / lỗ TB 10,681.14 · tổng PnL -135,428
+       hiệu chỉnh RR:  Sharpe -2.28 · Sortino -1.18 · Calmar 0.08 · hồi phục -0.60
+       nhịp giao dịch: 1.67 lệnh/ngày · giữ lệnh trung vị 342 phút · chuỗi thắng dài nhất 27 · chuỗi thua dài nhất 14
+       phân phối lệnh: trung vị 819 · độ lệch chuẩn 7,766 · skew -2.56 · kurtosis 7.33 · p05 -20,912 / p95 4,874 · KTC95 trung bình [-2,126; 344]
+       vốn và sổ:      vốn tham chiếu 154,986 (WEEKLY_EQUITY_CURVE) · sổ phủ 91/123 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -186,920 · spread ×3 -44,245 · thanh khoản ½ -66,368 → LIQUIDATED
+     theo pha thị trường:
+       Giảm, êm        29 lệnh   win 83%  PnL -46,551       góp 15% lãi gộp nhưng lỗ ròng
+       Giảm, động      14 lệnh   win 79%  PnL 20,547        góp 9% lãi gộp
+       Đi ngang, êm    21 lệnh   win 62%  PnL -54,959       góp 9% lãi gộp nhưng lỗ ròng
+       Đi ngang, động  7 lệnh    win 100% PnL 10,567        góp 4% lãi gộp
+       Tăng, êm        28 lệnh   win 93%  PnL 42,836        góp 19% lãi gộp
+       Tăng, động      53 lệnh   win 68%  PnL -107,867      góp 43% lãi gộp nhưng lỗ ròng
+       Monte Carlo: 10,000 kịch bản × 152 lệnh = 1,520,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT
+       lợi nhuận/vốn:  xấu nhất -690.0% · p05 -294.8% · trung vị -82.0% · p95 +83.2% · tốt nhất +201.3%
+       sụt vốn:        P95 100.0% · xấu nhất 100.0% · xác suất cháy 55.9% · xác suất lỗ 77.1%
+       căn cứ kiểu vào lệnh: 6/130 lệnh mở thuận chiều biến động 24h trước đó
+   → Profit factor Dark-Wood-Dahlia 1.41 so với Rude-Gems-Leopard 0.64.
+   → Rude-Gems-Leopard: mức sụt vốn vượt vốn ghi nhận tại thời điểm đó nên con số phần trăm là sàn, không phải đo được.
+
+----------------------------------------------------------------------------------------------------------------------
+* = mức sụt vốn vượt vốn ghi nhận tại thời điểm đó, con số là sàn.
+· Mỗi asset gồm 1 bot chạy ngon và 1 bot cũng chạy nhưng kém hơn, chọn theo lợi nhuận thực hiện tại thời điểm quét.
+· Pha thị trường lấy tại thời điểm MỞ lệnh; lệnh trên instrument không có nến được tính là chưa rõ pha, không gộp vào pha nào.
+· Monte Carlo stationary bootstrap (Politis-Romano 1994), 10.000 kịch bản, mỗi kịch bản replay đúng số lệnh của chính bot. Mẫu CHỈ gồm lệnh đã chốt — vị thế đang mở cố ý không đưa vào, nên phần lỗ treo (nếu có) được nêu riêng chứ không trộn vào phân vị lợi nhuận.
+· Đây là quan sát, chưa phải phán quyết rủi ro — phán quyết ở bước 3.
+
+===================================================================================================================================================================
+BƯỚC 3 — CHẤM ĐIỂM VÀ XẾP LOẠI BOT (QC CORE)
+14/09/2026 07:43 UTC | 30 bot | RỦI RO càng thấp càng an toàn · CHẤT LƯỢNG càng cao càng tốt
+===================================================================================================================================================================
+#   TÊN BOT               ASSET      TRADE  WIN%  PF SỔ  PF CHỐT  SỤT VỐN  P95 ĐUÔI  RỦI RO  CHẤT LG  XẾP LOẠI       NHẬN XÉT                                      
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+1   King_GG               BTC/CEX    268    55    1.68   1.31     62.9%    66%       100.0   59.6     NGUY HIỂM      rủi ro đuôi mô phỏng cực đoan; kịch bản stress…
+     ↳ tính toán: PF 1.68 · DD 62.9% · P95 66% · cháy 1% · lỗ mở 411k$ · exp 20,782k$
+     ↳ nguyên nhân: Rủi ro đuôi cao: P95 sụt vốn 66%; đòn bẩy và exposure lớn: đòn bẩy 50x; chất lượng hiệu suất kém (điểm 80); vị thế lớn so với thanh khoản
+     (điểm 75).
+     ↳ rủi ro bị che: lỗ chưa chốt bằng 69% vốn
+     ↳ đề xuất: EMERGENCY_STOP
+2   Rude-Gems-Leopard     ETH/CEX    152    77    0.64   —        100.0%   100%      100.0   17.2     NGUY HIỂM      hành vi giao dịch hủy hoại; rủi ro đuôi mô phỏ…
+     ↳ tính toán: PF 0.64 · DD 100.0% · P95 100% · cháy 56%
+     ↳ nguyên nhân: Xác suất cháy tài khoản 56% trong 500 lệnh tới; rủi ro đuôi cao: P95 sụt vốn 100%; hành vi giao dịch nguy hiểm (điểm 95); sụt vốn sâu: tối đa
+     100.0%.
+     ↳ rủi ro bị che: sụt vốn vượt vốn ghi nhận nên chưa đo được thật
+     ↳ đề xuất: EMERGENCY_STOP
+3   Zs+++                 ETH/CEX    213    55    0.56   0.59     100.0%   100%      100.0   33.0     NGUY HIỂM      rủi ro đuôi mô phỏng cực đoan; kịch bản stress…
+     ↳ tính toán: PF 0.56 · DD 100.0% · P95 100% · cháy 50% · lỗ mở 21k$ · exp 2,719k$
+     ↳ nguyên nhân: Xác suất cháy tài khoản 50% trong 500 lệnh tới; rủi ro đuôi cao: P95 sụt vốn 100%; sụt vốn sâu: tối đa 100.0%; chất lượng hiệu suất kém (điểm
+     80).
+     ↳ rủi ro bị che: sụt vốn vượt vốn ghi nhận nên chưa đo được thật
+     ↳ đề xuất: EMERGENCY_STOP
+4   Quaint-SegWit-Laurel  SOL/CEX    33     58    0.33   0.29     21.4%    15%       88.0    35.4     NGUY HIỂM      hành vi giao dịch hủy hoại                    
+     ↳ tính toán: PF 0.33 · DD 21.4% · P95 15% · lỗ mở 4k$ · exp 60k$
+     ↳ nguyên nhân: Chất lượng hiệu suất kém (điểm 100); hành vi giao dịch nguy hiểm (điểm 100); phân phối lợi nhuận xấu (điểm 75); tập trung danh mục (điểm 64).
+     ↳ đề xuất: PAUSE
+5   xiaojian888999        BTC/CEX    311    73    3.18   2.78     7.8%     9%        88.0    89.1     NGUY HIỂM      hành vi giao dịch hủy hoại                    
+     ↳ tính toán: PF 3.18 · DD 7.8% · P95 9% · lỗ mở 31k$ · exp 1,505k$
+     ↳ nguyên nhân: Hành vi giao dịch nguy hiểm (điểm 100); tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60); vị thế lớn so với thanh khoản (điểm
+     60).
+     ↳ đề xuất: PAUSE
+6   01pp                  ETH/CEX    304    64    1.73   1.86     50.9%    29%       85.0    73.9     NGUY HIỂM      rủi ro đuôi mô phỏng cực đoan                 
+     ↳ tính toán: PF 1.73 · DD 50.9% · P95 29% · exp 718k$
+     ↳ nguyên nhân: Rủi ro đuôi cao: P95 sụt vốn 29%; sụt vốn sâu: tối đa 50.9%; tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     ↳ đề xuất: REDUCE
+7   FJ Investment         BTC/CEX    75     35    1.96   2.50     100.0%   34%       85.0    86.2     NGUY HIỂM      rủi ro đuôi mô phỏng cực đoan                 
+     ↳ tính toán: PF 1.96 · DD 100.0% · P95 34% · exp 975k$
+     ↳ nguyên nhân: Sụt vốn sâu: tối đa 100.0%; rủi ro đuôi cao: P95 sụt vốn 34%; ngược xu hướng thị trường (tăng); tập trung danh mục (điểm 64).
+     ↳ rủi ro bị che: sụt vốn vượt vốn ghi nhận nên chưa đo được thật
+     ↳ đề xuất: REDUCE
+8   Linxixi               BTC/CEX    68     53    1.37   1.48     18.1%    25%       85.0    78.5     NGUY HIỂM      rủi ro đuôi mô phỏng cực đoan                 
+     ↳ tính toán: PF 1.37 · DD 18.1% · P95 25% · exp 238k$
+     ↳ nguyên nhân: Rủi ro đuôi cao: P95 sụt vốn 25%; ngược xu hướng thị trường (tăng); tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     ↳ đề xuất: REDUCE
+9   Pure-Symbol-Yarrow    ETH/CEX    500    82    0.78   0.76     16.6%    43%       85.0    46.6     NGUY HIỂM      rủi ro đuôi mô phỏng cực đoan                 
+     ↳ tính toán: PF 0.78 · DD 16.6% · P95 43% · lỗ mở 1k$ · exp 75k$
+     ↳ nguyên nhân: Rủi ro đuôi cao: P95 sụt vốn 43%; ngược xu hướng thị trường (giảm); chất lượng hiệu suất kém (điểm 80); phân phối lợi nhuận xấu (điểm 75).
+     ↳ đề xuất: REDUCE
+10  SharpMine             ETH/CEX    77     27    0.72   1.57     59.4%    32%       85.0    59.3     NGUY HIỂM      rủi ro đuôi mô phỏng cực đoan                 
+     ↳ tính toán: PF 0.72 · DD 59.4% · P95 32% · lỗ mở 20k$ · exp 433k$
+     ↳ nguyên nhân: Sụt vốn sâu: tối đa 59.4%; rủi ro đuôi cao: P95 sụt vốn 32%; chất lượng hiệu suất kém (điểm 71); tập trung danh mục (điểm 64).
+     ↳ đề xuất: REDUCE
+11  k001                  ETH/CEX    207    56    0.88   0.89     20.8%    28%       85.0    39.1     NGUY HIỂM      rủi ro đuôi mô phỏng cực đoan                 
+     ↳ tính toán: PF 0.88 · DD 20.8% · P95 28% · lỗ mở 2k$ · exp 528k$
+     ↳ nguyên nhân: Rủi ro đuôi cao: P95 sụt vốn 28%; chất lượng hiệu suất kém (điểm 80); phân phối lợi nhuận xấu (điểm 75); ngược xu hướng thị trường (giảm).
+     ↳ đề xuất: REDUCE
+12  Ail.Wang              BTC/CEX    497    86    3.19   0.24     0.7%     1%        70.0    50.8     NGUY HIỂM      chốt hết sổ mở thì profit factor chỉ còn 0.24 
+     ↳ tính toán: PF 3.19→0.24 · DD 0.7% · P95 1% · lỗ mở 244k$ · exp 1,787k$
+     ↳ nguyên nhân: Đang ôm 243,611 USDT lỗ chưa chốt (23% vốn), chốt hết thì PF tụt từ 3.19 xuống 0.24; chất lượng hiệu suất kém (điểm 98); ngược xu hướng thị
+     trường (tăng); đòn bẩy và exposure lớn: đòn bẩy 50x.
+     ↳ rủi ro bị che: chốt hết sổ mở thì PF rơi từ 3.19 xuống 0.24; lỗ chưa chốt bằng 23% vốn
+     ↳ đề xuất: REDUCE
+13  Bare-Payee-Fox        LIT/CEX    81     100   —      1.19     0.0%     0%        70.0    65.0     NGUY HIỂM      lỗ chưa chốt bằng 25% vốn mà chưa từng cho thấ…
+     ↳ tính toán: PF —→1.19 · DD 0.0% · P95 0% · lỗ mở 53k$ · exp 707k$
+     ↳ nguyên nhân: Đang ôm 52,608 USDT lỗ chưa chốt (25% vốn), chưa từng chốt lỗ nên PF vô nghĩa; chốt hết thì PF chỉ còn 1.19; đòn bẩy và exposure lớn: đòn bẩy
+     20x; chất lượng hiệu suất kém (điểm 80); tập trung danh mục (điểm 64).
+     ↳ rủi ro bị che: chưa từng ghi nhận một lệnh lỗ nào; lỗ chưa chốt bằng 25% vốn
+     ↳ đề xuất: REDUCE
+14  ChinatownOG           BTC/CEX    81     79    13.89  0.71     3.0%     3%        70.0    54.4     NGUY HIỂM      chốt hết sổ mở thì profit factor chỉ còn 0.71 
+     ↳ tính toán: PF 13.89→0.71 · DD 3.0% · P95 3% · lỗ mở 62k$ · exp 760k$
+     ↳ nguyên nhân: Đang ôm 61,753 USDT lỗ chưa chốt (56% vốn), chốt hết thì PF tụt từ 13.89 xuống 0.71; chất lượng hiệu suất kém (điểm 100); ngược xu hướng thị
+     trường (tăng); đòn bẩy và exposure lớn: đòn bẩy 50x.
+     ↳ rủi ro bị che: chốt hết sổ mở thì PF rơi từ 13.89 xuống 0.71; lỗ chưa chốt bằng 56% vốn
+     ↳ đề xuất: REDUCE
+15  HaveARestin           ETH/CEX    143    92    11.12  0.16     0.5%     0%        70.0    54.5     NGUY HIỂM      chốt hết sổ mở thì profit factor chỉ còn 0.16 
+     ↳ tính toán: PF 11.12→0.16 · DD 0.5% · P95 0% · lỗ mở 86k$ · exp 441k$
+     ↳ nguyên nhân: Đang ôm 86,132 USDT lỗ chưa chốt (65% vốn), chốt hết thì PF tụt từ 11.12 xuống 0.16; chất lượng hiệu suất kém (điểm 100); ngược xu hướng thị
+     trường (giảm); đòn bẩy và exposure lớn: đòn bẩy 100x.
+     ↳ rủi ro bị che: chốt hết sổ mở thì PF rơi từ 11.12 xuống 0.16; lỗ chưa chốt bằng 65% vốn
+     ↳ đề xuất: REDUCE
+16  Valid-Launch-Monkey   ETH/CEX    54     72    1.09   0.26     1.2%     2%        70.0    51.6     NGUY HIỂM      chốt hết sổ mở thì profit factor chỉ còn 0.26 
+     ↳ tính toán: PF 1.09→0.26 · DD 1.2% · P95 2% · lỗ mở 10k$ · exp 42k$
+     ↳ nguyên nhân: Đang ôm 9,746 USDT lỗ chưa chốt (7% vốn), chốt hết thì PF tụt từ 1.09 xuống 0.26; chất lượng hiệu suất kém (điểm 82); phân phối lợi nhuận xấu
+     (điểm 75); tập trung danh mục (điểm 64).
+     ↳ rủi ro bị che: chốt hết sổ mở thì PF rơi từ 1.09 xuống 0.26
+     ↳ đề xuất: REDUCE
+17  脚本test              BTC/CEX    498    62    6.28   3.85     100.0%   11%       56.0    80.6     TIỀM ẨN        Số liệu bề mặt che mất rủi ro: sụt vốn vượt vố…
+     ↳ tính toán: PF 6.28 · DD 100.0% · P95 11% · lỗ mở 21k$ · exp 1,780k$
+     ↳ nguyên nhân: Đòn bẩy và exposure lớn: đòn bẩy 20x; chất lượng hiệu suất kém (điểm 71); sụt vốn sâu: tối đa 100.0%; tập trung danh mục (điểm 64).
+     ↳ rủi ro bị che: sụt vốn vượt vốn ghi nhận nên chưa đo được thật
+     ↳ đề xuất: BLOCK_NEW_TRADES
+18  xiaomijiahanyangzao   ETH/CEX    133    74    3.94   1.05     1.8%     2%        53.9    65.0     TIỀM ẨN        Điểm rủi ro 54 ở vùng giữa, chưa đủ an toàn để…
+     ↳ tính toán: PF 3.94→1.05 · DD 1.8% · P95 2% · lỗ mở 71k$ · exp 535k$
+     ↳ nguyên nhân: Đang ôm 70,816 USDT lỗ chưa chốt (13% vốn), chốt hết thì PF tụt từ 3.94 xuống 1.05; ngược xu hướng thị trường (giảm); đòn bẩy và exposure lớn:
+     đòn bẩy 40x; chất lượng hiệu suất kém (điểm 68).
+     ↳ đề xuất: BLOCK_NEW_TRADES
+19  Fly-000               SNDK/CEX   93     43    0.95   13.43    2.4%     2%        51.6    76.2     TIỀM ẨN        Điểm rủi ro 52 ở vùng giữa, chưa đủ an toàn để…
+     ↳ tính toán: PF 0.95 · DD 2.4% · P95 2% · lỗ mở 0k$ · exp 115k$
+     ↳ nguyên nhân: Chất lượng hiệu suất kém (điểm 80); rủi ro đuôi cao: P95 sụt vốn 2%; tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     ↳ đề xuất: BLOCK_NEW_TRADES
+20  RuiJie                ETH/CEX    300    93    41.52  9.99     0.2%     0%        41.2    74.8     TIỀM ẨN        Số liệu bề mặt che mất rủi ro: chưa từng chạy …
+     ↳ tính toán: PF 41.52 · DD 0.2% · P95 0% · lỗ mở 13k$ · exp 789k$
+     ↳ nguyên nhân: Ngược xu hướng thị trường (giảm); tập trung danh mục (điểm 64); vị thế lớn so với thanh khoản (điểm 60).
+     ↳ rủi ro bị che: chưa từng chạy qua pha giảm
+     ↳ đề xuất: WARN
+21  0xleek.eth            HYPE/CEX   55     60    1.74   1.72     13.1%    21%       40.5    78.4     TIỀM ẨN        Số liệu bề mặt che mất rủi ro: chưa từng chạy …
+     ↳ tính toán: PF 1.74 · DD 13.1% · P95 21% · lỗ mở 0k$ · exp 160k$
+     ↳ nguyên nhân: Ngược xu hướng thị trường (tăng); tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60); chiến lược không bền qua các pha thị trường
+     (điểm 60).
+     ↳ rủi ro bị che: chưa từng chạy qua pha giảm
+     ↳ đề xuất: WARN
+22  AI 量化新星 - 趋势策… BNB/CEX    71     34    2.23   2.25     15.1%    15%       37.2    78.4     TIỀM ẨN        Số liệu bề mặt che mất rủi ro: 83% lãi gộp chỉ…
+     ↳ tính toán: PF 2.23 · DD 15.1% · P95 15% · exp 14k$
+     ↳ nguyên nhân: Tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60); sụt vốn sâu: tối đa 15.1%.
+     ↳ rủi ro bị che: 83% lãi gộp chỉ đến từ một pha thị trường
+     ↳ đề xuất: WARN
+23  FrontierQuantTrader   XRP/CEX    77     64    3.28   —        1.6%     3%        21.7    88.4     TIỀM ẨN        Số liệu bề mặt che mất rủi ro: 95% lãi gộp chỉ…
+     ↳ tính toán: PF 3.28 · DD 1.6% · P95 3%
+     ↳ nguyên nhân: Tập trung danh mục (điểm 64).
+     ↳ rủi ro bị che: 95% lãi gộp chỉ đến từ một pha thị trường
+     ↳ đề xuất: MONITOR
+24  BTC策略               BTC/CEX    499    42    0.83   0.81     3.4%     6%        44.1    52.3     AN TOÀN        Rủi ro thấp (44), chất lượng mới ở mức trung b…
+     ↳ tính toán: PF 0.83 · DD 3.4% · P95 6% · lỗ mở 3k$ · exp 188k$
+     ↳ nguyên nhân: Chất lượng hiệu suất kém (điểm 80); rủi ro đuôi cao: P95 sụt vốn 6%; tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     ↳ đề xuất: WARN
+25  Proud-Peg-Basil       CRCL/CEX   58     66    2.52   1.09     1.7%     3%        48.5    69.4     TIỀM NĂNG      Rủi ro thấp (48) và chất lượng tốt (69)       
+     ↳ tính toán: PF 2.52→1.09 · DD 1.7% · P95 3% · lỗ mở 17k$ · exp 183k$
+     ↳ nguyên nhân: Đang ôm 16,652 USDT lỗ chưa chốt (3% vốn), chốt hết thì PF tụt từ 2.52 xuống 1.09; phân phối lợi nhuận xấu (điểm 75); tập trung danh mục (điểm
+     64); rủi ro đuôi cao: P95 sụt vốn 3%.
+     ↳ đề xuất: BLOCK_NEW_TRADES
+26  亿难贫                ETH/CEX    499    73    4.03   2.37     0.0%     0%        47.1    78.5     TIỀM NĂNG      Rủi ro thấp (47) và chất lượng tốt (78)       
+     ↳ tính toán: PF 4.03 · DD 0.0% · P95 0% · lỗ mở 0k$ · exp 12k$
+     ↳ nguyên nhân: Ngược xu hướng thị trường (giảm); hành vi giao dịch nguy hiểm (điểm 75); tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     ↳ đề xuất: BLOCK_NEW_TRADES
+27  Milies L              BTC/CEX    74     69    4.89   3.01     6.3%     5%        40.0    87.2     TIỀM NĂNG      Rủi ro thấp (40) và chất lượng tốt (87)       
+     ↳ tính toán: PF 4.89 · DD 6.3% · P95 5% · lỗ mở 23k$ · exp 926k$
+     ↳ nguyên nhân: Tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60); đòn bẩy và exposure lớn: đòn bẩy 100x; vị thế lớn so với thanh khoản (điểm
+     60).
+     ↳ đề xuất: WARN
+28  Dark-Wood-Dahlia      SNDK/CEX   326    46    1.41   1.50     4.7%     6%        38.4    85.4     TIỀM NĂNG      Rủi ro thấp (38) và chất lượng tốt (85)       
+     ↳ tính toán: PF 1.41 · DD 4.7% · P95 6% · lỗ mở 14k$ · exp 1,005k$
+     ↳ nguyên nhân: Đòn bẩy và exposure lớn: đòn bẩy 100x; tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     ↳ đề xuất: WARN
+29  Shallow-Pair-Frog     BTC/CEX    428    46    3.29   3.33     7.7%     9%        37.2    95.0     TIỀM NĂNG      Rủi ro thấp (37) và chất lượng tốt (95)       
+     ↳ tính toán: PF 3.29 · DD 7.7% · P95 9% · lỗ mở 1k$ · exp 307k$
+     ↳ nguyên nhân: Tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60); đòn bẩy và exposure lớn: đòn bẩy 100x.
+     ↳ đề xuất: WARN
+30  01014588              ETH/CEX    167    70    1.62   1.64     11.8%    14%       29.5    84.6     TIỀM NĂNG      Rủi ro thấp (29) và chất lượng tốt (85)       
+     ↳ tính toán: PF 1.62 · DD 11.8% · P95 14% · exp 78k$
+     ↳ nguyên nhân: Tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     ↳ đề xuất: MONITOR
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Phân loại: NGUY HIỂM: 16 | TIỀM ẨN: 7 | AN TOÀN: 1 | TIỀM NĂNG: 6
+Phân bố hạng rủi ro: NGHIÊM TRỌNG: 8 | THEO DÕI: 7 | CAO: 5 | NÂNG CAO: 5 | KHẨN CẤP: 3 | AN TOÀN: 2
+
+PHIẾU ĐÁNH GIÁ TỪNG BOT
+===================================================================================================================================================================
+[1] King_GG — BTC/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 59.6/100   ·   ĐIỂM RỦI RO: 100.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: EMERGENCY_STOP
+     Độ tin cậy của đánh giá: 63% · đối soát sổ lệnh UNVERIFIED_REFERENCE · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 268 lệnh đã chốt · thắng 55% · profit factor 1.68 · tổng lãi/lỗ 895,540 USDT · Sharpe 4.27 · sụt vốn sâu nhất 62.9%
+     ĐANG NẮM GIỮ: 2 vị thế đang mở · exposure 20,781,527 USDT · đòn bẩy 50x · lỗ chưa chốt 410,656 USDT · vốn tham chiếu 597,758 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 268 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +146.1% trên vốn, kịch bản tốt (p95) +312.9%, kịch bản
+     xấu (p05) +6.8%, XẤU NHẤT -147.8%. Sụt vốn P95 66%, xấu nhất 100%. Xác suất thua lỗ 4%, xác suất cháy tài khoản 1%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 97.7% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 49 ứng viên cùng asset, xác suất còn 39.5%. Cần tối thiểu 181 lệnh để tin được thành tích này, bot đang có
+     268 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       King_GG — BTC/CEX, 268 lệnh đã chốt, vốn tham chiếu 597,758 USDT, 3.7 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: King_GG đang ôm 410,656 USDT lỗ chưa chốt, bằng 69% vốn tham chiếu — tiền đã mất nhưng chưa ghi nhận vì vị thế còn mở, nên không xuất
+       hiện trong bất kỳ chỉ số nào (thắng 55%, profit factor 1.68, sụt vốn 62.9%). Bảng số cho thấy một bot đang ổn; tài khoản thật đã mất một phần vốn mà người
+       copy chưa biết.
+
+       CHỨNG MINH:
+       • Profit factor 1.68 (sổ đã chốt) → 1.31 (chốt cả sổ mở) — chốt hết sổ mở thì mất 22% lợi thế
+       • Lỗ chưa chốt 410,656 USDT = 69% vốn, trên 2 vị thế mở
+       • Kịch bản sốc (biến động 2x, spread 3x, thanh khoản 1/2): bị thanh lý
+       • Điểm rủi ro 100 đến từ sàn veto (bình quân 10 chiều chỉ 60.1): rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý
+       • Monte Carlo 10,000 kịch bản × 268 lệnh: trung vị +146.1% vốn, p05 +6.8%, xấu nhất -147.8%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 27.6%, xác suất lỗ 4%, xác suất cháy vốn 1%
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 60/100, rủi ro 100/100. Khuyến nghị: DỪNG NGAY, không copy trong mọi trường hợp. Độ tin cậy của chính đánh giá này chỉ
+       63%.
+
+     VÌ SAO XẾP LOẠI NÀY: rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý
+     VÌ SAO RỦI RO: Rủi ro đuôi cao: P95 sụt vốn 66%; đòn bẩy và exposure lớn: đòn bẩy 50x; chất lượng hiệu suất kém (điểm 80); vị thế lớn so với thanh khoản
+     (điểm 75).
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: lỗ chưa chốt bằng 69% vốn
+     Điểm 100.0 là mức tối đa do quy tắc khẩn cấp, bỏ qua bình quân 60.1. Veto kích hoạt bởi: rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý.
+       + Rủi ro đuôi 100/100 (trọng số 1.3) đóng góp 12.6 điểm
+       + Đòn bẩy / Exposure 95/100 (trọng số 1.1) đóng góp 10.1 điểm
+       + Chất lượng hiệu suất 80/100 (trọng số 1.0) đóng góp 7.8 điểm
+       + Rủi ro sụt vốn 65/100 (trọng số 1.1) đóng góp 6.9 điểm
+       − Hành vi giao dịch chỉ 30/100 (trọng số 1.2) kéo bình quân xuống
+       − Đồng thuận thị trường chỉ 10/100 (trọng số 1.2) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+
+[2] Rude-Gems-Leopard — ETH/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 17.2/100   ·   ĐIỂM RỦI RO: 100.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: EMERGENCY_STOP
+     Độ tin cậy của đánh giá: 95% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 152 lệnh đã chốt · thắng 77% · profit factor 0.64 · tổng lãi/lỗ -135,428 USDT · Sharpe -2.28 · sụt vốn sâu nhất 100.0%
+     ĐANG NẮM GIỮ: vốn tham chiếu 154,986 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 152 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi -82.0% trên vốn, kịch bản tốt (p95) +83.2%, kịch bản xấu
+     (p05) -294.8%, XẤU NHẤT -690.0%. Sụt vốn P95 100%, xấu nhất 100%. Xác suất thua lỗ 77%, xác suất cháy tài khoản 56%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 5.0%; sau khi trừ việc bot này được chọn là con tốt nhất trong 2 ứng viên cùng asset, xác suất còn 1.5%
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Rude-Gems-Leopard — ETH/CEX, 152 lệnh đã chốt, vốn tham chiếu 154,986 USDT, 1.7 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Rude-Gems-Leopard đang lỗ, không phải đang lãi: trên 152 lệnh đã chốt, kỳ vọng mỗi lệnh là -891 USDT, cộng dồn 135,428 USDT lỗ. Tỷ lệ
+       thắng 77% nghe ổn, nhưng mỗi lệnh thắng chỉ bằng 0.19 lần một lệnh thua, nên trông giỏi trên bảng tỷ lệ thắng mà vẫn lỗ đều trên tài khoản. Chiến lược đã
+       đủ lệnh để nói, và nó đang nói rằng nó mất tiền.
+
+       CHỨNG MINH:
+       • Profit factor 0.64
+       • Kịch bản sốc (biến động 2x, spread 3x, thanh khoản 1/2): bị thanh lý
+       • Điểm rủi ro 100 đến từ sàn veto (bình quân 10 chiều chỉ 56.1): hành vi giao dịch hủy hoại; rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh
+         lý
+       • Monte Carlo 10,000 kịch bản × 152 lệnh: trung vị -82.0% vốn, p05 -294.8%, xấu nhất -690.0%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 354.0%, xác suất lỗ 77%, xác suất cháy vốn 56%
+       • 152 lệnh, thắng 77%, payoff 0.19 → một lệnh thua xoá 5.2 lệnh thắng
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 17/100, rủi ro 100/100. Khuyến nghị: DỪNG NGAY, không copy trong mọi trường hợp. Điều kiện xem xét lại: xác suất cháy tài
+       khoản trong mô phỏng giảm xuống dưới 5%.
+
+     VÌ SAO XẾP LOẠI NÀY: hành vi giao dịch hủy hoại; rủi ro đuôi mô phỏng cực đoan
+     VÌ SAO RỦI RO: Xác suất cháy tài khoản 56% trong 500 lệnh tới; rủi ro đuôi cao: P95 sụt vốn 100%; hành vi giao dịch nguy hiểm (điểm 95); sụt vốn sâu: tối đa
+     100.0%.
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: sụt vốn vượt vốn ghi nhận nên chưa đo được thật
+     Điểm 100.0 là mức tối đa do quy tắc khẩn cấp, bỏ qua bình quân 56.1. Veto kích hoạt bởi: hành vi giao dịch hủy hoại; rủi ro đuôi mô phỏng cực đoan; kịch bản
+     stress dẫn tới thanh lý.
+       + Rủi ro đuôi 100/100 (trọng số 1.3) đóng góp 12.6 điểm
+       + Hành vi giao dịch 95/100 (trọng số 1.2) đóng góp 11.1 điểm
+       + Rủi ro sụt vốn 90/100 (trọng số 1.1) đóng góp 9.6 điểm
+       + Chất lượng hiệu suất 80/100 (trọng số 1.0) đóng góp 7.8 điểm
+       − Độ bền chiến lược qua các pha chỉ 25/100 (trọng số 0.8) kéo bình quân xuống
+       − Đồng thuận thị trường chỉ 5/100 (trọng số 1.2) kéo bình quân xuống
+       − Đòn bẩy / Exposure chỉ 5/100 (trọng số 1.1) kéo bình quân xuống
+       − Thanh khoản / Khớp lệnh chỉ 5/100 (trọng số 0.9) kéo bình quân xuống
+
+[3] Zs+++ — ETH/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 33.0/100   ·   ĐIỂM RỦI RO: 100.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: EMERGENCY_STOP
+     Độ tin cậy của đánh giá: 68% · đối soát sổ lệnh UNVERIFIED_REFERENCE · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 213 lệnh đã chốt · thắng 55% · profit factor 0.56 · tổng lãi/lỗ -231,725 USDT · Sharpe -3.93 · sụt vốn sâu nhất 100.0%
+     ĐANG NẮM GIỮ: 22 vị thế đang mở · exposure 2,719,459 USDT · đòn bẩy 100x · lỗ chưa chốt 21,246 USDT · vốn tham chiếu 263,306 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 213 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi -81.9% trên vốn, kịch bản tốt (p95) +49.1%, kịch bản xấu
+     (p05) -249.1%, XẤU NHẤT -534.5%. Sụt vốn P95 100%, xấu nhất 100%. Xác suất thua lỗ 83%, xác suất cháy tài khoản 50%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 1.2%; sau khi trừ việc bot này được chọn là con tốt nhất trong 11 ứng viên cùng asset, xác suất còn
+     0.0%
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Zs+++ — ETH/CEX, 213 lệnh đã chốt, vốn tham chiếu 263,306 USDT, 2.4 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Zs+++ đang lỗ, không phải đang lãi: trên 213 lệnh đã chốt, kỳ vọng mỗi lệnh là -1,088 USDT, cộng dồn 231,725 USDT lỗ. Chiến lược đã đủ
+       lệnh để nói, và nó đang nói rằng nó mất tiền.
+
+       CHỨNG MINH:
+       • Profit factor 0.56 (sổ đã chốt) → 0.59 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 21,246 USDT = 8% vốn, trên 22 vị thế mở
+       • Kịch bản sốc (biến động 2x, spread 3x, thanh khoản 1/2): bị thanh lý
+       • Điểm rủi ro 100 đến từ sàn veto (bình quân 10 chiều chỉ 70.1): rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý
+       • Monte Carlo 10,000 kịch bản × 213 lệnh: trung vị -81.9% vốn, p05 -249.1%, xấu nhất -534.5%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 297.2%, xác suất lỗ 83%, xác suất cháy vốn 50%
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 33/100, rủi ro 100/100. Khuyến nghị: DỪNG NGAY, không copy trong mọi trường hợp. Điều kiện xem xét lại: xác suất cháy tài
+       khoản trong mô phỏng giảm xuống dưới 5%. Độ tin cậy của chính đánh giá này chỉ 68%.
+
+     VÌ SAO XẾP LOẠI NÀY: rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý
+     VÌ SAO RỦI RO: Xác suất cháy tài khoản 50% trong 500 lệnh tới; rủi ro đuôi cao: P95 sụt vốn 100%; sụt vốn sâu: tối đa 100.0%; chất lượng hiệu suất kém (điểm
+     80).
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: sụt vốn vượt vốn ghi nhận nên chưa đo được thật
+     Điểm 100.0 là mức tối đa do quy tắc khẩn cấp, bỏ qua bình quân 70.1. Veto kích hoạt bởi: rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý.
+       + Rủi ro đuôi 100/100 (trọng số 1.3) đóng góp 12.6 điểm
+       + Rủi ro sụt vốn 90/100 (trọng số 1.1) đóng góp 9.6 điểm
+       + Chất lượng hiệu suất 80/100 (trọng số 1.0) đóng góp 7.8 điểm
+       + Chất lượng lợi nhuận / R 75/100 (trọng số 0.9) đóng góp 6.6 điểm
+       − 1 chiều thiếu bằng chứng được tính trung tính 50 điểm, không đẩy điểm lên cũng không kéo xuống
+
+[4] Quaint-SegWit-Laurel — SOL/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 35.4/100   ·   ĐIỂM RỦI RO: 88.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: PAUSE
+     Độ tin cậy của đánh giá: 61% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 33 lệnh đã chốt · thắng 58% · profit factor 0.33 · tổng lãi/lỗ -12,708 USDT · Sharpe -3.86 · sụt vốn sâu nhất 21.4%
+     ĐANG NẮM GIỮ: 8 vị thế đang mở · exposure 59,538 USDT · đòn bẩy 20x · lỗ chưa chốt 4,481 USDT · vốn tham chiếu 166,769 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 33 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi -7.5% trên vốn, kịch bản tốt (p95) -0.7%, kịch bản xấu
+     (p05) -14.9%, XẤU NHẤT -25.0%. Sụt vốn P95 15%, xấu nhất 25%. Xác suất thua lỗ 97%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 1.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 2 ứng viên cùng asset, xác suất còn 0.2%
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Quaint-SegWit-Laurel — SOL/CEX, 33 lệnh đã chốt, vốn tham chiếu 166,769 USDT, 0.4 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Quaint-SegWit-Laurel đang lỗ, không phải đang lãi: trên 33 lệnh đã chốt, kỳ vọng mỗi lệnh là -385 USDT, cộng dồn 12,708 USDT lỗ. Chiến
+       lược đã đủ lệnh để nói, và nó đang nói rằng nó mất tiền.
+
+       CHỨNG MINH:
+       • Profit factor 0.33 (sổ đã chốt) → 0.29 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 4,481 USDT = 3% vốn, trên 8 vị thế mở
+       • Điểm rủi ro 88 đến từ sàn veto (bình quân 10 chiều chỉ 59.2): hành vi giao dịch hủy hoại
+       • Monte Carlo 10,000 kịch bản × 33 lệnh: trung vị -7.5% vốn, p05 -14.9%, xấu nhất -25.0%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 17.0%, xác suất lỗ 97%
+       • 33 lệnh, thắng 58%, payoff 0.24 → một lệnh thua xoá 4.1 lệnh thắng
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 35/100, rủi ro 88/100. Khuyến nghị: TẠM DỪNG copy cho tới khi bot tự xử lý xong phần rủi ro bên dưới. Độ tin cậy của chính
+       đánh giá này chỉ 61%.
+
+     VÌ SAO XẾP LOẠI NÀY: hành vi giao dịch hủy hoại
+     VÌ SAO RỦI RO: Chất lượng hiệu suất kém (điểm 100); hành vi giao dịch nguy hiểm (điểm 100); phân phối lợi nhuận xấu (điểm 75); tập trung danh mục (điểm 64).
+     Điểm 88.0 đến từ sàn veto 88, không phải bình quân: bình quân gia quyền 10 chiều chỉ 59.2. Veto kích hoạt bởi: hành vi giao dịch hủy hoại.
+       + Hành vi giao dịch 100/100 (trọng số 1.2) đóng góp 11.7 điểm
+       + Chất lượng hiệu suất 100/100 (trọng số 1.0) đóng góp 9.7 điểm
+       + Chất lượng lợi nhuận / R 75/100 (trọng số 0.9) đóng góp 6.6 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Thanh khoản / Khớp lệnh chỉ 15/100 (trọng số 0.9) kéo bình quân xuống
+       − 1 chiều thiếu bằng chứng được tính trung tính 50 điểm, không đẩy điểm lên cũng không kéo xuống
+
+[5] xiaojian888999 — BTC/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 89.1/100   ·   ĐIỂM RỦI RO: 88.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: PAUSE
+     Độ tin cậy của đánh giá: 70% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 311 lệnh đã chốt · thắng 73% · profit factor 3.18 · tổng lãi/lỗ 385,509 USDT · Sharpe 10.57 · sụt vốn sâu nhất 7.8%
+     ĐANG NẮM GIỮ: 16 vị thế đang mở · exposure 1,504,996 USDT · đòn bẩy 10x · lỗ chưa chốt 30,573 USDT · vốn tham chiếu 490,951 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 311 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +77.3% trên vốn, kịch bản tốt (p95) +116.2%, kịch bản xấu
+     (p05) +43.1%, XẤU NHẤT +5.5%. Sụt vốn P95 9%, xấu nhất 18%. Xác suất thua lỗ 0%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0%; sau khi trừ việc bot này được chọn là con tốt nhất trong 47 ứng viên cùng asset, xác suất còn
+     100.0%. Cần tối thiểu 24 lệnh để tin được thành tích này, bot đang có 311 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       xiaojian888999 — BTC/CEX, 311 lệnh đã chốt, vốn tham chiếu 490,951 USDT, 3.4 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: xiaojian888999 bị chặn bởi luật veto, không phải bởi điểm bình quân: hành vi giao dịch hủy hoại. Veto tồn tại để một lỗi đủ nặng không
+       bị điểm trung bình đẹp che đi — bình quân 10 chiều vẫn là 43.4, nhưng chừng nào lỗi này còn thì bot vẫn không nên copy.
+
+       CHỨNG MINH:
+       • Profit factor 3.18 (sổ đã chốt) → 2.78 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 30,573 USDT = 6% vốn, trên 16 vị thế mở
+       • Điểm rủi ro 88 đến từ sàn veto (bình quân 10 chiều chỉ 43.4): hành vi giao dịch hủy hoại
+       • Monte Carlo 10,000 kịch bản × 311 lệnh: trung vị +77.3% vốn, p05 +43.1%, xấu nhất +5.5%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 35.0%, xác suất lỗ 0%
+       • 311 lệnh, thắng 73%, payoff 1.16
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 89/100, rủi ro 88/100. Khuyến nghị: TẠM DỪNG copy cho tới khi bot tự xử lý xong phần rủi ro bên dưới.
+
+     VÌ SAO XẾP LOẠI NÀY: hành vi giao dịch hủy hoại
+     VÌ SAO RỦI RO: Hành vi giao dịch nguy hiểm (điểm 100); tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60); vị thế lớn so với thanh khoản (điểm
+     60).
+     Điểm 88.0 đến từ sàn veto 88, không phải bình quân: bình quân gia quyền 10 chiều chỉ 43.4. Veto kích hoạt bởi: hành vi giao dịch hủy hoại.
+       + Hành vi giao dịch 100/100 (trọng số 1.2) đóng góp 11.7 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Thanh khoản / Khớp lệnh 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Đồng thuận thị trường chỉ 30/100 (trọng số 1.2) kéo bình quân xuống
+       − Đòn bẩy / Exposure chỉ 30/100 (trọng số 1.1) kéo bình quân xuống
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+
+[6] 01pp — ETH/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 73.9/100   ·   ĐIỂM RỦI RO: 85.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 90% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 304 lệnh đã chốt · thắng 64% · profit factor 1.73 · tổng lãi/lỗ 133,112 USDT · Sharpe 4.37 · sụt vốn sâu nhất 50.9%
+     ĐANG NẮM GIỮ: 6 vị thế đang mở · exposure 717,821 USDT · đòn bẩy 50x · vốn tham chiếu 157,074 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 304 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +84.8% trên vốn, kịch bản tốt (p95) +146.5%, kịch bản xấu
+     (p05) +22.0%, XẤU NHẤT -55.5%. Sụt vốn P95 29%, xấu nhất 74%. Xác suất thua lỗ 1%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 99.3%; sau khi trừ việc bot này được chọn là con tốt nhất trong 4 ứng viên cùng asset, xác suất còn
+     92.2%. Cần tối thiểu 135 lệnh để tin được thành tích này, bot đang có 304 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       01pp — ETH/CEX, 304 lệnh đã chốt, vốn tham chiếu 157,074 USDT, 4.1 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: 01pp bị chặn bởi luật veto, không phải bởi điểm bình quân: rủi ro đuôi mô phỏng cực đoan. Veto tồn tại để một lỗi đủ nặng không bị
+       điểm trung bình đẹp che đi — bình quân 10 chiều vẫn là 47.8, nhưng chừng nào lỗi này còn thì bot vẫn không nên copy.
+
+       CHỨNG MINH:
+       • Profit factor 1.73 (sổ đã chốt) → 1.86 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 47.8): rủi ro đuôi mô phỏng cực đoan
+       • Monte Carlo 10,000 kịch bản × 304 lệnh: trung vị +84.8% vốn, p05 +22.0%, xấu nhất -55.5%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 7.0%, xác suất lỗ 1%
+       • 304 lệnh, thắng 64%, payoff 0.97
+       • Sụt vốn thực tế 50.9%, Sharpe 4.37, chuỗi thua dài nhất 17 lệnh
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 74/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy.
+
+     VÌ SAO XẾP LOẠI NÀY: rủi ro đuôi mô phỏng cực đoan
+     VÌ SAO RỦI RO: Rủi ro đuôi cao: P95 sụt vốn 29%; sụt vốn sâu: tối đa 50.9%; tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     Điểm 85.0 đến từ sàn veto 85, không phải bình quân: bình quân gia quyền 10 chiều chỉ 47.8. Veto kích hoạt bởi: rủi ro đuôi mô phỏng cực đoan.
+       + Rủi ro đuôi 95/100 (trọng số 1.3) đóng góp 12.0 điểm
+       + Rủi ro sụt vốn 65/100 (trọng số 1.1) đóng góp 6.9 điểm
+       + Đòn bẩy / Exposure 60/100 (trọng số 1.1) đóng góp 6.4 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       − Đồng thuận thị trường chỉ 10/100 (trọng số 1.2) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+       − Chất lượng hiệu suất chỉ 5/100 (trọng số 1.0) kéo bình quân xuống
+
+[7] FJ Investment — BTC/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 86.2/100   ·   ĐIỂM RỦI RO: 85.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 69% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 75 lệnh đã chốt · thắng 35% · profit factor 1.96 · tổng lãi/lỗ 59,240 USDT · Sharpe 0.91 · sụt vốn sâu nhất 100.0%
+     ĐANG NẮM GIỮ: 5 vị thế đang mở · exposure 975,343 USDT · đòn bẩy 30x · vốn tham chiếu 125,073 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 75 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +40.9% trên vốn, kịch bản tốt (p95) +152.6%, kịch bản xấu
+     (p05) -29.0%, XẤU NHẤT -55.8%. Sụt vốn P95 34%, xấu nhất 60%. Xác suất thua lỗ 25%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 95.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 47 ứng viên cùng asset, xác suất còn 27.2%. Cần tối thiểu 75 lệnh để tin được thành tích này, bot đang có 75
+     — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       FJ Investment — BTC/CEX, 75 lệnh đã chốt, vốn tham chiếu 125,073 USDT, 0.9 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: FJ Investment có thành tích trông khả quan (thắng 35%, profit factor 1.96, sụt vốn 100.0%), nhưng được chọn vì là con tốt nhất trong
+       47 ứng viên cùng asset — chọn giỏi nhất từ nhiều ứng viên luôn có phần may mắn. Trừ phần đó theo Deflated Sharpe, xác suất bot thật sự có lợi thế chỉ còn
+       27.2%, gần mức tung đồng xu.
+
+       CHỨNG MINH:
+       • Profit factor 1.96 (sổ đã chốt) → 2.50 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 62.5): rủi ro đuôi mô phỏng cực đoan
+       • Monte Carlo 10,000 kịch bản × 75 lệnh: trung vị +40.9% vốn, p05 -29.0%, xấu nhất -55.8%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 35.9%, xác suất lỗ 25%
+       • 75 lệnh, thắng 35%, payoff 3.69 → lệnh thắng lớn hơn hẳn lệnh thua
+       • Sụt vốn thực tế 100.0%, Sharpe 0.91, chuỗi thua dài nhất 9 lệnh
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 86/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Độ tin cậy của chính đánh giá này chỉ 69%.
+
+     VÌ SAO XẾP LOẠI NÀY: rủi ro đuôi mô phỏng cực đoan
+     VÌ SAO RỦI RO: Sụt vốn sâu: tối đa 100.0%; rủi ro đuôi cao: P95 sụt vốn 34%; ngược xu hướng thị trường (tăng); tập trung danh mục (điểm 64).
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: sụt vốn vượt vốn ghi nhận nên chưa đo được thật
+     Điểm 85.0 đến từ sàn veto 85, không phải bình quân: bình quân gia quyền 10 chiều chỉ 62.5. Veto kích hoạt bởi: rủi ro đuôi mô phỏng cực đoan.
+       + Rủi ro đuôi 100/100 (trọng số 1.3) đóng góp 12.6 điểm
+       + Rủi ro sụt vốn 100/100 (trọng số 1.1) đóng góp 10.7 điểm
+       + Đồng thuận thị trường 80/100 (trọng số 1.2) đóng góp 9.3 điểm
+       + Đòn bẩy / Exposure 60/100 (trọng số 1.1) đóng góp 6.4 điểm
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+       − Chất lượng hiệu suất chỉ 5/100 (trọng số 1.0) kéo bình quân xuống
+
+[8] Linxixi — BTC/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 78.5/100   ·   ĐIỂM RỦI RO: 85.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 68% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 68 lệnh đã chốt · thắng 53% · profit factor 1.37 · tổng lãi/lỗ 31,468 USDT · Sharpe 1.57 · sụt vốn sâu nhất 18.1%
+     ĐANG NẮM GIỮ: 3 vị thế đang mở · exposure 238,283 USDT · đòn bẩy 20x · vốn tham chiếu 287,528 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 68 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +10.3% trên vốn, kịch bản tốt (p95) +42.9%, kịch bản xấu
+     (p05) -18.0%, XẤU NHẤT -54.7%. Sụt vốn P95 25%, xấu nhất 55%. Xác suất thua lỗ 29%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 77.4% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 2 ứng viên cùng asset, xác suất còn 59.1%. Cần tối thiểu 322 lệnh để tin được thành tích này, bot đang có 68
+     — còn thiếu 254
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Linxixi — BTC/CEX, 68 lệnh đã chốt, vốn tham chiếu 287,528 USDT, 0.8 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Linxixi có thành tích trông khả quan (thắng 53%, profit factor 1.37, sụt vốn 18.1%), nhưng được chọn vì là con tốt nhất trong 2 ứng
+       viên cùng asset — chọn giỏi nhất từ nhiều ứng viên luôn có phần may mắn. Trừ phần đó theo Deflated Sharpe, xác suất bot thật sự có lợi thế chỉ còn 59.1%,
+       gần mức tung đồng xu.
+
+       CHỨNG MINH:
+       • Profit factor 1.37 (sổ đã chốt) → 1.48 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 49.9): rủi ro đuôi mô phỏng cực đoan
+       • Monte Carlo 10,000 kịch bản × 68 lệnh: trung vị +10.3% vốn, p05 -18.0%, xấu nhất -54.7%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 24.3%, xác suất lỗ 29%
+       • 68 lệnh, thắng 53%, payoff 1.21
+       • Sụt vốn thực tế 18.1%, Sharpe 1.57, chuỗi thua dài nhất 6 lệnh
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 78/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: có thêm khoảng 254 lệnh nữa để đủ cơ
+       sở thống kê. Độ tin cậy của chính đánh giá này chỉ 68%.
+
+     VÌ SAO XẾP LOẠI NÀY: rủi ro đuôi mô phỏng cực đoan
+     VÌ SAO RỦI RO: Rủi ro đuôi cao: P95 sụt vốn 25%; ngược xu hướng thị trường (tăng); tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     Điểm 85.0 đến từ sàn veto 85, không phải bình quân: bình quân gia quyền 10 chiều chỉ 49.9. Veto kích hoạt bởi: rủi ro đuôi mô phỏng cực đoan.
+       + Rủi ro đuôi 85/100 (trọng số 1.3) đóng góp 10.7 điểm
+       + Đồng thuận thị trường 80/100 (trọng số 1.2) đóng góp 9.3 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+       − Chất lượng hiệu suất chỉ 5/100 (trọng số 1.0) kéo bình quân xuống
+
+[9] Pure-Symbol-Yarrow — ETH/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 46.6/100   ·   ĐIỂM RỦI RO: 85.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 69% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 500 lệnh đã chốt · thắng 82% · profit factor 0.78 · tổng lãi/lỗ -10,424 USDT · Sharpe -2.15 · sụt vốn sâu nhất 16.6%
+     ĐANG NẮM GIỮ: 3 vị thế đang mở · exposure 74,996 USDT · đòn bẩy 100x · lỗ chưa chốt 1,421 USDT · vốn tham chiếu 89,911 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 500 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi -10.4% trên vốn, kịch bản tốt (p95) +9.6%, kịch bản xấu
+     (p05) -37.8%, XẤU NHẤT -82.9%. Sụt vốn P95 43%, xấu nhất 88%. Xác suất thua lỗ 78%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 17.8% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 49 ứng viên cùng asset, xác suất còn 0.1%
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Pure-Symbol-Yarrow — ETH/CEX, 500 lệnh đã chốt, vốn tham chiếu 89,911 USDT, 11.0 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Pure-Symbol-Yarrow đang lỗ, không phải đang lãi: trên 500 lệnh đã chốt, kỳ vọng mỗi lệnh là -21 USDT, cộng dồn 10,424 USDT lỗ. Tỷ lệ
+       thắng 82% nghe ổn, nhưng mỗi lệnh thắng chỉ bằng 0.18 lần một lệnh thua, nên trông giỏi trên bảng tỷ lệ thắng mà vẫn lỗ đều trên tài khoản. Chiến lược đã
+       đủ lệnh để nói, và nó đang nói rằng nó mất tiền.
+
+       CHỨNG MINH:
+       • Profit factor 0.78 (sổ đã chốt) → 0.76 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 1,421 USDT = 2% vốn, trên 3 vị thế mở
+       • Kịch bản sốc (biến động 2x, spread 3x, thanh khoản 1/2): dễ tổn thương
+       • Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 63.5): rủi ro đuôi mô phỏng cực đoan
+       • Monte Carlo 10,000 kịch bản × 500 lệnh: trung vị -10.4% vốn, p05 -37.8%, xấu nhất -82.9%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 46.0%, xác suất lỗ 78%
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 47/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Độ tin cậy của chính đánh giá này chỉ 69%.
+
+     VÌ SAO XẾP LOẠI NÀY: rủi ro đuôi mô phỏng cực đoan
+     VÌ SAO RỦI RO: Rủi ro đuôi cao: P95 sụt vốn 43%; ngược xu hướng thị trường (giảm); chất lượng hiệu suất kém (điểm 80); phân phối lợi nhuận xấu (điểm 75).
+     Điểm 85.0 đến từ sàn veto 85, không phải bình quân: bình quân gia quyền 10 chiều chỉ 63.5. Veto kích hoạt bởi: rủi ro đuôi mô phỏng cực đoan.
+       + Rủi ro đuôi 100/100 (trọng số 1.3) đóng góp 12.6 điểm
+       + Đồng thuận thị trường 80/100 (trọng số 1.2) đóng góp 9.3 điểm
+       + Chất lượng hiệu suất 80/100 (trọng số 1.0) đóng góp 7.8 điểm
+       + Rủi ro sụt vốn 65/100 (trọng số 1.1) đóng góp 6.9 điểm
+       − Thanh khoản / Khớp lệnh chỉ 15/100 (trọng số 0.9) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+
+[10] SharpMine — ETH/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 59.3/100   ·   ĐIỂM RỦI RO: 85.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 64% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 77 lệnh đã chốt · thắng 27% · profit factor 0.72 · tổng lãi/lỗ -11,020 USDT · Sharpe 1.70 · sụt vốn sâu nhất 59.4%
+     ĐANG NẮM GIỮ: 9 vị thế đang mở · exposure 432,763 USDT · đòn bẩy 50x · lỗ chưa chốt 19,799 USDT · vốn tham chiếu 123,281 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 77 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi -8.5% trên vốn, kịch bản tốt (p95) +9.7%, kịch bản xấu
+     (p05) -29.0%, XẤU NHẤT -56.3%. Sụt vốn P95 32%, xấu nhất 62%. Xác suất thua lỗ 77%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 23.7% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 18 ứng viên cùng asset, xác suất còn 0.5%
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       SharpMine — ETH/CEX, 77 lệnh đã chốt, vốn tham chiếu 123,281 USDT, 2.2 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: SharpMine đang lỗ, không phải đang lãi: trên 77 lệnh đã chốt, kỳ vọng mỗi lệnh là -143 USDT, cộng dồn 11,020 USDT lỗ. Chiến lược đã đủ
+       lệnh để nói, và nó đang nói rằng nó mất tiền.
+
+       CHỨNG MINH:
+       • Profit factor 0.72 (sổ đã chốt) → 1.57 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 19,799 USDT = 16% vốn, trên 9 vị thế mở
+       • Kịch bản sốc (biến động 2x, spread 3x, thanh khoản 1/2): dễ tổn thương
+       • Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 63.3): rủi ro đuôi mô phỏng cực đoan
+       • Monte Carlo 10,000 kịch bản × 77 lệnh: trung vị -8.5% vốn, p05 -29.0%, xấu nhất -56.3%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 34.9%, xác suất lỗ 77%
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 59/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Độ tin cậy của chính đánh giá này chỉ 64%.
+
+     VÌ SAO XẾP LOẠI NÀY: rủi ro đuôi mô phỏng cực đoan
+     VÌ SAO RỦI RO: Sụt vốn sâu: tối đa 59.4%; rủi ro đuôi cao: P95 sụt vốn 32%; chất lượng hiệu suất kém (điểm 71); tập trung danh mục (điểm 64).
+     Điểm 85.0 đến từ sàn veto 85, không phải bình quân: bình quân gia quyền 10 chiều chỉ 63.3. Veto kích hoạt bởi: rủi ro đuôi mô phỏng cực đoan.
+       + Rủi ro đuôi 100/100 (trọng số 1.3) đóng góp 12.6 điểm
+       + Rủi ro sụt vốn 100/100 (trọng số 1.1) đóng góp 10.7 điểm
+       + Chất lượng hiệu suất 71/100 (trọng số 1.0) đóng góp 6.9 điểm
+       + Đòn bẩy / Exposure 60/100 (trọng số 1.1) đóng góp 6.4 điểm
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+       − 1 chiều thiếu bằng chứng được tính trung tính 50 điểm, không đẩy điểm lên cũng không kéo xuống
+
+[11] k001 — ETH/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 39.1/100   ·   ĐIỂM RỦI RO: 85.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 86% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 207 lệnh đã chốt · thắng 56% · profit factor 0.88 · tổng lãi/lỗ -16,061 USDT · Sharpe -0.59 · sụt vốn sâu nhất 20.8%
+     ĐANG NẮM GIỮ: 11 vị thế đang mở · exposure 527,562 USDT · đòn bẩy 10x · lỗ chưa chốt 2,097 USDT · vốn tham chiếu 444,306 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 207 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi -3.3% trên vốn, kịch bản tốt (p95) +17.0%, kịch bản xấu
+     (p05) -24.1%, XẤU NHẤT -51.6%. Sụt vốn P95 28%, xấu nhất 52%. Xác suất thua lỗ 61%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 29.3%; sau khi trừ việc bot này được chọn là con tốt nhất trong 49 ứng viên cùng asset, xác suất còn
+     0.2%
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       k001 — ETH/CEX, 207 lệnh đã chốt, vốn tham chiếu 444,306 USDT, 2.3 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: k001 đang lỗ, không phải đang lãi: trên 207 lệnh đã chốt, kỳ vọng mỗi lệnh là -78 USDT, cộng dồn 16,061 USDT lỗ. Chiến lược đã đủ lệnh
+       để nói, và nó đang nói rằng nó mất tiền.
+
+       CHỨNG MINH:
+       • Profit factor 0.88 (sổ đã chốt) → 0.89 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 2,097 USDT = 0% vốn, trên 11 vị thế mở
+       • Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 57.9): rủi ro đuôi mô phỏng cực đoan
+       • Monte Carlo 10,000 kịch bản × 207 lệnh: trung vị -3.3% vốn, p05 -24.1%, xấu nhất -51.6%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 29.5%, xác suất lỗ 61%
+       • 207 lệnh, thắng 56%, payoff 0.69 → một lệnh thua xoá 1.4 lệnh thắng
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 39/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy.
+
+     VÌ SAO XẾP LOẠI NÀY: rủi ro đuôi mô phỏng cực đoan
+     VÌ SAO RỦI RO: Rủi ro đuôi cao: P95 sụt vốn 28%; chất lượng hiệu suất kém (điểm 80); phân phối lợi nhuận xấu (điểm 75); ngược xu hướng thị trường (giảm).
+     Điểm 85.0 đến từ sàn veto 85, không phải bình quân: bình quân gia quyền 10 chiều chỉ 57.9. Veto kích hoạt bởi: rủi ro đuôi mô phỏng cực đoan.
+       + Rủi ro đuôi 100/100 (trọng số 1.3) đóng góp 12.6 điểm
+       + Chất lượng hiệu suất 80/100 (trọng số 1.0) đóng góp 7.8 điểm
+       + Đồng thuận thị trường 65/100 (trọng số 1.2) đóng góp 7.6 điểm
+       + Rủi ro sụt vốn 65/100 (trọng số 1.1) đóng góp 6.9 điểm
+       − Đòn bẩy / Exposure chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+
+[12] Ail.Wang — BTC/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 50.8/100   ·   ĐIỂM RỦI RO: 70.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 78% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 497 lệnh đã chốt · thắng 86% · profit factor 3.19 · tổng lãi/lỗ 32,291 USDT · Sharpe 20.25 · sụt vốn sâu nhất 0.7%
+     ĐANG NẮM GIỮ: 67 vị thế đang mở · exposure 1,787,423 USDT · đòn bẩy 50x · lỗ chưa chốt 243,611 USDT · vốn tham chiếu 1,057,346 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 497 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +3.1% trên vốn, kịch bản tốt (p95) +4.7%, kịch bản xấu
+     (p05) +1.5%, XẤU NHẤT -0.9%. Sụt vốn P95 1%, xấu nhất 2%. Xác suất thua lỗ 0%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 8 ứng viên cùng asset, xác suất còn 99.8%. Cần tối thiểu 73 lệnh để tin được thành tích này, bot đang có 497
+     — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Ail.Wang — BTC/CEX, 497 lệnh đã chốt, vốn tham chiếu 1,057,346 USDT, 23.4 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Nhìn bảng thì Ail.Wang rất đẹp: thắng 86%, profit factor 3.19, sụt vốn 0.7%. Nhưng đó chỉ là các lệnh bot tự chọn đóng — bot đang giữ
+       243,611 USDT lỗ chưa chốt (23% vốn), chốt hết thì PF tụt còn 0.24, từ lãi thành lỗ. Cơ chế là chốt lời sớm, ôm lỗ chờ gỡ; khi giá không quay lại, người
+       copy ăn trọn cú hiện lỗ.
+
+       CHỨNG MINH:
+       • Profit factor 3.19 (sổ đã chốt) → 0.24 (chốt cả sổ mở) — chênh lệch này là toàn bộ vấn đề
+       • Lỗ chưa chốt 243,611 USDT = 23% vốn, trên 67 vị thế mở
+       • Điểm rủi ro 70 đến từ sàn veto (bình quân 10 chiều chỉ 61.8): chốt hết sổ mở thì profit factor chỉ còn 0.24
+       • Monte Carlo 10,000 kịch bản × 497 lệnh: trung vị +3.1% vốn, p05 +1.5%, xấu nhất -0.9%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 1.0%, xác suất lỗ 0%
+       • 497 lệnh, thắng 86%, payoff 0.52 → một lệnh thua xoá 1.9 lệnh thắng
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 51/100, rủi ro 70/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: bot chốt hết hoặc cắt phần lỗ đang
+       treo, và profit factor sau khi chốt quay lên trên 1.
+
+     VÌ SAO XẾP LOẠI NÀY: chốt hết sổ mở thì profit factor chỉ còn 0.24
+     VÌ SAO RỦI RO: Đang ôm 243,611 USDT lỗ chưa chốt (23% vốn), chốt hết thì PF tụt từ 3.19 xuống 0.24; chất lượng hiệu suất kém (điểm 98); ngược xu hướng thị
+     trường (tăng); đòn bẩy và exposure lớn: đòn bẩy 50x.
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: chốt hết sổ mở thì PF rơi từ 3.19 xuống 0.24; lỗ chưa chốt bằng 23% vốn
+     Điểm 70.0 đến từ sàn veto 70, không phải bình quân: bình quân gia quyền 10 chiều chỉ 61.8. Veto kích hoạt bởi: chốt hết sổ mở thì profit factor chỉ còn 0.24.
+       + Chất lượng hiệu suất 98/100 (trọng số 1.0) đóng góp 9.5 điểm
+       + Đồng thuận thị trường 80/100 (trọng số 1.2) đóng góp 9.3 điểm
+       + Đòn bẩy / Exposure 75/100 (trọng số 1.1) đóng góp 8.0 điểm
+       + Rủi ro đuôi 60/100 (trọng số 1.3) đóng góp 7.6 điểm
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+
+[13] Bare-Payee-Fox — LIT/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 65.0/100   ·   ĐIỂM RỦI RO: 70.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 53% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 81 lệnh đã chốt · thắng 100% · tổng lãi/lỗ 37,223 USDT · Sharpe 26.78 · sụt vốn sâu nhất 0.0%
+     ĐANG NẮM GIỮ: 28 vị thế đang mở · exposure 707,477 USDT · đòn bẩy 20x · lỗ chưa chốt 52,608 USDT · vốn tham chiếu 212,784 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 81 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +17.4% trên vốn, kịch bản tốt (p95) +21.9%, kịch bản xấu
+     (p05) +13.4%, XẤU NHẤT +9.4%. Sụt vốn P95 0%, xấu nhất 0%. Xác suất thua lỗ 0%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0%; sau khi trừ việc bot này được chọn là con tốt nhất trong 11 ứng viên cùng asset, xác suất còn
+     100.0%. Cần tối thiểu 3 lệnh để tin được thành tích này, bot đang có 81 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Bare-Payee-Fox — LIT/CEX, 81 lệnh đã chốt, vốn tham chiếu 212,784 USDT, 0.9 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Bare-Payee-Fox đang ôm 52,608 USDT lỗ chưa chốt, bằng 25% vốn tham chiếu — tiền đã mất nhưng chưa ghi nhận vì vị thế còn mở, nên không
+       xuất hiện trong bất kỳ chỉ số nào (thắng 100%, sụt vốn 0.0%). Bảng số cho thấy một bot đang ổn; tài khoản thật đã mất một phần vốn mà người copy chưa biết.
+
+       CHỨNG MINH:
+       • Lỗ chưa chốt 52,608 USDT = 25% vốn, trên 28 vị thế mở
+       • Điểm rủi ro 70 đến từ sàn veto (bình quân 10 chiều chỉ 51.0): lỗ chưa chốt bằng 25% vốn mà chưa từng cho thấy sẵn sàng cắt
+       • Monte Carlo 10,000 kịch bản × 81 lệnh: trung vị +17.4% vốn, p05 +13.4%, xấu nhất +9.4%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 12.5%, xác suất lỗ 0%
+       • Sụt vốn thực tế 0.0%, Sharpe 26.78
+       • Xác suất có lợi thế thật 100.0% sau khi trừ việc được chọn trong 11 ứng viên
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 65/100, rủi ro 70/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Độ tin cậy của chính đánh giá này chỉ 53%.
+
+     VÌ SAO XẾP LOẠI NÀY: lỗ chưa chốt bằng 25% vốn mà chưa từng cho thấy sẵn sàng cắt
+     VÌ SAO RỦI RO: Đang ôm 52,608 USDT lỗ chưa chốt (25% vốn), chưa từng chốt lỗ nên PF vô nghĩa; chốt hết thì PF chỉ còn 1.19; đòn bẩy và exposure lớn: đòn bẩy
+     20x; chất lượng hiệu suất kém (điểm 80); tập trung danh mục (điểm 64).
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: chưa từng ghi nhận một lệnh lỗ nào; lỗ chưa chốt bằng 25% vốn
+     Điểm 70.0 đến từ sàn veto 70, không phải bình quân: bình quân gia quyền 10 chiều chỉ 51.0. Veto kích hoạt bởi: lỗ chưa chốt bằng 25% vốn mà chưa từng cho
+     thấy sẵn sàng cắt.
+       + Đòn bẩy / Exposure 90/100 (trọng số 1.1) đóng góp 9.6 điểm
+       + Chất lượng hiệu suất 80/100 (trọng số 1.0) đóng góp 7.7 điểm
+       + Rủi ro đuôi 60/100 (trọng số 1.3) đóng góp 7.6 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Chất lượng lợi nhuận / R chỉ 20/100 (trọng số 0.9) kéo bình quân xuống
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+       − 2 chiều thiếu bằng chứng được tính trung tính 50 điểm, không đẩy điểm lên cũng không kéo xuống
+
+[14] ChinatownOG — BTC/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 54.4/100   ·   ĐIỂM RỦI RO: 70.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 72% · đối soát sổ lệnh UNVERIFIED_REFERENCE · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 81 lệnh đã chốt · thắng 79% · profit factor 13.89 · tổng lãi/lỗ 41,299 USDT · Sharpe 10.04 · sụt vốn sâu nhất 3.0%
+     ĐANG NẮM GIỮ: 37 vị thế đang mở · exposure 759,550 USDT · đòn bẩy 50x · lỗ chưa chốt 61,753 USDT · vốn tham chiếu 109,753 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 81 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +36.5% trên vốn, kịch bản tốt (p95) +62.6%, kịch bản xấu
+     (p05) +17.1%, XẤU NHẤT -0.8%. Sụt vốn P95 3%, xấu nhất 8%. Xác suất thua lỗ 0%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 2 ứng viên cùng asset, xác suất còn 100.0%. Cần tối thiểu 5 lệnh để tin được thành tích này, bot đang có 81
+     — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       ChinatownOG — BTC/CEX, 81 lệnh đã chốt, vốn tham chiếu 109,753 USDT, 2.0 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Nhìn bảng thì ChinatownOG rất đẹp: thắng 79%, profit factor 13.89, sụt vốn 3.0%. Nhưng đó chỉ là các lệnh bot tự chọn đóng — bot đang
+       giữ 61,753 USDT lỗ chưa chốt (56% vốn), chốt hết thì PF tụt còn 0.71, từ lãi thành lỗ. Cơ chế là chốt lời sớm, ôm lỗ chờ gỡ; khi giá không quay lại, người
+       copy ăn trọn cú hiện lỗ.
+
+       CHỨNG MINH:
+       • Profit factor 13.89 (sổ đã chốt) → 0.71 (chốt cả sổ mở) — chênh lệch này là toàn bộ vấn đề
+       • Lỗ chưa chốt 61,753 USDT = 56% vốn, trên 37 vị thế mở
+       • Điểm rủi ro 70 đến từ sàn veto (bình quân 10 chiều chỉ 56.9): chốt hết sổ mở thì profit factor chỉ còn 0.71
+       • Monte Carlo 10,000 kịch bản × 81 lệnh: trung vị +36.5% vốn, p05 +17.1%, xấu nhất -0.8%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 13.6%, xác suất lỗ 0%
+       • 81 lệnh, thắng 79%, payoff 3.69 → lệnh thắng lớn hơn hẳn lệnh thua
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 54/100, rủi ro 70/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: bot chốt hết hoặc cắt phần lỗ đang
+       treo, và profit factor sau khi chốt quay lên trên 1.
+
+     VÌ SAO XẾP LOẠI NÀY: chốt hết sổ mở thì profit factor chỉ còn 0.71
+     VÌ SAO RỦI RO: Đang ôm 61,753 USDT lỗ chưa chốt (56% vốn), chốt hết thì PF tụt từ 13.89 xuống 0.71; chất lượng hiệu suất kém (điểm 100); ngược xu hướng thị
+     trường (tăng); đòn bẩy và exposure lớn: đòn bẩy 50x.
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: chốt hết sổ mở thì PF rơi từ 13.89 xuống 0.71; lỗ chưa chốt bằng 56% vốn
+     Điểm 70.0 đến từ sàn veto 70, không phải bình quân: bình quân gia quyền 10 chiều chỉ 56.9. Veto kích hoạt bởi: chốt hết sổ mở thì profit factor chỉ còn 0.71.
+       + Chất lượng hiệu suất 100/100 (trọng số 1.0) đóng góp 9.7 điểm
+       + Đồng thuận thị trường 80/100 (trọng số 1.2) đóng góp 9.3 điểm
+       + Đòn bẩy / Exposure 75/100 (trọng số 1.1) đóng góp 8.0 điểm
+       + Rủi ro đuôi 60/100 (trọng số 1.3) đóng góp 7.6 điểm
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+
+[15] HaveARestin — ETH/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 54.5/100   ·   ĐIỂM RỦI RO: 70.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 80% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 143 lệnh đã chốt · thắng 92% · profit factor 11.12 · tổng lãi/lỗ 9,583 USDT · Sharpe 16.13 · sụt vốn sâu nhất 0.5%
+     ĐANG NẮM GIỮ: 95 vị thế đang mở · exposure 440,608 USDT · đòn bẩy 100x · lỗ chưa chốt 86,132 USDT · vốn tham chiếu 131,958 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 143 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +7.3% trên vốn, kịch bản tốt (p95) +8.6%, kịch bản xấu
+     (p05) +5.8%, XẤU NHẤT +3.9%. Sụt vốn P95 0%, xấu nhất 1%. Xác suất thua lỗ 0%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 9 ứng viên cùng asset, xác suất còn 99.8%. Cần tối thiểu 20 lệnh để tin được thành tích này, bot đang có 143
+     — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       HaveARestin — ETH/CEX, 143 lệnh đã chốt, vốn tham chiếu 131,958 USDT, 1.6 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Nhìn bảng thì HaveARestin rất đẹp: thắng 92%, profit factor 11.12, sụt vốn 0.5%. Nhưng đó chỉ là các lệnh bot tự chọn đóng — bot đang
+       giữ 86,132 USDT lỗ chưa chốt (65% vốn), chốt hết thì PF tụt còn 0.16, từ lãi thành lỗ. Cơ chế là chốt lời sớm, ôm lỗ chờ gỡ; khi giá không quay lại, người
+       copy ăn trọn cú hiện lỗ.
+
+       CHỨNG MINH:
+       • Profit factor 11.12 (sổ đã chốt) → 0.16 (chốt cả sổ mở) — chênh lệch này là toàn bộ vấn đề
+       • Lỗ chưa chốt 86,132 USDT = 65% vốn, trên 95 vị thế mở
+       • Điểm rủi ro 70 đến từ sàn veto (bình quân 10 chiều chỉ 54.4): chốt hết sổ mở thì profit factor chỉ còn 0.16
+       • Monte Carlo 10,000 kịch bản × 143 lệnh: trung vị +7.3% vốn, p05 +5.8%, xấu nhất +3.9%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 5.5%, xác suất lỗ 0%
+       • 143 lệnh, thắng 92%, payoff 1.02
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 54/100, rủi ro 70/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: bot chốt hết hoặc cắt phần lỗ đang
+       treo, và profit factor sau khi chốt quay lên trên 1.
+
+     VÌ SAO XẾP LOẠI NÀY: chốt hết sổ mở thì profit factor chỉ còn 0.16
+     VÌ SAO RỦI RO: Đang ôm 86,132 USDT lỗ chưa chốt (65% vốn), chốt hết thì PF tụt từ 11.12 xuống 0.16; chất lượng hiệu suất kém (điểm 100); ngược xu hướng thị
+     trường (giảm); đòn bẩy và exposure lớn: đòn bẩy 100x.
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: chốt hết sổ mở thì PF rơi từ 11.12 xuống 0.16; lỗ chưa chốt bằng 65% vốn
+     Điểm 70.0 đến từ sàn veto 70, không phải bình quân: bình quân gia quyền 10 chiều chỉ 54.4. Veto kích hoạt bởi: chốt hết sổ mở thì profit factor chỉ còn 0.16.
+       + Chất lượng hiệu suất 100/100 (trọng số 1.0) đóng góp 9.7 điểm
+       + Đồng thuận thị trường 80/100 (trọng số 1.2) đóng góp 9.3 điểm
+       + Đòn bẩy / Exposure 75/100 (trọng số 1.1) đóng góp 8.0 điểm
+       + Rủi ro đuôi 60/100 (trọng số 1.3) đóng góp 7.6 điểm
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Thanh khoản / Khớp lệnh chỉ 15/100 (trọng số 0.9) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+
+[16] Valid-Launch-Monkey — ETH/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 51.6/100   ·   ĐIỂM RỦI RO: 70.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 67% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 54 lệnh đã chốt · thắng 72% · profit factor 1.09 · tổng lãi/lỗ 213 USDT · Sharpe 0.28 · sụt vốn sâu nhất 1.2%
+     ĐANG NẮM GIỮ: 5 vị thế đang mở · exposure 41,986 USDT · đòn bẩy 10x · lỗ chưa chốt 9,746 USDT · vốn tham chiếu 141,915 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 54 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +0.2% trên vốn, kịch bản tốt (p95) +1.4%, kịch bản xấu
+     (p05) -1.2%, XẤU NHẤT -3.0%. Sụt vốn P95 2%, xấu nhất 3%. Xác suất thua lỗ 40%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 57.6% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 18 ứng viên cùng asset, xác suất còn 4.8%. Cần tối thiểu 3,889 lệnh để tin được thành tích này, bot đang có
+     54 — còn thiếu 3,835
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Valid-Launch-Monkey — ETH/CEX, 54 lệnh đã chốt, vốn tham chiếu 141,915 USDT, 1.0 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Nhìn bảng thì Valid-Launch-Monkey rất đẹp: thắng 72%, profit factor 1.09, sụt vốn 1.2%. Nhưng đó chỉ là các lệnh bot tự chọn đóng —
+       bot đang giữ 9,746 USDT lỗ chưa chốt (7% vốn), chốt hết thì PF tụt còn 0.26, từ lãi thành lỗ. Cơ chế là chốt lời sớm, ôm lỗ chờ gỡ; khi giá không quay lại,
+       người copy ăn trọn cú hiện lỗ.
+
+       CHỨNG MINH:
+       • Profit factor 1.09 (sổ đã chốt) → 0.26 (chốt cả sổ mở) — chênh lệch này là toàn bộ vấn đề
+       • Lỗ chưa chốt 9,746 USDT = 7% vốn, trên 5 vị thế mở
+       • Điểm rủi ro 70 đến từ sàn veto (bình quân 10 chiều chỉ 47.7): chốt hết sổ mở thì profit factor chỉ còn 0.26
+       • Monte Carlo 10,000 kịch bản × 54 lệnh: trung vị +0.2% vốn, p05 -1.2%, xấu nhất -3.0%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 1.6%, xác suất lỗ 40%
+       • 54 lệnh, thắng 72%, payoff 0.42 → một lệnh thua xoá 2.4 lệnh thắng
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 52/100, rủi ro 70/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: bot chốt hết hoặc cắt phần lỗ đang
+       treo, và profit factor sau khi chốt quay lên trên 1. Độ tin cậy của chính đánh giá này chỉ 67%.
+
+     VÌ SAO XẾP LOẠI NÀY: chốt hết sổ mở thì profit factor chỉ còn 0.26
+     VÌ SAO RỦI RO: Đang ôm 9,746 USDT lỗ chưa chốt (7% vốn), chốt hết thì PF tụt từ 1.09 xuống 0.26; chất lượng hiệu suất kém (điểm 82); phân phối lợi nhuận xấu
+     (điểm 75); tập trung danh mục (điểm 64).
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: chốt hết sổ mở thì PF rơi từ 1.09 xuống 0.26
+     Điểm 70.0 đến từ sàn veto 70, không phải bình quân: bình quân gia quyền 10 chiều chỉ 47.7. Veto kích hoạt bởi: chốt hết sổ mở thì profit factor chỉ còn 0.26.
+       + Chất lượng hiệu suất 82/100 (trọng số 1.0) đóng góp 7.9 điểm
+       + Rủi ro đuôi 60/100 (trọng số 1.3) đóng góp 7.6 điểm
+       + Chất lượng lợi nhuận / R 75/100 (trọng số 0.9) đóng góp 6.6 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Đòn bẩy / Exposure chỉ 30/100 (trọng số 1.1) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 30/100 (trọng số 0.8) kéo bình quân xuống
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Thanh khoản / Khớp lệnh chỉ 15/100 (trọng số 0.9) kéo bình quân xuống
+
+[17] 脚本test — BTC/CEX
+     XẾP LOẠI: TIỀM ẨN   ·   ĐIỂM NGON: 80.6/100   ·   ĐIỂM RỦI RO: 56.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: BLOCK_NEW_TRADES
+     Độ tin cậy của đánh giá: 65% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 498 lệnh đã chốt · thắng 62% · profit factor 6.28 · tổng lãi/lỗ 156,508 USDT · Sharpe -1.05 · sụt vốn sâu nhất 100.0%
+     ĐANG NẮM GIỮ: 10 vị thế đang mở · exposure 1,780,114 USDT · đòn bẩy 20x · lỗ chưa chốt 20,906 USDT · vốn tham chiếu 126,883 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 498 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +114.4% trên vốn, kịch bản tốt (p95) +321.1%, kịch bản
+     xấu (p05) -1.6%, XẤU NHẤT -23.8%. Sụt vốn P95 11%, xấu nhất 29%. Xác suất thua lỗ 6%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 49 ứng viên cùng asset, xác suất còn 99.9%. Cần tối thiểu 49 lệnh để tin được thành tích này, bot đang có
+     498 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       脚本test — BTC/CEX, 498 lệnh đã chốt, vốn tham chiếu 126,883 USDT, 5.6 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: 脚本test không có dấu hiệu bất thường nào đủ nặng để một mình nó quyết định kết quả (thắng 62%, profit factor 6.28, sụt vốn 100.0%).
+       Điểm số đến từ bình quân các chiều rủi ro chứ không từ một lỗi cụ thể, nên đây là mức rủi ro tổng thể chứ không phải một chỗ hỏng cụ thể.
+
+       CHỨNG MINH:
+       • Profit factor 6.28 (sổ đã chốt) → 3.85 (chốt cả sổ mở) — chốt hết sổ mở thì mất 39% lợi thế
+       • Lỗ chưa chốt 20,906 USDT = 16% vốn, trên 10 vị thế mở
+       • Điểm rủi ro 56 là bình quân 10 chiều; nặng nhất: Đòn bẩy / Exposure 75, Chất lượng hiệu suất 71
+       • Monte Carlo 10,000 kịch bản × 498 lệnh: trung vị +114.4% vốn, p05 -1.6%, xấu nhất -23.8%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 7.1%, xác suất lỗ 6%
+       • 498 lệnh, thắng 62%, payoff 3.81 → lệnh thắng lớn hơn hẳn lệnh thua
+
+       KẾT LUẬN: TIỀM ẨN — chất lượng 81/100, rủi ro 56/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có. Độ tin cậy của chính đánh giá này chỉ 65%.
+
+     VÌ SAO XẾP LOẠI NÀY: Số liệu bề mặt che mất rủi ro: sụt vốn vượt vốn ghi nhận nên chưa đo được thật
+     VÌ SAO RỦI RO: Đòn bẩy và exposure lớn: đòn bẩy 20x; chất lượng hiệu suất kém (điểm 71); sụt vốn sâu: tối đa 100.0%; tập trung danh mục (điểm 64).
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: sụt vốn vượt vốn ghi nhận nên chưa đo được thật
+     Điểm 56.0 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Đòn bẩy / Exposure 75/100 (trọng số 1.1) đóng góp 8.0 điểm
+       + Rủi ro đuôi 60/100 (trọng số 1.3) đóng góp 7.6 điểm
+       + Rủi ro sụt vốn 65/100 (trọng số 1.1) đóng góp 6.9 điểm
+       + Chất lượng hiệu suất 71/100 (trọng số 1.0) đóng góp 6.9 điểm
+       − Đồng thuận thị trường chỉ 30/100 (trọng số 1.2) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+
+[18] xiaomijiahanyangzao — ETH/CEX
+     XẾP LOẠI: TIỀM ẨN   ·   ĐIỂM NGON: 65.0/100   ·   ĐIỂM RỦI RO: 53.9/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: BLOCK_NEW_TRADES
+     Độ tin cậy của đánh giá: 79% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 133 lệnh đã chốt · thắng 74% · profit factor 3.94 · tổng lãi/lỗ 76,076 USDT · Sharpe 7.06 · sụt vốn sâu nhất 1.8%
+     ĐANG NẮM GIỮ: 8 vị thế đang mở · exposure 534,702 USDT · đòn bẩy 40x · lỗ chưa chốt 70,816 USDT · vốn tham chiếu 546,002 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 133 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +13.7% trên vốn, kịch bản tốt (p95) +21.3%, kịch bản xấu
+     (p05) +7.1%, XẤU NHẤT -2.0%. Sụt vốn P95 2%, xấu nhất 3%. Xác suất thua lỗ 0%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 47 ứng viên cùng asset, xác suất còn 99.9%. Cần tối thiểu 14 lệnh để tin được thành tích này, bot đang có
+     133 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       xiaomijiahanyangzao — ETH/CEX, 133 lệnh đã chốt, vốn tham chiếu 546,002 USDT, 1.5 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: xiaomijiahanyangzao không có dấu hiệu bất thường nào đủ nặng để một mình nó quyết định kết quả (thắng 74%, profit factor 3.94, sụt vốn
+       1.8%). Điểm số đến từ bình quân các chiều rủi ro chứ không từ một lỗi cụ thể, nên đây là mức rủi ro tổng thể chứ không phải một chỗ hỏng cụ thể.
+
+       CHỨNG MINH:
+       • Profit factor 3.94 (sổ đã chốt) → 1.05 (chốt cả sổ mở) — chốt hết sổ mở thì mất 73% lợi thế
+       • Lỗ chưa chốt 70,816 USDT = 13% vốn, trên 8 vị thế mở
+       • Điểm rủi ro 54 là bình quân 10 chiều; nặng nhất: Đồng thuận thị trường 80, Đòn bẩy / Exposure 75
+       • Monte Carlo 10,000 kịch bản × 133 lệnh: trung vị +13.7% vốn, p05 +7.1%, xấu nhất -2.0%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 5.7%, xác suất lỗ 0%
+       • 133 lệnh, thắng 74%, payoff 1.35
+
+       KẾT LUẬN: TIỀM ẨN — chất lượng 65/100, rủi ro 54/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có.
+
+     VÌ SAO XẾP LOẠI NÀY: Điểm rủi ro 54 ở vùng giữa, chưa đủ an toàn để tin
+     VÌ SAO RỦI RO: Đang ôm 70,816 USDT lỗ chưa chốt (13% vốn), chốt hết thì PF tụt từ 3.94 xuống 1.05; ngược xu hướng thị trường (giảm); đòn bẩy và exposure lớn:
+     đòn bẩy 40x; chất lượng hiệu suất kém (điểm 68).
+     Điểm 53.9 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Đồng thuận thị trường 80/100 (trọng số 1.2) đóng góp 9.3 điểm
+       + Đòn bẩy / Exposure 75/100 (trọng số 1.1) đóng góp 8.0 điểm
+       + Rủi ro đuôi 60/100 (trọng số 1.3) đóng góp 7.6 điểm
+       + Chất lượng hiệu suất 68/100 (trọng số 1.0) đóng góp 6.6 điểm
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+
+[19] Fly-000 — SNDK/CEX
+     XẾP LOẠI: TIỀM ẨN   ·   ĐIỂM NGON: 76.2/100   ·   ĐIỂM RỦI RO: 51.6/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: BLOCK_NEW_TRADES
+     Độ tin cậy của đánh giá: 63% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 93 lệnh đã chốt · thắng 43% · profit factor 0.95 · tổng lãi/lỗ -154 USDT · Sharpe -0.84 · sụt vốn sâu nhất 2.4%
+     ĐANG NẮM GIỮ: 100 vị thế đang mở · exposure 115,161 USDT · đòn bẩy 10x · lỗ chưa chốt 192 USDT · vốn tham chiếu 128,172 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 93 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi -0.2% trên vốn, kịch bản tốt (p95) +1.5%, kịch bản xấu
+     (p05) -1.6%, XẤU NHẤT -3.4%. Sụt vốn P95 2%, xấu nhất 3%. Xác suất thua lỗ 56%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 43.7%; sau khi trừ việc bot này được chọn là con tốt nhất trong 2 ứng viên cùng asset, xác suất còn
+     24.9%
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Fly-000 — SNDK/CEX, 93 lệnh đã chốt, vốn tham chiếu 128,172 USDT, 1.1 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Fly-000 đang lỗ, không phải đang lãi: trên 93 lệnh đã chốt, kỳ vọng mỗi lệnh là -2 USDT, cộng dồn 154 USDT lỗ. Chiến lược đã đủ lệnh
+       để nói, và nó đang nói rằng nó mất tiền.
+
+       CHỨNG MINH:
+       • Profit factor 0.95 (sổ đã chốt) → 13.43 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 192 USDT = 0% vốn, trên 100 vị thế mở
+       • Điểm rủi ro 52 là bình quân 10 chiều; nặng nhất: Chất lượng hiệu suất 80, Rủi ro đuôi 70
+       • Monte Carlo 10,000 kịch bản × 93 lệnh: trung vị -0.2% vốn, p05 -1.6%, xấu nhất -3.4%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 1.9%, xác suất lỗ 56%
+       • 93 lệnh, thắng 43%, payoff 1.26
+
+       KẾT LUẬN: TIỀM ẨN — chất lượng 76/100, rủi ro 52/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có. Độ tin cậy của chính đánh giá này chỉ 63%.
+
+     VÌ SAO XẾP LOẠI NÀY: Điểm rủi ro 52 ở vùng giữa, chưa đủ an toàn để tin
+     VÌ SAO RỦI RO: Chất lượng hiệu suất kém (điểm 80); rủi ro đuôi cao: P95 sụt vốn 2%; tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     Điểm 51.6 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Rủi ro đuôi 70/100 (trọng số 1.3) đóng góp 8.8 điểm
+       + Chất lượng hiệu suất 80/100 (trọng số 1.0) đóng góp 7.8 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Thanh khoản / Khớp lệnh 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       − Độ bền chiến lược qua các pha chỉ 25/100 (trọng số 0.8) kéo bình quân xuống
+       − Đòn bẩy / Exposure chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − 1 chiều thiếu bằng chứng được tính trung tính 50 điểm, không đẩy điểm lên cũng không kéo xuống
+
+[20] RuiJie — ETH/CEX
+     XẾP LOẠI: TIỀM ẨN   ·   ĐIỂM NGON: 74.8/100   ·   ĐIỂM RỦI RO: 41.2/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: WARN
+     Độ tin cậy của đánh giá: 89% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 300 lệnh đã chốt · thắng 93% · profit factor 41.52 · tổng lãi/lỗ 172,313 USDT · Sharpe 27.20 · sụt vốn sâu nhất 0.2%
+     ĐANG NẮM GIỮ: 24 vị thế đang mở · exposure 788,587 USDT · đòn bẩy 20x · lỗ chưa chốt 13,429 USDT · vốn tham chiếu 1,024,810 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 300 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +16.7% trên vốn, kịch bản tốt (p95) +20.4%, kịch bản xấu
+     (p05) +13.4%, XẤU NHẤT +9.0%. Sụt vốn P95 0%, xấu nhất 1%. Xác suất thua lỗ 0%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0%; sau khi trừ việc bot này được chọn là con tốt nhất trong 18 ứng viên cùng asset, xác suất còn
+     100.0%. Cần tối thiểu 5 lệnh để tin được thành tích này, bot đang có 300 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       RuiJie — ETH/CEX, 300 lệnh đã chốt, vốn tham chiếu 1,024,810 USDT, 5.0 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: RuiJie đang có thành tích tốt (thắng 93%, profit factor 41.52, sụt vốn 0.2%), nhưng toàn bộ hình thành mà chưa có lấy một lệnh nào
+       trong pha thị trường giảm. Không phải bot sẽ thua ở chiều xuống — chưa ai biết — mà là không có cơ sở nào để nói nó chịu được, đúng vào chế độ nó chưa từng
+       gặp.
+
+       CHỨNG MINH:
+       • Profit factor 41.52 (sổ đã chốt) → 9.99 (chốt cả sổ mở) — chốt hết sổ mở thì mất 76% lợi thế
+       • Lỗ chưa chốt 13,429 USDT = 1% vốn, trên 24 vị thế mở
+       • Điểm rủi ro 41 là bình quân 10 chiều; nặng nhất: Đồng thuận thị trường 80, Rủi ro danh mục 64
+       • Monte Carlo 10,000 kịch bản × 300 lệnh: trung vị +16.7% vốn, p05 +13.4%, xấu nhất +9.0%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 12.6%, xác suất lỗ 0%
+       • Chưa từng bị thử ở chiều xuống — không có lệnh nào trong pha thị trường giảm
+
+       KẾT LUẬN: TIỀM ẨN — chất lượng 75/100, rủi ro 41/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Điều kiện xem xét lại: bot chạy qua một pha thị trường giảm
+       và giữ được kết quả.
+
+     VÌ SAO XẾP LOẠI NÀY: Số liệu bề mặt che mất rủi ro: chưa từng chạy qua pha giảm
+     VÌ SAO RỦI RO: Ngược xu hướng thị trường (giảm); tập trung danh mục (điểm 64); vị thế lớn so với thanh khoản (điểm 60).
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: chưa từng chạy qua pha giảm
+     Điểm 41.2 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Đồng thuận thị trường 80/100 (trọng số 1.2) đóng góp 9.3 điểm
+       + Thanh khoản / Khớp lệnh 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Rủi ro đuôi chỉ 15/100 (trọng số 1.3) kéo bình quân xuống
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Chất lượng hiệu suất chỉ 5/100 (trọng số 1.0) kéo bình quân xuống
+
+[21] 0xleek.eth — HYPE/CEX
+     XẾP LOẠI: TIỀM ẨN   ·   ĐIỂM NGON: 78.4/100   ·   ĐIỂM RỦI RO: 40.5/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: WARN
+     Độ tin cậy của đánh giá: 59% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 55 lệnh đã chốt · thắng 60% · profit factor 1.74 · tổng lãi/lỗ 23,585 USDT · Sharpe 2.30 · sụt vốn sâu nhất 13.1%
+     ĐANG NẮM GIỮ: 2 vị thế đang mở · exposure 159,996 USDT · đòn bẩy 10x · lỗ chưa chốt 457 USDT · vốn tham chiếu 133,909 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 55 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +15.8% trên vốn, kịch bản tốt (p95) +57.0%, kịch bản xấu
+     (p05) -14.5%, XẤU NHẤT -37.3%. Sụt vốn P95 21%, xấu nhất 40%. Xác suất thua lỗ 23%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 88.4% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 3 ứng viên cùng asset, xác suất còn 63.4%. Cần tối thiểu 103 lệnh để tin được thành tích này, bot đang có 55
+     — còn thiếu 48
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       0xleek.eth — HYPE/CEX, 55 lệnh đã chốt, vốn tham chiếu 133,909 USDT, 0.7 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: 0xleek.eth đang có thành tích tốt (thắng 60%, profit factor 1.74, sụt vốn 13.1%), nhưng toàn bộ hình thành mà chưa có lấy một lệnh nào
+       trong pha thị trường giảm. Không phải bot sẽ thua ở chiều xuống — chưa ai biết — mà là không có cơ sở nào để nói nó chịu được, đúng vào chế độ nó chưa từng
+       gặp.
+
+       CHỨNG MINH:
+       • Profit factor 1.74 (sổ đã chốt) → 1.72 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 457 USDT = 0% vốn, trên 2 vị thế mở
+       • Điểm rủi ro 41 là bình quân 10 chiều; nặng nhất: Đồng thuận thị trường 65, Rủi ro danh mục 64
+       • Monte Carlo 10,000 kịch bản × 55 lệnh: trung vị +15.8% vốn, p05 -14.5%, xấu nhất -37.3%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 19.8%, xác suất lỗ 23%
+       • Chưa từng bị thử ở chiều xuống — không có lệnh nào trong pha thị trường giảm
+
+       KẾT LUẬN: TIỀM ẨN — chất lượng 78/100, rủi ro 41/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Điều kiện xem xét lại: bot chạy qua một pha thị trường giảm
+       và giữ được kết quả. Độ tin cậy của chính đánh giá này chỉ 59%.
+
+     VÌ SAO XẾP LOẠI NÀY: Số liệu bề mặt che mất rủi ro: chưa từng chạy qua pha giảm
+     VÌ SAO RỦI RO: Ngược xu hướng thị trường (tăng); tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60); chiến lược không bền qua các pha thị trường
+     (điểm 60).
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: chưa từng chạy qua pha giảm
+     Điểm 40.5 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Đồng thuận thị trường 65/100 (trọng số 1.2) đóng góp 7.6 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Thanh khoản / Khớp lệnh 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Hành vi giao dịch chỉ 30/100 (trọng số 1.2) kéo bình quân xuống
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Đòn bẩy / Exposure chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Chất lượng hiệu suất chỉ 5/100 (trọng số 1.0) kéo bình quân xuống
+
+[22] AI 量化新星 - 趋势策略 — BNB/CEX
+     XẾP LOẠI: TIỀM ẨN   ·   ĐIỂM NGON: 78.4/100   ·   ĐIỂM RỦI RO: 37.2/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: WARN
+     Độ tin cậy của đánh giá: 74% · đối soát sổ lệnh RECONCILED · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 71 lệnh đã chốt · thắng 34% · profit factor 2.23 · tổng lãi/lỗ 42,207 USDT · Sharpe 5.43 · sụt vốn sâu nhất 15.1%
+     ĐANG NẮM GIỮ: 1 vị thế đang mở · exposure 14,254 USDT · đòn bẩy 6x · vốn tham chiếu 136,684 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 71 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +29.3% trên vốn, kịch bản tốt (p95) +73.6%, kịch bản xấu
+     (p05) -6.4%, XẤU NHẤT -30.7%. Sụt vốn P95 15%, xấu nhất 31%. Xác suất thua lỗ 10%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 99.2%; sau khi trừ việc bot này được chọn là con tốt nhất trong 3 ứng viên cùng asset, xác suất còn
+     94.2%. Cần tối thiểu 33 lệnh để tin được thành tích này, bot đang có 71 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       AI 量化新星 - 趋势策略 — BNB/CEX, 71 lệnh đã chốt, vốn tham chiếu 136,684 USDT, 1.4 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: AI 量化新星 - 趋势策略 có kết quả tốt trên sổ (thắng 34%, profit factor 2.23, sụt vốn 15.1%), nhưng 83% lãi gộp đến từ riêng pha thị
+       trường Tăng, động. Đây là một chiến lược hợp với một kiểu thị trường chứ không phải một lợi thế ổn định — khi pha đổi, lợi thế biến mất mà không có cảnh
+       báo trước. Bot đã lỗ ròng ở 2/6 pha.
+
+       CHỨNG MINH:
+       • Profit factor 2.23 (sổ đã chốt) → 2.25 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Điểm rủi ro 37 là bình quân 10 chiều; nặng nhất: Rủi ro danh mục 64, Chất lượng lợi nhuận / R 60
+       • Monte Carlo 10,000 kịch bản × 71 lệnh: trung vị +29.3% vốn, p05 -6.4%, xấu nhất -30.7%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 12.1%, xác suất lỗ 10%
+       • 71 lệnh, thắng 34%, payoff 4.37 → lệnh thắng lớn hơn hẳn lệnh thua
+       • Sụt vốn thực tế 15.1%, Sharpe 5.43, chuỗi thua dài nhất 8 lệnh
+
+       KẾT LUẬN: TIỀM ẨN — chất lượng 78/100, rủi ro 37/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Điều kiện xem xét lại: bot kiếm được lợi nhuận ở pha thị
+       trường khác ngoài pha đang phụ thuộc.
+
+     VÌ SAO XẾP LOẠI NÀY: Số liệu bề mặt che mất rủi ro: 83% lãi gộp chỉ đến từ một pha thị trường
+     VÌ SAO RỦI RO: Tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60); sụt vốn sâu: tối đa 15.1%.
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: 83% lãi gộp chỉ đến từ một pha thị trường
+     Điểm 37.2 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Rủi ro sụt vốn 60/100 (trọng số 1.1) đóng góp 6.4 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Đòn bẩy / Exposure chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Thanh khoản / Khớp lệnh chỉ 15/100 (trọng số 0.9) kéo bình quân xuống
+       − Hành vi giao dịch chỉ 10/100 (trọng số 1.2) kéo bình quân xuống
+       − Chất lượng hiệu suất chỉ 5/100 (trọng số 1.0) kéo bình quân xuống
+
+[23] FrontierQuantTrader — XRP/CEX
+     XẾP LOẠI: TIỀM ẨN   ·   ĐIỂM NGON: 88.4/100   ·   ĐIỂM RỦI RO: 21.7/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: MONITOR
+     Độ tin cậy của đánh giá: 92% · đối soát sổ lệnh RECONCILED · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 77 lệnh đã chốt · thắng 64% · profit factor 3.28 · tổng lãi/lỗ 10,627 USDT · Sharpe 3.22 · sụt vốn sâu nhất 1.6%
+     ĐANG NẮM GIỮ: vốn tham chiếu 116,118 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 77 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +8.4% trên vốn, kịch bản tốt (p95) +22.4%, kịch bản xấu
+     (p05) -0.6%, XẤU NHẤT -7.0%. Sụt vốn P95 3%, xấu nhất 7%. Xác suất thua lỗ 7%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 99.7% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 18 ứng viên cùng asset, xác suất còn 80.7%. Cần tối thiểu 29 lệnh để tin được thành tích này, bot đang có 77
+     — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       FrontierQuantTrader — XRP/CEX, 77 lệnh đã chốt, vốn tham chiếu 116,118 USDT, 0.9 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: FrontierQuantTrader có kết quả tốt trên sổ (thắng 64%, profit factor 3.28, sụt vốn 1.6%), nhưng 95% lãi gộp đến từ riêng pha thị
+       trường Tăng, động. Đây là một chiến lược hợp với một kiểu thị trường chứ không phải một lợi thế ổn định — khi pha đổi, lợi thế biến mất mà không có cảnh
+       báo trước.
+
+       CHỨNG MINH:
+       • Profit factor 3.28
+       • Điểm rủi ro 22 là bình quân 10 chiều; nặng nhất: Rủi ro danh mục 64, Rủi ro đuôi 50
+       • Monte Carlo 10,000 kịch bản × 77 lệnh: trung vị +8.4% vốn, p05 -0.6%, xấu nhất -7.0%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 1.7%, xác suất lỗ 7%
+       • 77 lệnh, thắng 64%, payoff 1.88 → lệnh thắng lớn hơn hẳn lệnh thua
+       • Sụt vốn thực tế 1.6%, Sharpe 3.22, chuỗi thua dài nhất 9 lệnh
+
+       KẾT LUẬN: TIỀM ẨN — chất lượng 88/100, rủi ro 22/100. Khuyến nghị: CÓ THỂ COPY, theo dõi định kỳ. Điều kiện xem xét lại: bot kiếm được lợi nhuận ở pha thị
+       trường khác ngoài pha đang phụ thuộc.
+
+     VÌ SAO XẾP LOẠI NÀY: Số liệu bề mặt che mất rủi ro: 95% lãi gộp chỉ đến từ một pha thị trường
+     VÌ SAO RỦI RO: Tập trung danh mục (điểm 64).
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: 95% lãi gộp chỉ đến từ một pha thị trường
+     Điểm 21.7 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Chất lượng lợi nhuận / R chỉ 20/100 (trọng số 0.9) kéo bình quân xuống
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Hành vi giao dịch chỉ 10/100 (trọng số 1.2) kéo bình quân xuống
+       − Đồng thuận thị trường chỉ 5/100 (trọng số 1.2) kéo bình quân xuống
+
+[24] BTC策略 — BTC/CEX
+     XẾP LOẠI: AN TOÀN   ·   ĐIỂM NGON: 52.3/100   ·   ĐIỂM RỦI RO: 44.1/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: WARN
+     Độ tin cậy của đánh giá: 70% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 499 lệnh đã chốt · thắng 42% · profit factor 0.83 · tổng lãi/lỗ -4,032 USDT · Sharpe -9.03 · sụt vốn sâu nhất 3.4%
+     ĐANG NẮM GIỮ: 91 vị thế đang mở · exposure 187,783 USDT · đòn bẩy 10x · lỗ chưa chốt 2,613 USDT · vốn tham chiếu 264,850 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 499 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi -1.6% trên vốn, kịch bản tốt (p95) +1.9%, kịch bản xấu
+     (p05) -4.9%, XẤU NHẤT -9.2%. Sụt vốn P95 6%, xấu nhất 9%. Xác suất thua lỗ 77%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 8.5%; sau khi trừ việc bot này được chọn là con tốt nhất trong 3 ứng viên cùng asset, xác suất còn 1.3%
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       BTC策略 — BTC/CEX, 499 lệnh đã chốt, vốn tham chiếu 264,850 USDT, 61.0 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: BTC策略 đang lỗ, không phải đang lãi: trên 499 lệnh đã chốt, kỳ vọng mỗi lệnh là -8 USDT, cộng dồn 4,032 USDT lỗ. Chiến lược đã đủ
+       lệnh để nói, và nó đang nói rằng nó mất tiền.
+
+       CHỨNG MINH:
+       • Profit factor 0.83 (sổ đã chốt) → 0.81 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 2,613 USDT = 1% vốn, trên 91 vị thế mở
+       • Điểm rủi ro 44 là bình quân 10 chiều; nặng nhất: Chất lượng hiệu suất 80, Rủi ro đuôi 70
+       • Monte Carlo 10,000 kịch bản × 499 lệnh: trung vị -1.6% vốn, p05 -4.9%, xấu nhất -9.2%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 5.7%, xác suất lỗ 77%
+       • 499 lệnh, thắng 42%, payoff 1.12
+
+       KẾT LUẬN: AN TOÀN — chất lượng 52/100, rủi ro 44/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Xếp loại này nói về rủi ro, không nói về lợi nhuận: bot đang
+       lỗ nên đây không phải khuyến nghị copy, chỉ nghĩa là mức thiệt hại có giới hạn. Độ tin cậy của chính đánh giá này chỉ 70%.
+
+     VÌ SAO XẾP LOẠI NÀY: Rủi ro thấp (44), chất lượng mới ở mức trung bình (52)
+     VÌ SAO RỦI RO: Chất lượng hiệu suất kém (điểm 80); rủi ro đuôi cao: P95 sụt vốn 6%; tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     Điểm 44.1 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Rủi ro đuôi 70/100 (trọng số 1.3) đóng góp 8.8 điểm
+       + Chất lượng hiệu suất 80/100 (trọng số 1.0) đóng góp 7.8 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Đòn bẩy / Exposure chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Thanh khoản / Khớp lệnh chỉ 15/100 (trọng số 0.9) kéo bình quân xuống
+       − Đồng thuận thị trường chỉ 10/100 (trọng số 1.2) kéo bình quân xuống
+
+[25] Proud-Peg-Basil — CRCL/CEX
+     XẾP LOẠI: TIỀM NĂNG   ·   ĐIỂM NGON: 69.4/100   ·   ĐIỂM RỦI RO: 48.5/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: BLOCK_NEW_TRADES
+     Độ tin cậy của đánh giá: 51% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 58 lệnh đã chốt · thắng 66% · profit factor 2.52 · tổng lãi/lỗ 18,958 USDT · Sharpe 4.17 · sụt vốn sâu nhất 1.7%
+     ĐANG NẮM GIỮ: 18 vị thế đang mở · exposure 183,044 USDT · đòn bẩy 5x · lỗ chưa chốt 16,652 USDT · vốn tham chiếu 500,199 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 58 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +3.7% trên vốn, kịch bản tốt (p95) +8.0%, kịch bản xấu
+     (p05) -0.3%, XẤU NHẤT -4.9%. Sụt vốn P95 3%, xấu nhất 6%. Xác suất thua lỗ 6%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 94.9% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 4 ứng viên cùng asset, xác suất còn 72.0%. Cần tối thiểu 59 lệnh để tin được thành tích này, bot đang có 58
+     — còn thiếu 1
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Proud-Peg-Basil — CRCL/CEX, 58 lệnh đã chốt, vốn tham chiếu 500,199 USDT, 0.7 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Proud-Peg-Basil không có dấu hiệu bất thường nào đủ nặng để một mình nó quyết định kết quả (thắng 66%, profit factor 2.52, sụt vốn
+       1.7%). Điểm số đến từ bình quân các chiều rủi ro chứ không từ một lỗi cụ thể, nên đây là mức rủi ro tổng thể chứ không phải một chỗ hỏng cụ thể.
+
+       CHỨNG MINH:
+       • Profit factor 2.52 (sổ đã chốt) → 1.09 (chốt cả sổ mở) — chốt hết sổ mở thì mất 57% lợi thế
+       • Lỗ chưa chốt 16,652 USDT = 3% vốn, trên 18 vị thế mở
+       • Điểm rủi ro 48 là bình quân 10 chiều; nặng nhất: Chất lượng lợi nhuận / R 75, Rủi ro danh mục 64
+       • Monte Carlo 10,000 kịch bản × 58 lệnh: trung vị +3.7% vốn, p05 -0.3%, xấu nhất -4.9%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 1.3%, xác suất lỗ 6%
+       • 58 lệnh, thắng 66%, payoff 1.33
+
+       KẾT LUẬN: TIỀM NĂNG — chất lượng 69/100, rủi ro 48/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có. Điều kiện xem xét lại: có thêm khoảng 1 lệnh
+       nữa để đủ cơ sở thống kê. Độ tin cậy của chính đánh giá này chỉ 51%.
+
+     VÌ SAO XẾP LOẠI NÀY: Rủi ro thấp (48) và chất lượng tốt (69)
+     VÌ SAO RỦI RO: Đang ôm 16,652 USDT lỗ chưa chốt (3% vốn), chốt hết thì PF tụt từ 2.52 xuống 1.09; phân phối lợi nhuận xấu (điểm 75); tập trung danh mục (điểm
+     64); rủi ro đuôi cao: P95 sụt vốn 3%.
+     Điểm 48.5 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Rủi ro đuôi 60/100 (trọng số 1.3) đóng góp 7.6 điểm
+       + Chất lượng lợi nhuận / R 75/100 (trọng số 0.9) đóng góp 6.6 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Đòn bẩy / Exposure chỉ 30/100 (trọng số 1.1) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 30/100 (trọng số 0.8) kéo bình quân xuống
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − 2 chiều thiếu bằng chứng được tính trung tính 50 điểm, không đẩy điểm lên cũng không kéo xuống
+
+[26] 亿难贫 — ETH/CEX
+     XẾP LOẠI: TIỀM NĂNG   ·   ĐIỂM NGON: 78.5/100   ·   ĐIỂM RỦI RO: 47.1/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: BLOCK_NEW_TRADES
+     Độ tin cậy của đánh giá: 86% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 499 lệnh đã chốt · thắng 73% · profit factor 4.03 · tổng lãi/lỗ 953 USDT · Sharpe 53.76 · sụt vốn sâu nhất 0.0%
+     ĐANG NẮM GIỮ: 42 vị thế đang mở · exposure 11,917 USDT · đòn bẩy 100x · lỗ chưa chốt 224 USDT · vốn tham chiếu 207,569 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 499 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +0.4% trên vốn, kịch bản tốt (p95) +0.7%, kịch bản xấu
+     (p05) +0.2%, XẤU NHẤT -0.0%. Sụt vốn P95 0%, xấu nhất 0%. Xác suất thua lỗ 0%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 47 ứng viên cùng asset, xác suất còn 100.0%. Cần tối thiểu 18 lệnh để tin được thành tích này, bot đang có
+     499 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       亿难贫 — ETH/CEX, 499 lệnh đã chốt, vốn tham chiếu 207,569 USDT, 131.4 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: 亿难贫 không có dấu hiệu bất thường nào đủ nặng để một mình nó quyết định kết quả (thắng 73%, profit factor 4.03, sụt vốn 0.0%). Điểm
+       số đến từ bình quân các chiều rủi ro chứ không từ một lỗi cụ thể, nên đây là mức rủi ro tổng thể chứ không phải một chỗ hỏng cụ thể.
+
+       CHỨNG MINH:
+       • Profit factor 4.03 (sổ đã chốt) → 2.37 (chốt cả sổ mở) — chốt hết sổ mở thì mất 41% lợi thế
+       • Lỗ chưa chốt 224 USDT = 0% vốn, trên 42 vị thế mở
+       • Điểm rủi ro 47 là bình quân 10 chiều; nặng nhất: Đồng thuận thị trường 80, Hành vi giao dịch 75
+       • Monte Carlo 10,000 kịch bản × 499 lệnh: trung vị +0.4% vốn, p05 +0.2%, xấu nhất -0.0%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 0.2%, xác suất lỗ 0%
+       • 499 lệnh, thắng 73%, payoff 1.46
+
+       KẾT LUẬN: TIỀM NĂNG — chất lượng 78/100, rủi ro 47/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có.
+
+     VÌ SAO XẾP LOẠI NÀY: Rủi ro thấp (47) và chất lượng tốt (78)
+     VÌ SAO RỦI RO: Ngược xu hướng thị trường (giảm); hành vi giao dịch nguy hiểm (điểm 75); tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     Điểm 47.1 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Đồng thuận thị trường 80/100 (trọng số 1.2) đóng góp 9.3 điểm
+       + Hành vi giao dịch 75/100 (trọng số 1.2) đóng góp 8.7 điểm
+       + Đòn bẩy / Exposure 60/100 (trọng số 1.1) đóng góp 6.4 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Thanh khoản / Khớp lệnh chỉ 15/100 (trọng số 0.9) kéo bình quân xuống
+       − Chất lượng hiệu suất chỉ 5/100 (trọng số 1.0) kéo bình quân xuống
+
+[27] Milies L — BTC/CEX
+     XẾP LOẠI: TIỀM NĂNG   ·   ĐIỂM NGON: 87.2/100   ·   ĐIỂM RỦI RO: 40.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: WARN
+     Độ tin cậy của đánh giá: 69% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 74 lệnh đã chốt · thắng 69% · profit factor 4.89 · tổng lãi/lỗ 121,628 USDT · Sharpe 6.54 · sụt vốn sâu nhất 6.3%
+     ĐANG NẮM GIỮ: 25 vị thế đang mở · exposure 925,638 USDT · đòn bẩy 100x · lỗ chưa chốt 23,497 USDT · vốn tham chiếu 255,853 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 74 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +46.6% trên vốn, kịch bản tốt (p95) +71.8%, kịch bản xấu
+     (p05) +25.0%, XẤU NHẤT +3.2%. Sụt vốn P95 5%, xấu nhất 11%. Xác suất thua lỗ 0%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 9 ứng viên cùng asset, xác suất còn 100.0%. Cần tối thiểu 9 lệnh để tin được thành tích này, bot đang có 74
+     — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Milies L — BTC/CEX, 74 lệnh đã chốt, vốn tham chiếu 255,853 USDT, 0.8 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Milies L không có dấu hiệu bất thường nào đủ nặng để một mình nó quyết định kết quả (thắng 69%, profit factor 4.89, sụt vốn 6.3%).
+       Điểm số đến từ bình quân các chiều rủi ro chứ không từ một lỗi cụ thể, nên đây là mức rủi ro tổng thể chứ không phải một chỗ hỏng cụ thể.
+
+       CHỨNG MINH:
+       • Profit factor 4.89 (sổ đã chốt) → 3.01 (chốt cả sổ mở) — chốt hết sổ mở thì mất 38% lợi thế
+       • Lỗ chưa chốt 23,497 USDT = 9% vốn, trên 25 vị thế mở
+       • Điểm rủi ro 40 là bình quân 10 chiều; nặng nhất: Rủi ro danh mục 64, Chất lượng lợi nhuận / R 60
+       • Monte Carlo 10,000 kịch bản × 74 lệnh: trung vị +46.6% vốn, p05 +25.0%, xấu nhất +3.2%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 20.2%, xác suất lỗ 0%
+       • 74 lệnh, thắng 69%, payoff 2.21 → lệnh thắng lớn hơn hẳn lệnh thua
+
+       KẾT LUẬN: TIỀM NĂNG — chất lượng 87/100, rủi ro 40/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Độ tin cậy của chính đánh giá này chỉ 69%.
+
+     VÌ SAO XẾP LOẠI NÀY: Rủi ro thấp (40) và chất lượng tốt (87)
+     VÌ SAO RỦI RO: Tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60); đòn bẩy và exposure lớn: đòn bẩy 100x; vị thế lớn so với thanh khoản (điểm
+     60).
+     Điểm 40.0 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Đòn bẩy / Exposure 60/100 (trọng số 1.1) đóng góp 6.4 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Thanh khoản / Khớp lệnh 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Rủi ro đuôi chỉ 30/100 (trọng số 1.3) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 30/100 (trọng số 0.8) kéo bình quân xuống
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Chất lượng hiệu suất chỉ 5/100 (trọng số 1.0) kéo bình quân xuống
+
+[28] Dark-Wood-Dahlia — SNDK/CEX
+     XẾP LOẠI: TIỀM NĂNG   ·   ĐIỂM NGON: 85.4/100   ·   ĐIỂM RỦI RO: 38.4/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: WARN
+     Độ tin cậy của đánh giá: 54% · đối soát sổ lệnh UNVERIFIED_REFERENCE · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 326 lệnh đã chốt · thắng 46% · profit factor 1.41 · tổng lãi/lỗ 20,663 USDT · Sharpe 4.50 · sụt vốn sâu nhất 4.7%
+     ĐANG NẮM GIỮ: 40 vị thế đang mở · exposure 1,005,417 USDT · đòn bẩy 100x · lỗ chưa chốt 14,482 USDT · vốn tham chiếu 235,783 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 326 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +8.3% trên vốn, kịch bản tốt (p95) +21.2%, kịch bản xấu
+     (p05) -1.6%, XẤU NHẤT -12.3%. Sụt vốn P95 6%, xấu nhất 13%. Xác suất thua lỗ 8%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 94.7% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 2 ứng viên cùng asset, xác suất còn 86.3%. Cần tối thiểu 338 lệnh để tin được thành tích này, bot đang có
+     326 — còn thiếu 12
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Dark-Wood-Dahlia — SNDK/CEX, 326 lệnh đã chốt, vốn tham chiếu 235,783 USDT, 8.8 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Dark-Wood-Dahlia có sổ sách trung thực — điểm quan trọng nhất: profit factor 1.41 trên lệnh đã chốt, và 1.50 nếu chốt luôn mọi vị thế
+       đang mở. Hai con số sát nhau nghĩa là bot cắt lỗ thật chứ không ôm lỗ chờ gỡ, nên thành tích đang thấy là thành tích thật. Sụt vốn thật đã ghi nhận 4.7%.
+
+       CHỨNG MINH:
+       • Profit factor 1.41 (sổ đã chốt) → 1.50 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 14,482 USDT = 6% vốn, trên 40 vị thế mở
+       • Điểm rủi ro 38 là bình quân 10 chiều; nặng nhất: Đòn bẩy / Exposure 75, Rủi ro danh mục 64
+       • Monte Carlo 10,000 kịch bản × 326 lệnh: trung vị +8.3% vốn, p05 -1.6%, xấu nhất -12.3%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 3.7%, xác suất lỗ 8%
+       • 326 lệnh, thắng 46%, payoff 1.67 → lệnh thắng lớn hơn hẳn lệnh thua
+
+       KẾT LUẬN: TIỀM NĂNG — chất lượng 85/100, rủi ro 38/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Điều kiện xem xét lại: có thêm khoảng 12 lệnh nữa để đủ cơ
+       sở thống kê. Độ tin cậy của chính đánh giá này chỉ 54%.
+
+     VÌ SAO XẾP LOẠI NÀY: Rủi ro thấp (38) và chất lượng tốt (85)
+     VÌ SAO RỦI RO: Đòn bẩy và exposure lớn: đòn bẩy 100x; tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     Điểm 38.4 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Đòn bẩy / Exposure 75/100 (trọng số 1.1) đóng góp 8.0 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Đồng thuận thị trường chỉ 10/100 (trọng số 1.2) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+       − Chất lượng hiệu suất chỉ 5/100 (trọng số 1.0) kéo bình quân xuống
+
+[29] Shallow-Pair-Frog — BTC/CEX
+     XẾP LOẠI: TIỀM NĂNG   ·   ĐIỂM NGON: 95.0/100   ·   ĐIỂM RỦI RO: 37.2/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: WARN
+     Độ tin cậy của đánh giá: 85% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 428 lệnh đã chốt · thắng 46% · profit factor 3.29 · tổng lãi/lỗ 141,501 USDT · Sharpe 3.40 · sụt vốn sâu nhất 7.7%
+     ĐANG NẮM GIỮ: 67 vị thế đang mở · exposure 307,362 USDT · đòn bẩy 100x · lỗ chưa chốt 857 USDT · vốn tham chiếu 579,369 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 428 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +22.6% trên vốn, kịch bản tốt (p95) +69.2%, kịch bản xấu
+     (p05) -5.4%, XẤU NHẤT -20.4%. Sụt vốn P95 9%, xấu nhất 20%. Xác suất thua lỗ 17%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 3 ứng viên cùng asset, xác suất còn 99.5%. Cần tối thiểu 101 lệnh để tin được thành tích này, bot đang có
+     428 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       Shallow-Pair-Frog — BTC/CEX, 428 lệnh đã chốt, vốn tham chiếu 579,369 USDT, 4.8 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Shallow-Pair-Frog có sổ sách trung thực — điểm quan trọng nhất: profit factor 3.29 trên lệnh đã chốt, và 3.33 nếu chốt luôn mọi vị thế
+       đang mở. Hai con số sát nhau nghĩa là bot cắt lỗ thật chứ không ôm lỗ chờ gỡ, nên thành tích đang thấy là thành tích thật. Sụt vốn thật đã ghi nhận 7.7%.
+
+       CHỨNG MINH:
+       • Profit factor 3.29 (sổ đã chốt) → 3.33 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Lỗ chưa chốt 857 USDT = 0% vốn, trên 67 vị thế mở
+       • Điểm rủi ro 37 là bình quân 10 chiều; nặng nhất: Rủi ro danh mục 64, Chất lượng lợi nhuận / R 60
+       • Monte Carlo 10,000 kịch bản × 428 lệnh: trung vị +22.6% vốn, p05 -5.4%, xấu nhất -20.4%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 7.8%, xác suất lỗ 17%
+       • 428 lệnh, thắng 46%, payoff 3.93 → lệnh thắng lớn hơn hẳn lệnh thua
+
+       KẾT LUẬN: TIỀM NĂNG — chất lượng 95/100, rủi ro 37/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút.
+
+     VÌ SAO XẾP LOẠI NÀY: Rủi ro thấp (37) và chất lượng tốt (95)
+     VÌ SAO RỦI RO: Tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60); đòn bẩy và exposure lớn: đòn bẩy 100x.
+     Điểm 37.2 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Đòn bẩy / Exposure 60/100 (trọng số 1.1) đóng góp 6.4 điểm
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Thanh khoản / Khớp lệnh chỉ 15/100 (trọng số 0.9) kéo bình quân xuống
+       − Đồng thuận thị trường chỉ 10/100 (trọng số 1.2) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+       − Chất lượng hiệu suất chỉ 5/100 (trọng số 1.0) kéo bình quân xuống
+
+[30] 01014588 — ETH/CEX
+     XẾP LOẠI: TIỀM NĂNG   ·   ĐIỂM NGON: 84.6/100   ·   ĐIỂM RỦI RO: 29.5/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: MONITOR
+     Độ tin cậy của đánh giá: 77% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 167 lệnh đã chốt · thắng 70% · profit factor 1.62 · tổng lãi/lỗ 88,949 USDT · Sharpe 3.72 · sụt vốn sâu nhất 11.8%
+     ĐANG NẮM GIỮ: 2 vị thế đang mở · exposure 77,561 USDT · đòn bẩy 10x · vốn tham chiếu 403,694 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 167 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +22.2% trên vốn, kịch bản tốt (p95) +41.8%, kịch bản xấu
+     (p05) +2.2%, XẤU NHẤT -20.6%. Sụt vốn P95 14%, xấu nhất 33%. Xác suất thua lỗ 3%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 95.3%; sau khi trừ việc bot này được chọn là con tốt nhất trong 8 ứng viên cùng asset, xác suất còn
+     58.6%. Cần tối thiểu 161 lệnh để tin được thành tích này, bot đang có 167 — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       01014588 — ETH/CEX, 167 lệnh đã chốt, vốn tham chiếu 403,694 USDT, 2.0 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: 01014588 có thành tích trông khả quan (thắng 70%, profit factor 1.62, sụt vốn 11.8%), nhưng được chọn vì là con tốt nhất trong 8 ứng
+       viên cùng asset — chọn giỏi nhất từ nhiều ứng viên luôn có phần may mắn. Trừ phần đó theo Deflated Sharpe, xác suất bot thật sự có lợi thế chỉ còn 58.6%,
+       gần mức tung đồng xu.
+
+       CHỨNG MINH:
+       • Profit factor 1.62 (sổ đã chốt) → 1.64 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ
+       • Điểm rủi ro 29 là bình quân 10 chiều; nặng nhất: Rủi ro danh mục 64, Chất lượng lợi nhuận / R 60
+       • Monte Carlo 10,000 kịch bản × 167 lệnh: trung vị +22.2% vốn, p05 +2.2%, xấu nhất -20.6%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 2.6%, xác suất lỗ 3%
+       • 167 lệnh, thắng 70%, payoff 0.69 → một lệnh thua xoá 1.4 lệnh thắng
+       • Sụt vốn thực tế 11.8%, Sharpe 3.72, chuỗi thua dài nhất 9 lệnh
+
+       KẾT LUẬN: TIỀM NĂNG — chất lượng 85/100, rủi ro 29/100. Khuyến nghị: CÓ THỂ COPY, theo dõi định kỳ.
+
+     VÌ SAO XẾP LOẠI NÀY: Rủi ro thấp (29) và chất lượng tốt (85)
+     VÌ SAO RỦI RO: Tập trung danh mục (điểm 64); phân phối lợi nhuận xấu (điểm 60).
+     Điểm 29.5 chính là bình quân gia quyền của các chiều đánh giá, không có veto nào được kích hoạt.
+       + Chất lượng lợi nhuận / R 60/100 (trọng số 0.9) đóng góp 5.2 điểm
+       + Rủi ro danh mục 64/100 (trọng số 0.8) đóng góp 5.0 điểm
+       − Rủi ro đuôi chỉ 30/100 (trọng số 1.3) kéo bình quân xuống
+       − Hành vi giao dịch chỉ 30/100 (trọng số 1.2) kéo bình quân xuống
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Đòn bẩy / Exposure chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+
+
+THIẾU DỮ LIỆU — VIỆC CẦN THU THẬP
+====================================================================================================
+[HIGH  ] Sổ lệnh — Lịch sử đầy đủ theo leadDays
+    Sổ lệnh mới phủ một phần thời gian hoạt động; cần phân trang sâu hơn để phủ hết lịch sử.
+    Mở khóa: performance_quality, tail_risk | Ảnh hưởng: Rude-Gems-Leopard, xiaojian888999, Quaint-SegWit-Laurel, k001, Pure-Symbol-Yarrow, SharpMine, Linxixi, FJ Investment, 01pp, Ail.Wang, Bare-Payee-Fox, HaveARestin, Valid-Launch-Monkey, 脚本test, xiaomijiahanyangzao, Fly-000, Proud-Peg-Basil, 亿难贫, BTC策略, RuiJie, 0xleek.eth, Milies L, Shallow-Pair-Frog, 01014588
+[HIGH  ] Vị thế mở (OKX không công bố) — instId — không thu thập được
+    OKX trả instId rỗng cho trader này. Hệ thống đã suy luận được 0 vị thế từ biến động giá ngụ ý; 2 vị thế còn lại chưa quy được.
+    Mở khóa: market_alignment, liquidity_execution | Ảnh hưởng: King_GG, xiaojian888999, Pure-Symbol-Yarrow, Linxixi, FJ Investment, Bare-Payee-Fox, 脚本test, Proud-Peg-Basil, BTC策略, 0xleek.eth, Dark-Wood-Dahlia
+[HIGH  ] Vị thế ngoài sổ lệnh — Sổ lệnh sâu hơn, hoặc danh sách instrument đầy đủ
+    9 vị thế không khớp bất kỳ instrument nào bot từng đóng gần đây; cần lịch sử sâu hơn để mở rộng tập ứng viên suy luận.
+    Mở khóa: market_alignment, liquidity_execution | Ảnh hưởng: xiaojian888999, Linxixi, FJ Investment, Bare-Payee-Fox, Proud-Peg-Basil, BTC策略, Dark-Wood-Dahlia
+[MEDIUM] Thị trường LIT — OHLCV + order book cho instrument bot đang trade
+    Bot giao dịch LIT nhưng chưa có dữ liệu thị trường nào cho symbol này.
+    Mở khóa: market_alignment, liquidity_execution | Ảnh hưởng: Bare-Payee-Fox
+[MEDIUM] Thị trường CRCL — OHLCV + order book cho instrument bot đang trade
+    Bot giao dịch CRCL nhưng chưa có dữ liệu thị trường nào cho symbol này.
+    Mở khóa: market_alignment, liquidity_execution | Ảnh hưởng: Proud-Peg-Basil
+[LOW   ] Thị trường HYPE — macro
+    Nguồn macro chưa được thu thập cho HYPE.
+    Mở khóa: portfolio_risk
+[LOW   ] Thị trường SNDK — macro
+    Nguồn macro chưa được thu thập cho SNDK.
+    Mở khóa: portfolio_risk
+[LOW   ] Thị trường HYPE — ohlcv_1h (cũ)
+    Nguồn ohlcv_1h lệch quá xa mốc dữ liệu của HYPE; cần crawl lại cùng nhịp.
+    Mở khóa: —
+[LOW   ] Thị trường SNDK — ohlcv_1h (cũ)
+    Nguồn ohlcv_1h lệch quá xa mốc dữ liệu của SNDK; cần crawl lại cùng nhịp.
+    Mở khóa: —

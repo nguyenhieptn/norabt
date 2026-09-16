@@ -183,12 +183,28 @@ function RunPanel({ runId, onChanged }) {
         ) : (
           <button className="btn pri" onClick={() => setChayLai(true)} disabled={busy || !pre?.ok}
             title={pre?.ok ? '' : 'Cấu hình chưa hợp lệ'}>
-            ▶ Chạy backtest
+            {info?.state === 'done' || info?.state === 'interrupted' ? '▶ Chạy lại backtest' : '▶ Chạy backtest'}
           </button>
         )}
         <button className="btn" onClick={showLog}>Xem log</button>
         <button className="btn" onClick={refresh}>Làm mới</button>
         <Link className="btn" to={`/library/result/${runId}`}>Xem kết quả</Link>
+        <Link
+          className="btn pri"
+          to="/library/wfa"
+          state={{
+            wfaInput: {
+              source_handle: `run_${runId}`,
+              strategy_name: info?.name || `Run #${runId}`,
+              symbol: info?.dataset?.split('_')[0] || 'SOL',
+            },
+            autoRun: true,
+          }}
+          title="Chuyển dữ liệu lần chạy này sang tab WFA và tự động chạy kiểm định"
+        >
+          <span>🔄 Chạy WFA</span>
+          <span style={{ fontWeight: 'bold' }}>➔</span>
+        </Link>
       </div>
 
       {chayLai && (
@@ -278,7 +294,7 @@ function AlphaMoi({ onDung }) {
                         <td>
                           {a.run_id
                             ? <Link className="btn" to={`/library/result/${a.run_id}`}>Xem</Link>
-                            : <button className="btn" onClick={() => setDung(a.id)}>Dựng lần chạy</button>}
+                            : <button className="btn pri" onClick={() => setDung(a.id)}>▶ Run backtest</button>}
                         </td>
                       </tr>
                     ))}

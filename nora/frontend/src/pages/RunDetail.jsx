@@ -46,12 +46,35 @@ export default function RunDetail() {
     <>
       <p className="crumb"><Link to="/library/result">Các lần chạy</Link> · mã {id}</p>
       <div className="head">
-        <h1>{info?.name || `Lần chạy ${id}`}</h1>
-        <p>
-          {info?.campaigns || 0} coin · dữ liệu <span className="mono">{info?.dataset}</span>
-          {info?.margin_type ? ` · ${info.margin_type}` : ''}
-          {info?.running ? ' · đang chạy' : ''}
-        </p>
+        <div className="head-row">
+          <div>
+            <h1>{info?.name || `Lần chạy ${id}`}</h1>
+            <p>
+              {info?.campaigns || 0} coin · dữ liệu <span className="mono">{info?.dataset}</span>
+              {info?.margin_type ? ` · ${info.margin_type}` : ''}
+              {info?.running ? ' · đang chạy' : ''}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Link
+              to="/library/wfa"
+              state={{
+                wfaInput: {
+                  source_handle: `run_${id}`,
+                  symbol: info?.dataset || 'SOL',
+                  strategy_name: info?.name || `Run #${id}`,
+                  metrics: ov,
+                }
+              }}
+              className="btn pri"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}
+              title="Chuyển kết quả lần chạy này sang bước kiểm định trượt Walk-Forward (WFA)"
+            >
+              <span>🔄 Kiểm định WFA tiếp</span>
+              <span>➔</span>
+            </Link>
+          </div>
+        </div>
       </div>
 
       {/* ---------- Tầng 1: tổng quan ---------- */}

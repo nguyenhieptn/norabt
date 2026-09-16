@@ -1,0 +1,90 @@
+%% Lõi QC (Bước 3): từ quan sát tới điểm rủi ro và đề xuất hành động
+%% Vẽ bằng Mermaid: https://mermaid.live
+flowchart TB
+
+BR["BotResult (Bước 2)<br/>hiệu suất · lỗ hoãn nhận · sụt vốn<br/>hành vi · chiến lược theo pha · mô phỏng"]
+MR["MarketResult (Bước 1)<br/>chỉ làm bối cảnh"]
+
+subgraph LENSES["10 LĂNG KÍNH — mỗi chiều tự chấm 0-100 kèm trọng số"]
+  direction TB
+  L1["Đồng thuận thị trường · 1.2<br/>hướng vị thế so với xu hướng"]
+  L2["Chất lượng hiệu suất · 1.0<br/>PF · win · kỳ vọng · PF sau khi chốt hết"]
+  L3["Chất lượng lợi nhuận/R · 0.9<br/>phân phối, lệch, đuôi dày"]
+  L4["Rủi ro sụt vốn · 1.1<br/>maxDD · thời gian chìm · cụm lỗ"]
+  L5["Rủi ro đuôi · 1.3<br/>P95/P99 DD · xác suất cháy"]
+  L6["Đòn bẩy / Exposure · 1.1"]
+  L7["Hành vi giao dịch · 1.2<br/>martingale có đối chứng · gỡ lỗ"]
+  L8["Độ bền chiến lược · 0.8<br/>phụ thuộc pha · chưa trải downtrend"]
+  L9["Thanh khoản / Khớp lệnh · 0.9"]
+  L10["Rủi ro danh mục · 0.8"]
+end
+
+EV{"Có bằng chứng<br/>cho chiều này không?"}
+UNK["UNKNOWN<br/>trọng số giữ nguyên,<br/>tin cậy = 0<br/>KHÔNG coi là an toàn"]
+NA["NOT_APPLICABLE<br/>trọng số = 0"]
+AV["AVAILABLE<br/>điểm + tin cậy"]
+
+WAVG["Bình quân gia quyền 10 chiều"]
+
+V1{"Veto: hành vi hủy hoại<br/>(martingale xác nhận)"}
+V2{"Veto: rủi ro đuôi cực đoan<br/>P95 DD >= 85"}
+V3{"Veto: chốt hết sổ mở<br/>thì PF < 1"}
+V4{"Veto: stress dẫn tới thanh lý"}
+EMG{"Khẩn cấp:<br/>xác suất cháy cao<br/>hoặc đã từng về 0"}
+
+FLOOR["Sàn veto<br/>điểm = max(bình quân, sàn)"]
+FORCE["Ép 100 điểm"]
+FINAL["Điểm cuối + decided_by<br/>WEIGHTED_AVERAGE / VETO_FLOOR / EMERGENCY_OVERRIDE"]
+
+QUAL["ĐIỂM CHẤT LƯỢNG (càng cao càng tốt)<br/>sinh lời (PF sau khi chốt hết sổ mở)<br/>ổn định · kiểm soát sụt vốn<br/>trung thực · độ bền qua các pha<br/>thành phần không đo được thì rơi khỏi cả tử và mẫu"]
+
+HID{"Số liệu bề mặt<br/>có che rủi ro không?<br/>PF sụp khi chốt hết · lỗ mở lớn<br/>lãi dồn một pha · chưa trải downtrend"}
+
+TIER{"Xếp loại 4 hạng"}
+T1["NGUY HIỂM<br/>rủi ro >= 70"]
+T2["TIỀM ẨN<br/>bề mặt che rủi ro<br/>hoặc rủi ro 50-69"]
+T3["TIỀM NĂNG<br/>rủi ro thấp + chất lượng >= 65"]
+T4["AN TOÀN<br/>rủi ro thấp, chất lượng vừa"]
+
+THIN{"Bằng chứng phủ < 50%<br/>VÀ điểm < 65?"}
+UNKT["THIẾU BẰNG CHỨNG<br/>bằng chứng mỏng không được<br/>hạ một mức rủi ro đã đo cao"]
+
+OUT["BotRiskAssessment<br/>· điểm rủi ro + điểm chất lượng<br/>· điểm và hạng<br/>· vì sao rủi ro (tiếng Việt)<br/>· vì sao đúng điểm này, không cao hơn<br/>· chiều nào đẩy lên / kéo xuống<br/>· đề xuất hành động"]
+CTRL["ControlDecisionEngine<br/>READ_ONLY — chỉ ghi nhận"]
+
+BR ==> LENSES
+MR -.-> L1
+MR -.-> L9
+LENSES --> EV
+EV -- "thiếu dữ liệu" --> UNK
+EV -- "không áp dụng" --> NA
+EV -- "đủ" --> AV
+UNK & NA & AV --> WAVG
+
+WAVG --> V1 --> V2 --> V3 --> V4 --> EMG
+V1 -- "có" --> FLOOR
+V2 -- "có" --> FLOOR
+V3 -- "có" --> FLOOR
+V4 -- "có" --> FLOOR
+EMG -- "có" --> FORCE
+FLOOR --> FINAL
+FORCE --> FINAL
+EMG -- "không" --> FINAL
+
+BR ==> QUAL
+FINAL --> THIN
+THIN -- "có" --> UNKT --> OUT
+THIN -- "không" --> HID
+QUAL --> HID
+HID --> TIER
+TIER --> T1 & T2 & T3 & T4
+T1 & T2 & T3 & T4 --> OUT
+OUT --> CTRL
+
+classDef veto fill:#da3633,stroke:#8e1519,color:#fff
+classDef safe fill:#238636,stroke:#1a7f37,color:#fff
+classDef warn fill:#9e6a03,stroke:#7d4e00,color:#fff
+class V1,V2,V3,V4,EMG,FLOOR,FORCE veto
+class T3,T4 safe
+class T1,T2 veto
+class UNK,UNKT,THIN,HID warn

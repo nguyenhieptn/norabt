@@ -1,0 +1,164 @@
+============================================================================================================================================
+BƯỚC 1 — DỮ LIỆU (KIỂM KÊ ĐẦU VÀO CHO MARKET VÀ BOT)
+14/09/2026 05:25 UTC | 1/1 thị trường đủ nguồn | 1/1 bot đủ dữ liệu
+============================================================================================================================================
+
+BẢNG 1.1 — DỮ LIỆU THỊ TRƯỜNG (1 ASSET)
+--------------------------------------------------------------------------------------------------------------------------------------------
+THỊ TRƯỜNG   NẾN 1H   NGUỒN ĐẠT  CHẤT LƯỢNG  THIẾU / QUÁ HẠN
+--------------------------------------------------------------------------------------------------------------------------------------------
+CEX/XRP      32,439   6/6        1.00        ✓ đủ
+--------------------------------------------------------------------------------------------------------------------------------------------
+
+BẢNG 1.2 — DỮ LIỆU BOT (1 BOT)
+--------------------------------------------------------------------------------------------------------------------------------------------
+SLOT       VAI       BOT                  LỆNH  /ASSET VỊ THẾ THIẾU inst TUẦN  HỒ SƠ  HOẠT ĐỘNG  CHẶN / GHI CHÚ
+--------------------------------------------------------------------------------------------------------------------------------------------
+CEX/XRP    YẾU HƠN   HaveARestin          145   27     95     0          12    có     1.3d       2/145 lệnh trống closeTime
+--------------------------------------------------------------------------------------------------------------------------------------------
+· Bước này chỉ kiểm kê dữ liệu; mọi diễn giải nằm ở bước 2.
+· CHẶN = thiếu thứ mà phép tính rủi ro không chạy được nếu không có.
+· GHI CHÚ = khiếm khuyết OKX để trống, ghi rõ số lượng, không tự điền.
+
+=======================================================================================================================================
+BƯỚC 2.1 — PHÂN TÍCH THỊ TRƯỜNG (CHẾ ĐỘ VÀ TƯ THẾ)
+14/09/2026 05:25 UTC | Quan sát 1 thị trường | Đạt điều kiện giám sát 1
+=======================================================================================================================================
+ASSET        TƯ THẾ           CHẾ ĐỘ THỊ TRƯỜNG              THANH KHOẢN   DÒNG TIỀN      ATR%    VỊ TRÍ BIÊN  CHẤT LƯỢNG  BOT  ĐỦ ĐK  
+---------------------------------------------------------------------------------------------------------------------------------------
+XRP/CEX      RỦI RO           Giảm, biến động bình thường    ADEQUATE      BUY_PRESSURE   0.56    16           100         19   có     
+---------------------------------------------------------------------------------------------------------------------------------------
+Phân bố tư thế: RỦI RO: 1
+Phân bố chế độ: Giảm, biến động bình thường: 1
+
+DIỄN GIẢI TỪNG THỊ TRƯỜNG
+=======================================================================================================================================
+[XRP/CEX] Giá 1.347, giảm, biến động bình thường, thanh khoản đủ, áp lực mua.
+    RỦI RO vì: xu hướng giảm; vị thế dồn một phía (long, tỷ lệ L/S 2.89); beta theo BTC cao (1.53), khuếch đại cú sốc chung
+
+======================================================================================================================
+BƯỚC 2.2 — PHÂN TÍCH VÀ MÔ PHỎNG TỪNG BOT
+14/09/2026 05:25 UTC | 1 asset | 1 bot phân tích được | Số liệu quan sát, chưa phải phán quyết rủi ro
+======================================================================================================================
+
+BẢNG A — HIỆU SUẤT ĐÃ THỰC HIỆN (1 ASSET · 1 BOT)
+---------------------------------------------------------------------------------------------------------------------------------------
+ASSET     VAI       BOT                 TRADE WIN% PROFIT      PF SỔ PF CHỐT MDD     SHARPE LỖ MỞ   HƯỚNG         KIỂU VÀO
+---------------------------------------------------------------------------------------------------------------------------------------
+CEX/XRP   YẾU HƠN   HaveARestin         143   92   9,583       11.12 0.16    0.5%    16.13  86k$    hai chiều     nghịch xu hướng
+---------------------------------------------------------------------------------------------------------------------------------------
+PROFIT = PnL sổ đã chốt · PF CHỐT = profit factor nếu chốt hết vị thế đang mở · MDD có dấu * = vượt vốn ghi nhận nên là sàn
+
+BẢNG B — MÔ PHỎNG MONTE CARLO VÀ ĐÁNH GIÁ RỦI RO
+10.000 kịch bản/bot · stationary bootstrap (Politis-Romano 1994) · mỗi kịch bản replay đúng số lệnh của chính bot · chỉ lệnh ĐÃ CHỐT
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+ASSET     BOT                 LN xấu nhất LN t.vị  LN p95   CVaR95   DD t.vị  DD p95  MAR    P(lãi) P(cháy) PSR    DSR    MinTRL
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+CEX/XRP   HaveARestin         +3.9%       +7.3%    +8.6%    +5.5%    0%       0%      19.0   100%   0%      1.000? 0.998  20 (có 143)
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+Tổng: 1 asset · 1 bot
+LN = lợi nhuận trên vốn · CVaR95 = lỗ trung bình trong 5% kịch bản tệ nhất · MAR = lợi nhuận chia sụt vốn
+PSR = xác suất Sharpe thật > 0 sau khi tính độ dài mẫu, độ lệch và đuôi dày; dấu ? = mô men do vài lệnh đơn lẻ chi phối nên không đáng tin
+DSR = PSR sau khi trừ việc bot được chọn là con tốt nhất trong pool ứng viên · MinTRL = số lệnh tối thiểu để Sharpe đủ tin ở mức 95%
+(Bailey & López de Prado 2012, 2014)
+
+CHI TIẾT TỪNG ASSET
+
+── CEX/XRP ── RỦI RO · BEARISH/NORMAL · thanh khoản ADEQUATE · chất lượng dữ liệu 1.00
+   Vì: xu hướng giảm; vị thế dồn một phía (long, tỷ lệ L/S 2.89); beta theo BTC cao (1.53), khuếch đại cú sốc chung
+   VAI       BOT                  lệnh  /asset win%  PF sổ  PF chốt sụt vốn  vị thế lỗ mở    CHIẾN LƯỢC
+   YẾU HƠN   HaveARestin          143   27     92    11.12  0.16    0.5%     95     86k$     hai chiều, nghịch xu hướng · phủ pha 83%
+   · HaveARestin — thông số đầy đủ:
+       hiệu suất:      kỳ vọng 67.01/lệnh · payoff 1.02 · lãi TB 80.38 / lỗ TB 78.93 · tổng PnL 9,583
+       hiệu chỉnh RR:  Sharpe 16.13 · Sortino 9.65 · Calmar 12.31 · hồi phục 17.62
+       nhịp giao dịch: 1.56 lệnh/ngày · giữ lệnh trung vị 1,475 phút · chuỗi thắng dài nhất 34 · chuỗi thua dài nhất 3
+       phân phối lệnh: trung vị 58 · độ lệch chuẩn 94 · skew -0.10 · kurtosis 18.05 · p05 -27 / p95 198 · KTC95 trung bình [52; 82]
+       vốn và sổ:      vốn tham chiếu 131,958 (WEEKLY_EQUITY_CURVE) · sổ phủ 92/580 ngày dẫn · đối soát PARTIAL_LEDGER · chế độ đo PARTIAL
+       stress tất định: biến động ×2 -474 · spread ×3 -488 · thanh khoản ½ -732 → SURVIVED
+     theo pha thị trường:
+       Giảm, êm        11 lệnh   win 100% PnL 1,239         góp 12% lãi gộp
+       Giảm, động      1 lệnh    win 100% PnL 53            góp 1% lãi gộp
+       Đi ngang, êm    17 lệnh   win 94%  PnL 959           góp 10% lãi gộp
+       Đi ngang, động  5 lệnh    win 100% PnL 234           góp 2% lãi gộp
+       Tăng, êm        24 lệnh   win 96%  PnL 2,056         góp 20% lãi gộp
+       Tăng, động      60 lệnh   win 90%  PnL 3,877         góp 39% lãi gộp
+       Monte Carlo: 10,000 kịch bản × 143 lệnh = 1,430,000 lượt bốc  · phạm vi: chỉ lệnh ĐÃ CHỐT, bot đang giữ 86k$ lỗ chưa chốt nằm ngoài mô phỏng
+       lợi nhuận/vốn:  xấu nhất +3.9% · p05 +5.8% · trung vị +7.3% · p95 +8.6% · tốt nhất +10.3%
+       sụt vốn:        P95 0.4% · xấu nhất 1.1% · xác suất cháy 0.0% · xác suất lỗ 0.0%
+       căn cứ kiểu vào lệnh: 20/94 lệnh mở thuận chiều biến động 24h trước đó
+   → Chưa đủ hai bot có dữ liệu để so sánh.
+
+----------------------------------------------------------------------------------------------------------------------
+* = mức sụt vốn vượt vốn ghi nhận tại thời điểm đó, con số là sàn.
+· Mỗi asset gồm 1 bot chạy ngon và 1 bot cũng chạy nhưng kém hơn, chọn theo lợi nhuận thực hiện tại thời điểm quét.
+· Pha thị trường lấy tại thời điểm MỞ lệnh; lệnh trên instrument không có nến được tính là chưa rõ pha, không gộp vào pha nào.
+· Monte Carlo stationary bootstrap (Politis-Romano 1994), 10.000 kịch bản, mỗi kịch bản replay đúng số lệnh của chính bot. Mẫu CHỈ gồm lệnh đã chốt — vị thế đang mở cố ý không đưa vào, nên phần lỗ treo (nếu có) được nêu riêng chứ không trộn vào phân vị lợi nhuận.
+· Đây là quan sát, chưa phải phán quyết rủi ro — phán quyết ở bước 3.
+
+===================================================================================================================================================================
+BƯỚC 3 — CHẤM ĐIỂM VÀ XẾP LOẠI BOT (QC CORE)
+14/09/2026 05:25 UTC | 1 bot | RỦI RO càng thấp càng an toàn · CHẤT LƯỢNG càng cao càng tốt
+===================================================================================================================================================================
+#   TÊN BOT               ASSET      TRADE  WIN%  PF SỔ  PF CHỐT  SỤT VỐN  P95 ĐUÔI  RỦI RO  CHẤT LG  XẾP LOẠI       NHẬN XÉT                                      
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+1   HaveARestin           ETH/CEX    143    92    11.12  0.16     0.5%     0%        70.0    54.5     NGUY HIỂM      chốt hết sổ mở thì profit factor chỉ còn 0.16 
+     ↳ tính toán: PF 11.12→0.16 · DD 0.5% · P95 0% · lỗ mở 86k$ · exp 441k$
+     ↳ nguyên nhân: Đang ôm 86,132 USDT lỗ chưa chốt (65% vốn), chốt hết thì PF tụt từ 11.12 xuống 0.16; chất lượng hiệu suất kém (điểm 100); ngược xu hướng thị
+     trường (giảm); đòn bẩy và exposure lớn: đòn bẩy 100x.
+     ↳ rủi ro bị che: chốt hết sổ mở thì PF rơi từ 11.12 xuống 0.16; lỗ chưa chốt bằng 65% vốn
+     ↳ đề xuất: REDUCE
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Phân loại: NGUY HIỂM: 1
+Phân bố hạng rủi ro: CAO: 1
+
+PHIẾU ĐÁNH GIÁ TỪNG BOT
+===================================================================================================================================================================
+[1] HaveARestin — ETH/CEX
+     XẾP LOẠI: NGUY HIỂM   ·   ĐIỂM NGON: 54.5/100   ·   ĐIỂM RỦI RO: 70.0/100 (càng thấp càng an toàn)   ·   ĐỀ XUẤT: REDUCE
+     Độ tin cậy của đánh giá: 80% · đối soát sổ lệnh PARTIAL_LEDGER · chế độ đo PARTIAL
+
+     THÔNG SỐ CỦA BOT: 143 lệnh đã chốt · thắng 92% · profit factor 11.12 · tổng lãi/lỗ 9,583 USDT · Sharpe 16.13 · sụt vốn sâu nhất 0.5%
+     ĐANG NẮM GIỮ: 95 vị thế đang mở · exposure 440,608 USDT · đòn bẩy 100x · lỗ chưa chốt 86,132 USDT · vốn tham chiếu 131,958 USDT
+     CHẠY MÔ PHỎNG 10,000 kịch bản × 143 lệnh (bootstrap từ chính sổ lệnh đã chốt của bot): trung vị lãi +7.3% trên vốn, kịch bản tốt (p95) +8.6%, kịch bản xấu
+     (p05) +5.8%, XẤU NHẤT +3.9%. Sụt vốn P95 0%, xấu nhất 1%. Xác suất thua lỗ 0%, xác suất cháy tài khoản 0%.
+     KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là 100.0% (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối độ lệch và đuôi phân phối); sau khi
+     trừ việc bot này được chọn là con tốt nhất trong 9 ứng viên cùng asset, xác suất còn 99.8%. Cần tối thiểu 20 lệnh để tin được thành tích này, bot đang có 143
+     — đã đủ
+
+     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:
+       HaveARestin — ETH/CEX, 143 lệnh đã chốt, vốn tham chiếu 131,958 USDT, 1.6 lệnh/ngày.
+
+       NGUYÊN NHÂN TẠI SAO: Nhìn bảng thì HaveARestin rất đẹp: thắng 92%, profit factor 11.12, sụt vốn 0.5%. Nhưng đó chỉ là các lệnh bot tự chọn đóng — bot đang
+       giữ 86,132 USDT lỗ chưa chốt (65% vốn), chốt hết thì PF tụt còn 0.16, từ lãi thành lỗ. Cơ chế là chốt lời sớm, ôm lỗ chờ gỡ; khi giá không quay lại, người
+       copy ăn trọn cú hiện lỗ.
+
+       CHỨNG MINH:
+       • Profit factor 11.12 (sổ đã chốt) → 0.16 (chốt cả sổ mở) — chênh lệch này là toàn bộ vấn đề
+       • Lỗ chưa chốt 86,132 USDT = 65% vốn, trên 95 vị thế mở
+       • Điểm rủi ro 70 đến từ sàn veto (bình quân 10 chiều chỉ 55.3): chốt hết sổ mở thì profit factor chỉ còn 0.16
+       • Monte Carlo 10,000 kịch bản × 143 lệnh: trung vị +7.3% vốn, p05 +5.8%, xấu nhất +3.9%
+       • Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 5.5%, xác suất lỗ 0%
+       • 143 lệnh, thắng 92%, payoff 1.02
+
+       KẾT LUẬN: NGUY HIỂM — chất lượng 54/100, rủi ro 70/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: bot chốt hết hoặc cắt phần lỗ đang
+       treo, và profit factor sau khi chốt quay lên trên 1.
+
+     VÌ SAO XẾP LOẠI NÀY: chốt hết sổ mở thì profit factor chỉ còn 0.16
+     VÌ SAO RỦI RO: Đang ôm 86,132 USDT lỗ chưa chốt (65% vốn), chốt hết thì PF tụt từ 11.12 xuống 0.16; chất lượng hiệu suất kém (điểm 100); ngược xu hướng thị
+     trường (giảm); đòn bẩy và exposure lớn: đòn bẩy 100x.
+     RỦI RO BỊ CHE SAU SỐ ĐẸP: chốt hết sổ mở thì PF rơi từ 11.12 xuống 0.16; lỗ chưa chốt bằng 65% vốn
+     Điểm 70.0 đến từ sàn veto 70, không phải bình quân: bình quân gia quyền 10 chiều chỉ 55.3. Veto kích hoạt bởi: chốt hết sổ mở thì profit factor chỉ còn 0.16.
+       + Chất lượng hiệu suất 100/100 (trọng số 1.0) đóng góp 9.7 điểm
+       + Đồng thuận thị trường 80/100 (trọng số 1.2) đóng góp 9.3 điểm
+       + Đòn bẩy / Exposure 75/100 (trọng số 1.1) đóng góp 8.0 điểm
+       + Rủi ro đuôi 60/100 (trọng số 1.3) đóng góp 7.6 điểm
+       − Rủi ro sụt vốn chỉ 15/100 (trọng số 1.1) kéo bình quân xuống
+       − Thanh khoản / Khớp lệnh chỉ 15/100 (trọng số 0.9) kéo bình quân xuống
+       − Độ bền chiến lược qua các pha chỉ 15/100 (trọng số 0.8) kéo bình quân xuống
+
+
+THIẾU DỮ LIỆU — VIỆC CẦN THU THẬP
+====================================================================================================
+[MEDIUM] Sổ lệnh — Lịch sử đầy đủ theo leadDays
+    Sổ lệnh mới phủ một phần thời gian hoạt động; cần phân trang sâu hơn để phủ hết lịch sử.
+    Mở khóa: performance_quality, tail_risk | Ảnh hưởng: HaveARestin

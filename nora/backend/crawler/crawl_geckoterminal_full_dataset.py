@@ -1,5 +1,6 @@
 """Build selected GeckoTerminal DEX OHLCV datasets as pickle files."""
 import argparse
+import json
 import os
 import re
 import shutil
@@ -12,20 +13,26 @@ import pandas as pd
 import requests
 
 DEFAULT_BASE_URL = "https://api.geckoterminal.com/api/v2"
-DEFAULT_OUTPUT_DIR = "data"
+DEFAULT_OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
 DEFAULT_LIMIT = 500
-DEFAULT_PAGE_DELAY_SEC = 12.0
+MINUTE_MS = 60 * 1000
+HOUR_MS = 60 * MINUTE_MS
+DEFAULT_PAGE_DELAY_SEC = 2.8
 DEFAULT_RETRIES = 5
-DEFAULT_RETRY_DELAY_SEC = 60.0
-DEFAULT_ASSET_DELAY_SEC = 60.0
+DEFAULT_RETRY_DELAY_SEC = 30.0
+DEFAULT_ASSET_DELAY_SEC = 3.0
 DEFAULT_MAX_PAGES = 30
-DEFAULT_LOOKBACK_DAYS = 120.0
+DEFAULT_MINUTE_MAX_PAGES = 400
+DEFAULT_CHECKPOINT_EVERY_PAGES = 5
+DEFAULT_MINUTE_AGGREGATES = "1,5,10,15"
+DEFAULT_LOOKBACK_DAYS = 90.0  # Chuẩn 3 tháng gần nhất cho dữ liệu DEX
 DEFAULT_CORE_ASSETS = "BTC,ETH,SOL"
 DEFAULT_TRENDING_COUNT = 3
 DEFAULT_NEW_COUNT = 2
 DEFAULT_TRENDING_NETWORKS = "solana,eth"
 DEFAULT_CURRENCY = "usd"
 DEFAULT_TOKEN = "base"
+DEFAULT_TARGETS_FILE = os.path.abspath(os.path.join(DEFAULT_OUTPUT_DIR, "geckoterminal_targets.json"))
 
 CORE_POOLS = {
     "BTC": {
@@ -46,6 +53,12 @@ CORE_POOLS = {
 }
 
 PKL_COLUMNS = ["open_time", "open", "high", "low", "close", "volume"]
+
+_SESSION = requests.Session()
+_SESSION.headers.update({
+    "accept": "application/json",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+})
 
 
 class RateLimitError(RuntimeError):
@@ -97,17 +110,18 @@ def _api_get(
     timeout: int,
     retries: int,
     retry_delay_sec: float,
+    context: str = "request",
 ) -> Dict[str, Any]:
     url = f"{base_url.rstrip('/')}{path}"
     clean_params = {k: v for k, v in params.items() if v is not None}
     for attempt in range(retries + 1):
         try:
-            response = requests.get(url, params=clean_params, headers={"accept": "application/json"}, timeout=timeout)
+            response = _SESSION.get(url, params=clean_params, timeout=timeout)
         except requests.RequestException as exc:
             if attempt >= retries:
                 raise
             wait_sec = retry_delay_sec * (attempt + 1)
-            warn(f"[warn] Request failed ({exc}); sleeping {wait_sec:.1f}s before retry {attempt + 1}/{retries}.")
+            warn(f"[warn] {context} request failed ({exc}); sleeping {wait_sec:.1f}s before retry {attempt + 1}/{retries}.")
             time.sleep(wait_sec)
             continue
 
@@ -115,13 +129,13 @@ def _api_get(
             response.raise_for_status()
             return response.json()
         if attempt >= retries:
-            raise RateLimitError(f"429 Too Many Requests for {path}")
+            raise RateLimitError(f"429 Too Many Requests for {context}")
 
         retry_after = response.headers.get("Retry-After")
         wait_sec = retry_delay_sec * (attempt + 1)
-        if retry_after and retry_after.isdigit():
+        if retry_after and retry_after.isdigit() and float(retry_after) > 0:
             wait_sec = max(wait_sec, float(retry_after))
-        warn(f"[warn] Rate limited; sleeping {wait_sec:.1f}s before retry {attempt + 1}/{retries}.")
+        warn(f"[warn] {context} rate limited; sleeping {wait_sec:.1f}s before retry {attempt + 1}/{retries}.")
         time.sleep(wait_sec)
     raise RuntimeError("unreachable retry state")
 
@@ -161,6 +175,15 @@ def _normalize_rows(raw_rows: Iterable[List[Any]], start_sec: int, end_sec: int)
     return frame
 
 
+def _frame_to_raw_rows(frame: pd.DataFrame) -> List[List[Any]]:
+    if frame.empty:
+        return []
+    raw_rows = []
+    for open_time, open_, high, low, close, volume in frame.loc[:, PKL_COLUMNS].itertuples(index=False, name=None):
+        raw_rows.append([int(open_time) // 1000, open_, high, low, close, volume])
+    return raw_rows
+
+
 def _crawl_ohlcv(
     base_url: str,
     network: str,
@@ -177,17 +200,40 @@ def _crawl_ohlcv(
     max_pages: Optional[int],
     currency: str,
     token: str,
+    context_label: str,
+    existing_frame: Optional[pd.DataFrame] = None,
+    checkpoint_path: Optional[str] = None,
+    checkpoint_every_pages: int = DEFAULT_CHECKPOINT_EVERY_PAGES,
 ) -> Tuple[pd.DataFrame, int]:
     path = f"/networks/{network}/pools/{pool_address}/ohlcv/{timeframe}"
     before_timestamp = end_sec
     page = 0
-    raw_rows: List[List[Any]] = []
+    raw_rows = _frame_to_raw_rows(existing_frame) if existing_frame is not None else []
+
+    oldest_existing_sec: Optional[int] = None
+    newest_existing_sec: Optional[int] = None
+    fetching_recent_gap = False
+    if raw_rows:
+        oldest_existing_sec = min(int(row[0]) for row in raw_rows)
+        newest_existing_sec = max(int(row[0]) for row in raw_rows)
+        log(
+            f"[resume] {context_label} existing_rows={len(raw_rows)} "
+            f"range={datetime.fromtimestamp(oldest_existing_sec, timezone.utc).isoformat()}.."
+            f"{datetime.fromtimestamp(newest_existing_sec, timezone.utc).isoformat()}"
+        )
+        if oldest_existing_sec <= start_sec and (end_sec - newest_existing_sec) < 1800:
+            log(f"[complete] {context_label} already covers lookback range ({datetime.fromtimestamp(oldest_existing_sec, timezone.utc).isoformat()} <= {datetime.fromtimestamp(start_sec, timezone.utc).isoformat()}); skipping API crawl.")
+            return _normalize_rows(raw_rows, start_sec, end_sec), 0
+        fetching_recent_gap = newest_existing_sec < (end_sec - 60)
+        if not fetching_recent_gap:
+            before_timestamp = min(before_timestamp, oldest_existing_sec - 1)
 
     while True:
-        page += 1
-        if max_pages and page > max_pages:
-            warn(f"[warn] Reached max_pages={max_pages} for {network}:{pool_address} {aggregate}h; stopping early.")
+        if max_pages and page >= max_pages:
+            warn(f"[warn] {context_label} reached max_pages={max_pages}; stopping early.")
             break
+        page += 1
+        page_context = f"{context_label} page={page} before={before_timestamp}"
 
         payload = _api_get(
             base_url,
@@ -203,13 +249,33 @@ def _crawl_ohlcv(
             timeout,
             retries,
             retry_delay_sec,
+            page_context,
         )
         rows = _extract_rows(payload)
         if not rows:
+            log(f"[page] {context_label} page={page} rows=0 done")
             break
 
         raw_rows.extend(rows)
         oldest_sec = min(int(row[0]) for row in rows)
+        newest_sec = max(int(row[0]) for row in rows)
+        log(
+            f"[page] {context_label} page={page} rows={len(rows)} "
+            f"oldest={datetime.fromtimestamp(oldest_sec, timezone.utc).isoformat()} "
+            f"newest={datetime.fromtimestamp(newest_sec, timezone.utc).isoformat()} total_raw={len(raw_rows)}"
+        )
+        if checkpoint_path and checkpoint_every_pages > 0 and page % checkpoint_every_pages == 0:
+            checkpoint_frame = _normalize_rows(raw_rows, start_sec, end_sec)
+            _write_pickle(checkpoint_path, checkpoint_frame)
+            log(f"[checkpoint] {context_label} rows={len(checkpoint_frame)} pages={page} path={checkpoint_path}")
+        if fetching_recent_gap and newest_existing_sec is not None and oldest_sec <= newest_existing_sec:
+            fetching_recent_gap = False
+            if oldest_existing_sec is not None and oldest_existing_sec <= start_sec:
+                break
+            before_timestamp = oldest_existing_sec - 1 if oldest_existing_sec is not None else oldest_sec - 1
+            if page_delay_sec:
+                time.sleep(page_delay_sec)
+            continue
         if oldest_sec <= start_sec:
             break
         if len(rows) < limit:
@@ -311,29 +377,36 @@ def _parse_list(value: str) -> List[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def _parse_hours(value: str) -> List[int]:
-    hours = set()
+def _parse_aggregates(value: str, suffix: str, minimum: int, maximum: int, arg_name: str) -> List[int]:
+    values = set()
     for part in value.split(","):
-        part = part.strip().lower().removesuffix("h")
+        part = part.strip().lower().removesuffix(suffix)
         if not part:
             continue
         if "-" in part:
             start, end = part.split("-", 1)
-            hours.update(range(int(start), int(end) + 1))
+            values.update(range(int(start), int(end) + 1))
         else:
-            hours.add(int(part))
-    invalid = [hour for hour in hours if hour < 1 or hour > 24]
+            values.add(int(part))
+    invalid = [item for item in values if item < minimum or item > maximum]
     if invalid:
-        raise ValueError("--hours values must be between 1 and 24")
-    if not hours:
-        raise ValueError("--hours must not be empty")
-    return sorted(hours)
+        raise ValueError(f"--{arg_name} values must be between {minimum} and {maximum}")
+    if not values:
+        raise ValueError(f"--{arg_name} must not be empty")
+    return sorted(values)
 
 
-def _aggregate_frame(frame: pd.DataFrame, hours: int) -> pd.DataFrame:
+def _parse_hours(value: str) -> List[int]:
+    return _parse_aggregates(value, "h", 1, 24, "hours")
+
+
+def _parse_minutes(value: str) -> List[int]:
+    return _parse_aggregates(value, "m", 1, 30, "minutes")
+
+
+def _aggregate_frame(frame: pd.DataFrame, interval_ms: int) -> pd.DataFrame:
     if frame.empty:
         return frame.loc[:, PKL_COLUMNS].copy()
-    interval_ms = hours * 60 * 60 * 1000
     ordered = frame.loc[:, PKL_COLUMNS].sort_values("open_time").reset_index(drop=True)
     buckets = (ordered["open_time"] // interval_ms) * interval_ms
     grouped = (
@@ -356,6 +429,27 @@ def _write_pickle(path: str, frame: pd.DataFrame) -> None:
     frame.to_pickle(path)
 
 
+def _read_pickle_if_usable(path: str) -> pd.DataFrame:
+    if not os.path.isfile(path) or os.path.getsize(path) <= 0:
+        return pd.DataFrame(columns=PKL_COLUMNS)
+    try:
+        frame = pd.read_pickle(path)
+    except Exception as exc:
+        warn(f"[warn] Cannot resume from {path}: {exc}")
+        return pd.DataFrame(columns=PKL_COLUMNS)
+    missing = [column for column in PKL_COLUMNS if column not in frame.columns]
+    if missing:
+        warn(f"[warn] Cannot resume from {path}: missing columns {','.join(missing)}")
+        return pd.DataFrame(columns=PKL_COLUMNS)
+    frame = frame.loc[:, PKL_COLUMNS].copy()
+    frame["open_time"] = frame["open_time"].astype("int64")
+    return frame.sort_values("open_time").drop_duplicates("open_time").reset_index(drop=True)
+
+
+def _format_frame_list(values: List[int], suffix: str) -> str:
+    return ",".join(f"{value}{suffix}" for value in values) if values else "none"
+
+
 def _clear_asset_dirs(output_dir: str, assets: Iterable[str]) -> None:
     for asset in assets:
         path = os.path.join(output_dir, _asset_slug(asset))
@@ -364,7 +458,35 @@ def _clear_asset_dirs(output_dir: str, assets: Iterable[str]) -> None:
             log(f"[clear] Removed old {path}")
 
 
+def _load_targets_file(path: str) -> List[Dict[str, str]]:
+    if not path or not os.path.isfile(path):
+        return []
+    with open(path, "r", encoding="utf-8") as handle:
+        raw_targets = json.load(handle)
+    targets = []
+    for item in raw_targets:
+        asset = _asset_slug(str(item.get("asset", "")))
+        network = str(item.get("network", "")).strip()
+        pool_address = str(item.get("pool_address", "")).strip()
+        if not asset or not network or not pool_address:
+            continue
+        targets.append(
+            {
+                "asset": asset,
+                "network": network,
+                "pool_address": pool_address,
+                "name": str(item.get("name") or asset),
+            }
+        )
+    return targets
+
+
 def _target_set(args: argparse.Namespace, base_url: str, timeout: int, retries: int, retry_delay_sec: float) -> List[Dict[str, str]]:
+    targets_file = args.targets_file or os.environ.get("GECKOTERMINAL_FULL_TARGETS_FILE", DEFAULT_TARGETS_FILE)
+    targets = _load_targets_file(targets_file)
+    if targets:
+        return targets
+
     assets = [_asset_slug(asset) for asset in _parse_list(args.core_assets)]
     targets = []
     seen_assets = set()
@@ -402,7 +524,7 @@ def _target_set(args: argparse.Namespace, base_url: str, timeout: int, retries: 
 
 def run(args: argparse.Namespace) -> List[Dict[str, Any]]:
     base_url = os.environ.get("GECKOTERMINAL_BASE_URL", DEFAULT_BASE_URL)
-    output_dir = os.environ.get("GECKOTERMINAL_FULL_OUTPUT_DIR", args.output_dir)
+    output_dir = os.path.abspath(os.environ.get("GECKOTERMINAL_FULL_OUTPUT_DIR", args.output_dir))
     timeout = int(os.environ.get("GECKOTERMINAL_TIMEOUT", "30"))
     limit = args.limit or int(os.environ.get("GECKOTERMINAL_FULL_LIMIT", str(DEFAULT_LIMIT)))
     page_delay_sec = args.page_delay_sec
@@ -446,18 +568,40 @@ def run(args: argparse.Namespace) -> List[Dict[str, Any]]:
     if start_sec >= end_sec:
         raise ValueError("start timestamp must be smaller than end timestamp")
 
-    hours = _parse_hours(args.hours)
-    if 1 not in hours:
-        hours = [1] + hours
+    if args.skip_hours:
+        hours = []
+    else:
+        hours = _parse_hours(args.hours)
+        if 1 not in hours:
+            hours = [1] + hours
+    minute_aggregates = args.minutes or os.environ.get("GECKOTERMINAL_FULL_MINUTE_AGGREGATES", DEFAULT_MINUTE_AGGREGATES)
+    minutes = _parse_minutes(minute_aggregates)
+    if 1 not in minutes:
+        minutes = [1] + minutes
+    minute_max_pages = args.minute_max_pages
+    if minute_max_pages is None:
+        minute_max_pages_env = os.environ.get("GECKOTERMINAL_FULL_MINUTE_MAX_PAGES")
+        minute_max_pages = int(minute_max_pages_env) if minute_max_pages_env else DEFAULT_MINUTE_MAX_PAGES
+    if minute_max_pages is not None and minute_max_pages < 1:
+        raise ValueError("--minute-max-pages must be positive")
+    checkpoint_every_pages = args.checkpoint_every_pages
+    if checkpoint_every_pages is None:
+        checkpoint_env = os.environ.get("GECKOTERMINAL_FULL_CHECKPOINT_EVERY_PAGES")
+        checkpoint_every_pages = int(checkpoint_env) if checkpoint_env else DEFAULT_CHECKPOINT_EVERY_PAGES
+    if checkpoint_every_pages < 0:
+        raise ValueError("--checkpoint-every-pages must be non-negative")
     targets = _target_set(args, base_url, timeout, retries, retry_delay_sec)
     if args.clear:
         _clear_asset_dirs(output_dir, [target["asset"] for target in targets])
 
-    log(f"[start] {len(targets)} assets, files={hours[0]}h..{hours[-1]}h, output={output_dir}")
+    log(
+        f"[start] {len(targets)} assets, minute_files={_format_frame_list(minutes, 'm')}, "
+        f"hour_files={_format_frame_list(hours, 'h')}, output={output_dir}"
+    )
     log(f"[range] {datetime.fromtimestamp(start_sec, timezone.utc).isoformat()} -> {datetime.fromtimestamp(end_sec, timezone.utc).isoformat()}")
 
     summaries = []
-    total_steps = len(targets) * len(hours)
+    total_steps = len(targets) * (len(minutes) + len(hours))
     step = 0
     for target_index, target in enumerate(targets):
         if target_index > 0 and asset_delay_sec:
@@ -469,14 +613,17 @@ def run(args: argparse.Namespace) -> List[Dict[str, Any]]:
         pool_address = target["pool_address"]
         log(f"[asset] {asset} | {network} | {target.get('name', '')} | pool={pool_address}")
 
+        rows_by_minute: Dict[int, int] = {}
+        one_minute_path = os.path.join(output_dir, asset, "1m.pkl")
+        existing_1m = _read_pickle_if_usable(one_minute_path)
         step += 1
-        log(f"[crawl] ({step}/{total_steps}) {asset} 1h source")
+        log(f"[crawl] ({step}/{total_steps}) {asset} 1m source")
         try:
-            frame_1h, pages = _crawl_ohlcv(
+            frame_1m, minute_pages = _crawl_ohlcv(
                 base_url,
                 network,
                 pool_address,
-                "hour",
+                "minute",
                 1,
                 start_sec,
                 end_sec,
@@ -485,39 +632,106 @@ def run(args: argparse.Namespace) -> List[Dict[str, Any]]:
                 retries,
                 retry_delay_sec,
                 timeout,
-                max_pages,
+                minute_max_pages,
                 args.currency,
                 args.token,
+                f"{asset} 1m",
+                existing_1m,
+                one_minute_path,
+                checkpoint_every_pages,
             )
         except Exception as exc:
-            warn(f"[error] {asset} 1h failed: {exc}")
-            summaries.append(
-                {
-                    "asset": asset,
-                    "network": network,
-                    "pool_address": pool_address,
-                    "name": target.get("name", ""),
-                    "rows_by_hour": {},
-                }
-            )
-            continue
+            warn(f"[error] {asset} 1m failed: {exc}")
+            frame_1m = _read_pickle_if_usable(one_minute_path)
+            if not frame_1m.empty:
+                rows_by_minute[1] = len(frame_1m)
+                warn(f"[partial] {asset} using checkpointed 1m rows={len(frame_1m)} for local aggregate files")
+            for minute in minutes:
+                if minute == 1:
+                    continue
+                step += 1
+                if frame_1m.empty:
+                    warn(f"[skip] ({step}/{total_steps}) {asset} {minute}m because 1m source failed")
+                    continue
+                log(f"[build] ({step}/{total_steps}) {asset} {minute}m from partial 1m")
+                frame = _aggregate_frame(frame_1m, minute * MINUTE_MS)
+                path = os.path.join(output_dir, asset, f"{minute}m.pkl")
+                _write_pickle(path, frame)
+                rows_by_minute[minute] = len(frame)
+                log(f"[write] {asset} {minute}m rows={len(frame)} path={path}")
+        else:
+            _write_pickle(one_minute_path, frame_1m)
+            rows_by_minute[1] = len(frame_1m)
+            log(f"[write] {asset} 1m rows={len(frame_1m)} pages={minute_pages} path={one_minute_path}")
+
+            for minute in minutes:
+                if minute == 1:
+                    continue
+                step += 1
+                log(f"[build] ({step}/{total_steps}) {asset} {minute}m from 1m")
+                frame = _aggregate_frame(frame_1m, minute * MINUTE_MS)
+                path = os.path.join(output_dir, asset, f"{minute}m.pkl")
+                _write_pickle(path, frame)
+                rows_by_minute[minute] = len(frame)
+                log(f"[write] {asset} {minute}m rows={len(frame)} path={path}")
 
         rows_by_hour: Dict[int, int] = {}
-        one_hour_path = os.path.join(output_dir, asset, "1h.pkl")
-        _write_pickle(one_hour_path, frame_1h)
-        rows_by_hour[1] = len(frame_1h)
-        log(f"[write] {asset} 1h rows={len(frame_1h)} pages={pages} path={one_hour_path}")
-
-        for hour in hours:
-            if hour == 1:
-                continue
+        if hours:
             step += 1
-            log(f"[build] ({step}/{total_steps}) {asset} {hour}h from 1h")
-            frame = _aggregate_frame(frame_1h, hour)
-            path = os.path.join(output_dir, asset, f"{hour}h.pkl")
-            _write_pickle(path, frame)
-            rows_by_hour[hour] = len(frame)
-            log(f"[write] {asset} {hour}h rows={len(frame)} path={path}")
+            log(f"[crawl] ({step}/{total_steps}) {asset} 1h source")
+            try:
+                frame_1h, pages = _crawl_ohlcv(
+                    base_url,
+                    network,
+                    pool_address,
+                    "hour",
+                    1,
+                    start_sec,
+                    end_sec,
+                    limit,
+                    page_delay_sec,
+                    retries,
+                    retry_delay_sec,
+                    timeout,
+                    max_pages,
+                    args.currency,
+                    args.token,
+                    f"{asset} 1h",
+                )
+            except Exception as exc:
+                warn(f"[error] {asset} 1h failed: {exc}")
+                for hour in hours:
+                    if hour == 1:
+                        continue
+                    step += 1
+                    warn(f"[skip] ({step}/{total_steps}) {asset} {hour}h because 1h source failed")
+                summaries.append(
+                    {
+                        "asset": asset,
+                        "network": network,
+                        "pool_address": pool_address,
+                        "name": target.get("name", ""),
+                        "rows_by_minute": rows_by_minute,
+                        "rows_by_hour": rows_by_hour,
+                    }
+                )
+                continue
+
+            one_hour_path = os.path.join(output_dir, asset, "1h.pkl")
+            _write_pickle(one_hour_path, frame_1h)
+            rows_by_hour[1] = len(frame_1h)
+            log(f"[write] {asset} 1h rows={len(frame_1h)} pages={pages} path={one_hour_path}")
+
+            for hour in hours:
+                if hour == 1:
+                    continue
+                step += 1
+                log(f"[build] ({step}/{total_steps}) {asset} {hour}h from 1h")
+                frame = _aggregate_frame(frame_1h, hour * HOUR_MS)
+                path = os.path.join(output_dir, asset, f"{hour}h.pkl")
+                _write_pickle(path, frame)
+                rows_by_hour[hour] = len(frame)
+                log(f"[write] {asset} {hour}h rows={len(frame)} path={path}")
 
         summaries.append(
             {
@@ -525,15 +739,22 @@ def run(args: argparse.Namespace) -> List[Dict[str, Any]]:
                 "network": network,
                 "pool_address": pool_address,
                 "name": target.get("name", ""),
+                "rows_by_minute": rows_by_minute,
                 "rows_by_hour": rows_by_hour,
             }
         )
 
     log("[summary]")
     for item in summaries:
-        nonzero = sum(1 for rows in item["rows_by_hour"].values() if rows > 0)
-        total_rows = sum(item["rows_by_hour"].values())
-        log(f"[summary] {item['asset']} files={nonzero}/{len(hours)} total_rows={total_rows} pool={item['pool_address']}")
+        minute_nonzero = sum(1 for rows in item["rows_by_minute"].values() if rows > 0)
+        hour_nonzero = sum(1 for rows in item["rows_by_hour"].values() if rows > 0)
+        minute_total_rows = sum(item["rows_by_minute"].values())
+        hour_total_rows = sum(item["rows_by_hour"].values())
+        log(
+            f"[summary] {item['asset']} minute_files={minute_nonzero}/{len(minutes)} "
+            f"minute_rows={minute_total_rows} hour_files={hour_nonzero}/{len(hours)} "
+            f"hour_rows={hour_total_rows} pool={item['pool_address']}"
+        )
     log("[done] Full GeckoTerminal PKL dataset build finished.")
     return summaries
 
@@ -545,7 +766,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--trending-networks", default=DEFAULT_TRENDING_NETWORKS, help="Comma-separated networks for trending/new pools.")
     parser.add_argument("--trending-count", type=int, default=DEFAULT_TRENDING_COUNT, help="How many trending pools to add.")
     parser.add_argument("--new-count", type=int, default=DEFAULT_NEW_COUNT, help="How many new pools to add.")
+    parser.add_argument("--targets-file", default=None, help="JSON file with asset/network/pool_address targets.")
     parser.add_argument("--hours", default="1-24", help="Hourly pickle files to build, e.g. 1-24 or 1,4,12,24.")
+    parser.add_argument("--skip-hours", action="store_true", help="Only build minute pickle files; leave existing hourly files untouched.")
+    parser.add_argument("--minutes", default=None, help="Minute pickle files to build, e.g. 1-30 or 1,5,15,30.")
     parser.add_argument("--start-ts", default=None, help="Start timestamp (s, ms, or ISO8601).")
     parser.add_argument("--end-ts", default=None, help="End timestamp (s, ms, or ISO8601). Defaults to now.")
     parser.add_argument("--lookback-days", type=float, default=DEFAULT_LOOKBACK_DAYS, help="Alternative to --start-ts.")
@@ -554,7 +778,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--retries", type=int, default=None, help=f"Retries for rate limits, default {DEFAULT_RETRIES}.")
     parser.add_argument("--retry-delay-sec", type=float, default=None, help=f"Base retry delay, default {DEFAULT_RETRY_DELAY_SEC}.")
     parser.add_argument("--asset-delay-sec", type=float, default=None, help=f"Seconds between assets, default {DEFAULT_ASSET_DELAY_SEC}.")
-    parser.add_argument("--max-pages", type=int, default=None, help=f"Safety cap per file, default {DEFAULT_MAX_PAGES}.")
+    parser.add_argument("--max-pages", type=int, default=None, help=f"Safety cap per hourly source, default {DEFAULT_MAX_PAGES}.")
+    parser.add_argument("--minute-max-pages", type=int, default=None, help=f"Safety cap for 1m source, default {DEFAULT_MINUTE_MAX_PAGES}.")
+    parser.add_argument("--checkpoint-every-pages", type=int, default=None, help=f"Write partial 1m PKL every N pages, default {DEFAULT_CHECKPOINT_EVERY_PAGES}; 0 disables.")
     parser.add_argument("--currency", default=DEFAULT_CURRENCY, help="Pricing currency: usd or token.")
     parser.add_argument("--token", default=DEFAULT_TOKEN, help="base, quote, or token address.")
     parser.add_argument("--clear", action="store_true", help="Remove old selected asset directories before writing.")

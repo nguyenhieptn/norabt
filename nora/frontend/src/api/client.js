@@ -94,4 +94,27 @@ export const api = {
     const qs = new URLSearchParams(p)
     return req(`/api/runs/${id}/chart?${qs}`, { method: 'POST' })
   },
+  // Research Platform API
+  researchScanLatest: (tf = '1h') => req(`/api/research/scan/latest?timeframe=${tf}`),
+  researchScanRun: (tf = '1h') => req(`/api/research/scan/run?timeframe=${tf}`, { method: 'POST' }),
+  researchAssetsOverview: (tf = '1h') => req(`/api/research/assets/overview?timeframe=${tf}`),
+  researchAnalysis: (symbol, tf = '1h') => req(`/api/research/markets/${symbol}/analysis?timeframe=${tf}`),
+  researchMarketsScan: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== null && v !== undefined && v !== ''))
+    return req(`/api/research/markets/scan?${qs}`)
+  },
+  researchMarketAnalysis: (symbol, tf = '1h', force = false) =>
+    req(`/api/research/markets/${symbol}/analysis?timeframe=${tf}&force_refresh=${force}`),
+  researchMarketTrades: (symbol, limit = 40) =>
+    req(`/api/research/markets/${symbol}/trades?limit=${limit}`),
+  researchMarketAnalyze: (symbol, tf = '1h') =>
+    req(`/api/research/markets/${symbol}/analyze?timeframe=${tf}`, { method: 'POST' }),
+  researchWhyNotTrade: () => req('/api/research/markets/why-not-trade'),
+  researchUniverse: () => req('/api/research/universe'),
+  researchDiscoveries: (tf = '1h', force = false) =>
+    req(`/api/research/discoveries?timeframe=${tf}&force_refresh=${force}`),
+  researchDiscoveryDetail: (id, tf = '1h', force = false) =>
+    req(`/api/research/discoveries/${id}?timeframe=${tf}&force_refresh=${force}`),
+  researchMethodsCompare: (tf = '1h', force = false) =>
+    req(`/api/research/methods/compare?timeframe=${tf}&force_refresh=${force}`),
 }

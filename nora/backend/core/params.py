@@ -25,6 +25,9 @@ class StrategyParams:
     # 3. Tham số quản lý rủi ro / vốn
     volume_rate: float = 1.0               # % vốn cho mỗi lệnh (1.0 = 100%)
     leverage: int = 1                      # Đòn bẩy
+    max_capital_usage: float = 1.0        # Tối đa phần trăm vốn được dùng
+    fee_rate: float = 0.0005               # Phí khớp mỗi chiều (mặc định taker)
+    slippage_rate: float = 0.0002          # Slippage mỗi chiều
     stop_loss_rate: float = 0.0            # % Cắt lỗ (0 = không cắt)
     take_profit_rate: float = 0.0          # % Chốt lời (0 = không chốt)
     trailing_stop: float = 0.0             # % Trailing stop

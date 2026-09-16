@@ -4,10 +4,16 @@ Cung cấp cơ chế nạp nến (Candle Loader) sử dụng bộ đệm (Memory
 để tái sử dụng dữ liệu nến giữa các lần chạy (Backtest / Optimize),
 giảm tải cho MongoDB và tăng tốc Backtest lên hàng chục lần.
 """
+import os
 from typing import Dict, List, Optional
 
 import pandas as pd
-from backend.db.mongo import fetch_candles_df
+from backend.db.local_pkl import (
+    default_data_root,
+    fetch_candles_df as fetch_local_candles_df,
+    has_frame as has_local_frame,
+)
+from backend.db.mongo import fetch_candles_df as fetch_mongo_candles_df
 
 # Cache lưu trữ nến đã tải: (symbol, frame) -> DataFrame
 _CANDLE_CACHE: Dict[str, pd.DataFrame] = {}
@@ -27,7 +33,11 @@ class CandleLoader:
         self.frame = frame
         self.db_name = db_name
         self.use_cache = use_cache
-        self._cache_key = f"{db_name}_{symbol}_{frame}"
+        self.data_source = os.environ.get("NORA_DATA_SOURCE", "auto").strip().lower()
+        if self.data_source not in {"auto", "local", "mongo"}:
+            self.data_source = "auto"
+        self.local_data_root = default_data_root()
+        self._cache_key_prefix = f"{self.data_source}_{self.local_data_root}_{db_name}_{symbol}_{frame}"
 
     def load_data(
         self,
@@ -41,10 +51,12 @@ class CandleLoader:
         Nếu use_cache=True, sẽ nạp toàn bộ một lần vào RAM (hoặc dùng bản đã có).
         Sau đó dùng Pandas indexing để cắt đoạn start_ts -> end_ts siêu nhanh.
         """
+        cache_columns = "*" if columns is None else ",".join(sorted(columns))
+        cache_key = f"{self._cache_key_prefix}_{start_ts}_{end_ts}_{cache_columns}"
         # Nếu dùng cache, thử lấy từ _CANDLE_CACHE
         if self.use_cache and not force_reload:
-            if self._cache_key in _CANDLE_CACHE:
-                df = _CANDLE_CACHE[self._cache_key]
+            if cache_key in _CANDLE_CACHE:
+                df = _CANDLE_CACHE[cache_key]
                 return self._slice_data(df, start_ts, end_ts, columns)
 
         # Giới hạn an toàn (Safe Limits): KHÔNG BAO GIỜ nạp toàn bộ DB vào RAM
@@ -57,13 +69,13 @@ class CandleLoader:
         if load_start is None or load_end is None:
             raise ValueError("CandleLoader require explicit start_ts and end_ts to prevent Memory Overload!")
 
-        df = fetch_candles_df(
-            symbol=self.symbol,
-            frame=self.frame,
+        fetch_columns = None
+        if not self.use_cache and columns is not None:
+            fetch_columns = list(dict.fromkeys(["open_time", *columns]))
+        df = self._fetch_candles(
             start_ts=load_start,
             end_ts=load_end,
-            columns=columns if not self.use_cache else None, 
-            db_name=self.db_name,
+            columns=fetch_columns,
         )
 
         if df.empty:
@@ -75,9 +87,55 @@ class CandleLoader:
             df.sort_index(inplace=True)
 
         if self.use_cache:
-            _CANDLE_CACHE[self._cache_key] = df
+            _CANDLE_CACHE[cache_key] = df
 
         return self._slice_data(df, start_ts, end_ts, columns)
+
+    def _fetch_candles(
+        self,
+        start_ts: int,
+        end_ts: int,
+        columns: Optional[List[str]],
+    ) -> pd.DataFrame:
+        if self.data_source == "local":
+            return fetch_local_candles_df(
+                symbol=self.symbol,
+                frame=self.frame,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                columns=columns,
+                data_root=self.local_data_root,
+            )
+        if self.data_source == "mongo":
+            return fetch_mongo_candles_df(
+                symbol=self.symbol,
+                frame=self.frame,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                columns=columns,
+                db_name=self.db_name,
+            )
+
+        if has_local_frame(self.symbol, self.frame, data_root=self.local_data_root):
+            local_df = fetch_local_candles_df(
+                symbol=self.symbol,
+                frame=self.frame,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                columns=columns,
+                data_root=self.local_data_root,
+            )
+            if not local_df.empty:
+                return local_df
+
+        return fetch_mongo_candles_df(
+            symbol=self.symbol,
+            frame=self.frame,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            columns=columns,
+            db_name=self.db_name,
+        )
 
     def _slice_data(
         self,

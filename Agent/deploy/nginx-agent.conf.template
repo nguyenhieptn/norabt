@@ -1,0 +1,381 @@
+# =============================================================================
+# NHẮC VĨNH VIỄN CHO NGƯỜI SỬA FILE NÀY SAU NÀY -- ĐỌC TRƯỚC KHI SỬA:
+#
+#   File mẫu này được viết TRƯỚC KHI `/admin` và `/{userref}_{code}` tồn tại
+#   trong Agent/backend/web/app.py. Kết quả: cả hai tuyến đó rơi thẳng vào
+#   `location / { return 404; }` ở cuối file cho tới khi lỗi này được phát
+#   hiện và vá (xem Agent/deploy/README.md / lịch sử git file này). ĐỪNG lặp
+#   lại lỗi tương tự: MỖI KHI THÊM MỘT `Route(...)` MỚI VÀO danh sách
+#   `routes = [...]` cuối `create_app()` trong app.py, PHẢI THÊM MỘT
+#   `location` TƯƠNG ỨNG Ở FILE NÀY **VÀ** Ở BẢN SAO
+#   Agent/deploy/nginx-agent-phase-b-full-strict.conf.template (khối 443)
+#   TRƯỚC KHI DEPLOY -- nếu không, `location / { return 404; }` sẽ nuốt mất
+#   tuyến mới ngay khi domain online, và không ai nhận ra cho tới khi có
+#   người dùng thật báo lỗi.
+#
+#   Danh sách tuyến app.py đang phục vụ tính tới lần sửa gần nhất của file
+#   này (đối chiếu lại `routes = [...]` trong app.py mỗi lần sửa để cập nhật
+#   danh sách này theo, đừng để nó trôi khỏi thực tế):
+#     GET      /                     -> location = /
+#     GET      /api/bots             -> location /api/
+#     GET      /api/markets          -> location /api/
+#     GET      /api/leaderboard      -> location /api/
+#     POST     /api/lookup           -> location /api/
+#     POST     /api/session          -> location /api/
+#     POST     /api/session/logout   -> location /api/
+#     GET+POST /api/analyze          -> location /api/analyze (riêng, chặt hơn)
+#     GET      /bot/{code}           -> location /bot/
+#     GET      /healthz              -> location = /healthz
+#     GET      /admin                -> location = /admin
+#     GET      /{user_ref}_{code}    -> location ~ ^/[a-z2-7]{10}_[A-Za-z0-9]{1,64}$
+#     (tĩnh, không phải route Starlette -- xem app.py phần phục vụ /assets/
+#      và Agent/frontend/build.sh) /assets/*  -> location /assets/
+# =============================================================================
+#
+# GIAI ĐOẠN A — vhost nginx cho agent-web khi Cloudflare đang ở chế độ
+# SSL/TLS "Flexible" (mây cam BẬT, cấu hình hiện tại đã đo được của
+# agent.expsolution.io — xem Agent/deploy/README.md mục "Bước 5").
+#
+# CHỈ CÓ CỔNG 80 TRONG FILE NÀY. KHÔNG CÓ BẤT KỲ `return 301 https` NÀO.
+# Đây là chủ ý, không phải thiếu sót — đọc phần CẢNH BÁO ngay dưới đây
+# TRƯỚC KHI định thêm redirect vào file này.
+#
+# ┌───────────────────────────────────────────────────────────────────────┐
+# │ CẢNH BÁO — VÌ SAO FILE NÀY KHÔNG ĐƯỢC CÓ REDIRECT SANG HTTPS           │
+# │                                                                       │
+# │ Cloudflare đang proxy domain này (mây cam bật) ở chế độ "Flexible":   │
+# │ chặng khách -> Cloudflare dùng HTTPS thật (chứng chỉ công khai        │
+# │ Cloudflare tự cấp, khách thấy ổ khoá bình thường), nhưng chặng        │
+# │ Cloudflare -> origin (máy này) lại là HTTP TRẦN qua cổng 80 — vì      │
+# │ origin CHƯA CÓ chứng chỉ TLS riêng. Đã đo trực tiếp:                  │
+# │   gốc :80  + Host: agent.expsolution.io  -> HTTP 200                 │
+# │   gốc :443 + SNI  agent.expsolution.io   -> HTTP 502 (chưa có vhost  │
+# │                                              443 nào lắng nghe)       │
+# │                                                                       │
+# │ Nếu vhost cổng 80 ở đây trả `return 301 https://...`, chuỗi sẽ là:    │
+# │   Cloudflare -> origin:80 -> 301 sang https                          │
+# │   -> Cloudflare (lại nối origin qua :80 vì đang Flexible) -> 301      │
+# │   -> ... lặp vô hạn.                                                 │
+# │ Trình duyệt sẽ báo ERR_TOO_MANY_REDIRECTS và dịch vụ CHẾT NGAY LẬP    │
+# │ TỨC. Đây không phải giả thuyết — đây là hệ quả tất yếu của việc kết   │
+# │ hợp "Cloudflare Flexible" với "origin tự redirect sang https".        │
+# │                                                                       │
+# │ Redirect 80->443 CHỈ được thêm lại sau khi làm ĐỦ CẢ HAI điều kiện,   │
+# │ theo ĐÚNG THỨ TỰ:                                                    │
+# │   1. Origin đã có chứng chỉ Let's Encrypt thật (certbot, xem README   │
+# │      mục "Nâng cấp lên Giai đoạn B").                                 │
+# │   2. Cloudflare dashboard đã đổi SSL/TLS mode từ Flexible sang        │
+# │      "Full (strict)".                                                │
+# │ Sau khi cả hai điều kiện trên đã xong, dùng file                     │
+# │ Agent/deploy/nginx-agent-phase-b-full-strict.conf.template thay cho  │
+# │ file này — KHÔNG sửa tay file này để thêm redirect.                   │
+# └───────────────────────────────────────────────────────────────────────┘
+#
+# Mẫu cấu hình nginx cho agent-web (dashboard + API JSON giám sát rủi ro bot
+# copy-trading OKX, Agent/backend/web/app.py) — CHƯA CÀI, chỉ là bản nháp chờ
+# duyệt. Viết cho thực tế Docker (agent-web chạy trong container, publish ra
+# 127.0.0.1:8770 trên HOST — xem Agent/deploy/docker-compose.yml).
+#
+# Cách dùng (xem Agent/deploy/README.md để có bối cảnh đầy đủ + lệnh kiểm tra
+# sau mỗi bước):
+#   1. DNS <DOMAIN> (agent.expsolution.io) đã trỏ về Cloudflare với proxy
+#      BẬT (mây cam) — người dùng đã tự làm bước này, không cần lặp lại.
+#   2. Thêm 3 dòng limit_req_zone/limit_conn_zone ở cuối file này vào khối
+#      http{} của /etc/nginx/nginx.conf (một lần, áp dụng cho mọi vhost).
+#   3. sed 's/<DOMAIN>/agent.expsolution.io/g' Agent/deploy/nginx-agent.conf.template \
+#        | sudo tee /etc/nginx/sites-available/<DOMAIN>
+#   4. sudo ln -s /etc/nginx/sites-available/<DOMAIN> /etc/nginx/sites-enabled/
+#   5. Kiểm cú pháp trong container tạm (KHÔNG `sudo nginx -t` trên máy thật
+#      cho tới khi người vận hành tự làm) rồi mới sudo nginx -t && sudo
+#      systemctl reload nginx.
+#
+# agent-web chỉ nghe ở 127.0.0.1:8770 (do docker-compose publish, xem
+# docker-compose.yml — KHÔNG BAO GIỜ 0.0.0.0) và KHÔNG tự mở ra ngoài — nginx
+# là lớp duy nhất chạm internet. Giữ nguyên cách này: server Starlette phía
+# sau chưa có xác thực của riêng nó, mọi kiểm soát truy cập (rate limit, chặn
+# route lạ, TLS) đều nằm ở đây.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name <DOMAIN>;
+
+    # Cần cho certbot cấp chứng chỉ ở Giai đoạn B (HTTP-01 challenge đi
+    # xuyên qua proxy Cloudflare được vì Cloudflare chuyển tiếp cổng 80 tới
+    # origin nguyên vẹn, kể cả khi đang ở chế độ Flexible). Giữ location này
+    # dù chưa chạy certbot — không có gì để mất.
+    location /.well-known/acme-challenge/ { root /var/www/html; }
+
+    # --- Real IP thật của khách qua Cloudflare ------------------------------
+    # QUAN TRỌNG: domain này chạy sau Cloudflare proxy (mây cam bật) nên
+    # $remote_addr mặc định ở đây là IP của CLOUDFLARE, KHÔNG PHẢI IP thật
+    # của người gọi. Thiếu khối real_ip_header/set_real_ip_from này thì MỌI
+    # giới hạn theo IP đều vô nghĩa — `limit_req_zone $binary_remote_addr`
+    # ở nginx (cuối file này, áp dụng cho các location bên dưới) sẽ coi
+    # TOÀN BỘ INTERNET là MỘT IP DUY NHẤT, và một người dùng (vô tình hay cố
+    # ý) có thể khoá quota của tất cả người khác.
+    #
+    # (PerIpRateLimiter ở tầng Starlette, Agent/backend/web/data.py, đọc
+    # request.client.host chứ KHÔNG đọc X-Real-IP/X-Forwarded-For — khối
+    # real_ip dưới đây KHÔNG sửa được vấn đề đó, nó chỉ sửa đúng tầng nginx.
+    # Xem ghi chú riêng trong Agent/deploy/README.md về khoảng trống này ở
+    # tầng ứng dụng — cần sửa trong code Python, ngoài phạm vi file mẫu này.)
+    #
+    # Danh sách dải IP dưới đây lấy trực tiếp từ nguồn chính thức của
+    # Cloudflare (KHÔNG tự bịa):
+    #   https://www.cloudflare.com/ips-v4
+    #   https://www.cloudflare.com/ips-v6
+    # Lấy ngày: 2026-09-15 (UTC). Danh sách NÀY CÓ THỂ THAY ĐỔI theo thời
+    # gian (Cloudflare thỉnh thoảng thêm/bớt dải IP) — rà lại định kỳ (vài
+    # tháng một lần là đủ) bằng cách tải lại hai URL trên và diff với khối
+    # dưới đây, đừng coi đây là danh sách vĩnh viễn.
+    #
+    # Đặt real_ip ở CẤP SERVER (trong chính vhost này), KHÔNG đặt ở cấp
+    # http của /etc/nginx/nginx.conf — máy này có 15 site production khác
+    # (ai.expsolution.io, demo.expsolution.io, ecom.expsolution.io,
+    # qhome.com.vn, fmsmoney.com, bms.efinora.com, ...) không đứng sau
+    # Cloudflare; đặt ở cấp http sẽ áp quy tắc "tin CF-Connecting-IP từ dải
+    # Cloudflare" cho toàn bộ các site đó một cách không cần thiết. nginx
+    # chọn đúng vhost theo Host header TRƯỚC KHI chạy realip (module realip
+    # chạy ở phase post-read, ngay sau khi đọc xong header — virtual server
+    # đã được chọn từ trước đó), nên đặt ở đây vẫn áp dụng ĐÚNG THỜI ĐIỂM —
+    # trước cả limit_req/limit_conn (hai directive đó chạy ở phase
+    # preaccess, sau post-read của realip), nên $binary_remote_addr mà
+    # limit_req_zone dùng để tính quota đã là IP thật của khách.
+    real_ip_header CF-Connecting-IP;
+    set_real_ip_from 173.245.48.0/20;
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 103.22.200.0/22;
+    set_real_ip_from 103.31.4.0/22;
+    set_real_ip_from 141.101.64.0/18;
+    set_real_ip_from 108.162.192.0/18;
+    set_real_ip_from 190.93.240.0/20;
+    set_real_ip_from 188.114.96.0/20;
+    set_real_ip_from 197.234.240.0/22;
+    set_real_ip_from 198.41.128.0/17;
+    set_real_ip_from 162.158.0.0/15;
+    set_real_ip_from 104.16.0.0/13;
+    set_real_ip_from 104.24.0.0/14;
+    set_real_ip_from 172.64.0.0/13;
+    set_real_ip_from 131.0.72.0/22;
+    set_real_ip_from 2400:cb00::/32;
+    set_real_ip_from 2606:4700::/32;
+    set_real_ip_from 2803:f800::/32;
+    set_real_ip_from 2405:b500::/32;
+    set_real_ip_from 2405:8100::/32;
+    set_real_ip_from 2a06:98c0::/29;
+    set_real_ip_from 2c0f:f248::/32;
+
+    # Log riêng cho vhost này — không lẫn vào access.log/error.log chung của
+    # nginx (nơi 6 container Docker khác + MySQL/PHP-FPM cũng có thể có vhost
+    # riêng). Giúp tra sự cố của agent-web mà không phải lọc log của dịch vụ
+    # khác, và tách hạn mức logrotate cho riêng vhost này.
+    access_log /var/log/nginx/agent-expsolution-access.log;
+    error_log  /var/log/nginx/agent-expsolution-error.log;
+
+    # /api/analyze nhận cả GET lẫn POST, và chấp nhận nhiều tên tham số đồng
+    # nghĩa (code, uniqueCode, unique_code, botId, bot_id, botCode, bot_code,
+    # không phân biệt hoa thường — xem _resolve_code_param trong
+    # Agent/backend/web/app.py). Ứng dụng tự chặn body vượt quá
+    # ANALYZE_MAX_BODY_BYTES = 64 * 1024 (Agent/backend/web/app.py) và trả
+    # 413 kèm thân JSON tiếng Việt. Đặt cùng ngưỡng 64k ở đây để khi bị chặn,
+    # người gọi (agent máy, không phải trình duyệt) luôn nhận lỗi JSON có cấu
+    # trúc thay vì trang HTML mặc định của nginx. CỐ Ý TRÙNG SỐ với
+    # ANALYZE_MAX_BODY_BYTES — đổi một bên thì phải đổi cả bên kia.
+    client_max_body_size 64k;
+
+    # streamable/SSE-shaped response (và cả JSON thường) không bị nginx giữ
+    # lại chờ đủ buffer mới đẩy đi — quan trọng nếu sau này thêm route dạng
+    # stream, và vô hại với JSON thường hiện tại.
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_http_version 1.1;
+
+    # POST /api/analyze chạy pipeline chấm điểm + Monte Carlo, đo thực tế
+    # "dưới 8 giây" cho lần gọi thứ hai trở đi (xem docstring của
+    # WebDataService trong Agent/backend/web/data.py); 75s chừa biên độ rộng
+    # cho lần gọi đầu (leaderboard OKX phải trang hết ~13 request) và cho một
+    # retry OKX chậm bất thường, mà vẫn không giữ worker connection của nginx
+    # cả chục phút như một endpoint SSE thật sự cần.
+    #
+    # RÀNG BUỘC THÊM VÌ CLOUDFLARE: gói Cloudflare miễn phí tự cắt kết nối ở
+    # khoảng 100 giây (lỗi 524 "A timeout occurred" do CHÍNH Cloudflare trả,
+    # origin không thấy request nữa). 75s hiện tại vẫn nằm trong ngưỡng đó
+    # nhưng khá sát — ĐỪNG nâng proxy_read_timeout/proxy_send_timeout lên
+    # gần hoặc vượt 100s mà không kiểm tra lại gói Cloudflare đang dùng
+    # (Enterprise mới nâng được giới hạn 100s này), nếu không client sẽ nhận
+    # 524 từ Cloudflare trước khi origin kịp trả lời, bất kể origin có timeout
+    # dài hơn bao nhiêu.
+    proxy_read_timeout 75s;
+    proxy_send_timeout 75s;
+
+    # Chuyển tiếp header nguyên vẹn — X-Forwarded-For/Proto để app biết IP
+    # thật của client (dùng cho rate limit theo IP ở tầng Starlette, xem
+    # PerIpRateLimiter trong web/data.py) và scheme gốc. LƯU Ý: ở Giai đoạn A
+    # chặng Cloudflare->origin là HTTP trần (Flexible), nên scheme thật của
+    # chặng này là "http" dù khách đã dùng https với Cloudflare — dùng
+    # $http_x_forwarded_proto do Cloudflare gửi lên (nó luôn ghi "https" vì
+    # đó là scheme khách thật sự dùng) thay vì $scheme (sẽ luôn là "http" ở
+    # giai đoạn này và làm ứng dụng hiểu sai là đang chạy không mã hoá).
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    proxy_set_header Connection        "";
+
+    # Giới hạn số kết nối đồng thời từ một IP — với proxy_buffering off +
+    # timeout 75s, một client ác ý mở hàng loạt kết nối chậm vẫn có thể giữ
+    # hết worker connection của nginx dù mỗi request riêng lẻ có bị
+    # limit_req chặn hay không.
+    limit_conn agent_conn 20;
+
+    # Khi limit_req/limit_conn chặn một request, trả 429 (Too Many Requests)
+    # thay vì mặc định 503 (Service Unavailable) của nginx — 429 đúng ngữ
+    # nghĩa hơn và dễ để một caller máy (agent, script) phân biệt "đang bị
+    # giới hạn tần suất, thử lại sau" khỏi "dịch vụ đang sập".
+    limit_req_status 429;
+
+    # Chặn dò quét: chỉ phục vụ "/", "/api/", "/bot/{code}", "/healthz",
+    # "/admin", "/{userref}_{code}" và "/assets/" (tài nguyên tĩnh của SPA) —
+    # đúng bộ route thật của Agent/backend/web/app.py (xem cuối create_app),
+    # còn lại 404 ở location / cuối cùng — không lộ route/lỗi nào khác cho
+    # một client đang dò tìm. Xem danh sách đầy đủ + lời nhắc ở đầu file này.
+    location = / {
+        limit_req zone=agent_general burst=50 nodelay;
+        proxy_pass http://127.0.0.1:8770;
+    }
+
+    # /api/analyze là endpoint A2MCP đã đăng ký trên OKX Marketplace. CLI
+    # phía người mua probe bằng tham số RỖNG trước (để tự khám phá tham số
+    # bắt buộc), rồi hỏi người dùng mã bot và probe lại — có thể lặp lại vài
+    # lần nếu người dùng gõ sai mã, cộng thêm khả năng CLI tự fallback
+    # GET<->POST khi gặp 405. Toàn bộ các lượt đó KHÔNG được để bị chặn,
+    # vì CLI coi phản hồi bị chặn (429/503) là LỖI KẾT THÚC của cả luồng,
+    # không phải tín hiệu "chờ rồi thử lại".
+    #
+    # Zone rate=30r/m, burst=10 nodelay CỐ Ý rộng hơn nhiều so với trần thật
+    # của dịch vụ — trần nghiệp vụ thật (5 lượt PHÂN TÍCH/phút/IP) nằm ở
+    # Starlette (ANALYZE_RATE_LIMIT_* trong web/app.py) và CHỈ tính những lượt
+    # gọi thực sự chạy pipeline chấm điểm (service.analyze()); các lượt rẻ —
+    # thiếu tham số, mã sai định dạng, hai tên tham số đồng nghĩa xung đột —
+    # được lọc ra TRƯỚC bộ đếm đó nên không tốn quota (xem api_analyze trong
+    # web/app.py). nginx ở tầng này KHÔNG thể phân biệt lượt rẻ với lượt đắt
+    # — nó đếm mọi request tới path này như nhau — nên KHÔNG còn được coi là
+    # phản chiếu con số 5/phút của Starlette (một comment cũ ở đây từng nói
+    # vậy, đã sai). Vai trò của limit_req tại đây chỉ còn là chặn lạm dụng
+    # thô/DoS rõ ràng (hàng trăm request/giây), để lại toàn bộ việc phân biệt
+    # rẻ/đắt và ép trần nghiệp vụ thật cho tầng Starlette.
+    location /api/analyze {
+        limit_req zone=agent_analyze burst=10 nodelay;
+        proxy_pass http://127.0.0.1:8770;
+    }
+
+    # Các route /api/ còn lại (/api/bots, /api/markets, /api/leaderboard,
+    # /api/lookup) chỉ đọc file JSON đã có sẵn trên đĩa hoặc gọi OKX ở mức
+    # rẻ (xem api_lookup trong web/app.py) — rẻ hơn nhiều so với
+    # /api/analyze, nên cho phép tần suất cao hơn hẳn.
+    location /api/ {
+        limit_req zone=agent_general burst=50 nodelay;
+        proxy_pass http://127.0.0.1:8770;
+    }
+
+    # /bot/{code} là trang HTML mà report_url trong JSON của /api/analyze
+    # trỏ tới (khi NORABT_WEB_REPORT_BASE_URL đã đặt — xem Agent/.env.example)
+    # — chỉ render markdown đã tính sẵn thành HTML, không chạy lại pipeline
+    # phân tích, nên rẻ như "/" và các route /api/ đọc file. Cùng mức
+    # agent_general. Thiếu location này thì report_url trỏ tới một link chết
+    # (404) dù JSON có vẻ hợp lệ — tự tái lập đúng lỗi mà việc chỉ trả
+    # report_url khi có domain thật vốn định tránh, chỉ là ở tầng nginx.
+    location /bot/ {
+        limit_req zone=agent_general burst=50 nodelay;
+        proxy_pass http://127.0.0.1:8770;
+    }
+
+    # GET /admin -- trang danh sách admin (Agent/backend/web/app.py's
+    # admin_page). CHỈ đọc lại đúng dữ liệu data/assessment/** mà /api/bots
+    # đã đọc (qua một cache TTL ngắn, xem app.py), không chạm OKX, không
+    # chạy pipeline chấm điểm -- rẻ như "/" nên cùng mức agent_general.
+    # Việc từ chối (không có/sai khoá admin) là 404 THÔNG THƯỜNG được sinh
+    # BÊN TRONG admin_page() (không phải 401/403 để không lộ route này tồn
+    # tại) -- nginx không cần, và không nên, biết gì về việc đó, chỉ cần
+    # chuyển tiếp request. THIẾU location này (lỗi đã xảy ra, xem đầu file)
+    # khiến /admin rơi vào `location / { return 404; }` bên dưới trước cả
+    # khi tới được app.py -- người có khoá admin đúng cũng không vào được.
+    location = /admin {
+        limit_req zone=agent_general burst=50 nodelay;
+        proxy_pass http://127.0.0.1:8770;
+    }
+
+    # GET /{userref}_{code} -- link báo cáo riêng-tư-theo-người-dùng mà
+    # `report_url`/dòng "xem chi tiết trực quan" trong /api/analyze trỏ tới
+    # khi caller có phiên đăng nhập user (xem app.py's user_report, data.py's
+    # report_url_is_usable). Chạy lại NGUYÊN VẸN pipeline chấm điểm giống hệt
+    # /bot/<code> ở trên (cùng schema `service.analyze()`), nên về LÝ THUYẾT
+    # đáng một mức limit_req chặt hơn agent_general -- nhưng /bot/ ở trên
+    # cũng đã tự nhận agent_general dù cùng chi phí, với lý do: trần nghiệp
+    # vụ THẬT nằm ở PerIpRateLimiter trong Starlette (dùng chung bucket với
+    # /api/analyze, xem resolve_client_ip/limiter trong app.py), tầng nginx
+    # này chỉ cần chặn lạm dụng thô -- giữ nhất quán với /bot/ thay vì bịa
+    # thêm một zone thứ ba chỉ khác biệt ở tên.
+    #
+    # BIỂU THỨC CHÍNH QUY PHẢI CHẶT ĐÚNG NHƯ VẦY, KHÔNG ĐƯỢC NỚI LỎNG:
+    # `user_ref` là ĐÚNG 10 ký tự base32 thường (`[a-z2-7]`, xem
+    # Agent/backend/web/identity.py's USER_REF_RE) và `code` là 1-64 ký tự
+    # chữ/số (xem Agent/backend/web/data.py's `_CODE_RE`). Neo cả hai đầu
+    # (`^...$`) nên đây CHỈ khớp đúng một hình dạng path duy nhất, một segment
+    # (không có dấu `/` nào lọt qua vì hai lớp ký tự trên không chứa `/`) --
+    # KHÔNG BAO GIỜ nới thành dạng dễ dãi kiểu `^/[^/]+_[^/]+$` "cho chắc", và
+    # KHÔNG BAO GIỜ xoá `location / { return 404; }` ở cuối file để "đơn giản
+    # hoá" việc này: lưới 404 đó là lớp phòng thủ chặn dò quét cho MỌI path lạ
+    # khác, không riêng gì path này -- app.py có tự validate lại
+    # user_ref/code một lần nữa (xem user_report's docstring), nhưng đó là
+    # phòng thủ ở tầng khác, không thay thế được lưới 404 ở tầng nginx.
+    location ~ "^/[a-z2-7]{10}_[A-Za-z0-9]{1,64}$" {
+        limit_req zone=agent_general burst=50 nodelay;
+        proxy_pass http://127.0.0.1:8770;
+    }
+
+    # /assets/ -- tài nguyên tĩnh (JS/CSS đã build) của SPA, phục vụ trực
+    # tiếp từ Agent/web/dist/assets/ bởi app.py (xem app.py's static file
+    # mount và Agent/frontend/build.sh) -- không chạy Python nào ngoài đọc
+    # file + set content-type, nên rẻ như "/" và cùng mức agent_general.
+    location /assets/ {
+        limit_req zone=agent_general burst=50 nodelay;
+        proxy_pass http://127.0.0.1:8770;
+    }
+
+    # /healthz để orchestrator/monitoring thăm dò định kỳ, có thể ở tần suất
+    # cao hơn nhịp thao tác của người dùng thật (vài giây/lần). Không áp
+    # limit_req cho riêng route này: nó chỉ đọc trạng thái đã có sẵn trong
+    # tiến trình (uptime, đếm file bot trên đĩa, cờ OKX reachable — xem
+    # healthz trong web/app.py), không chạm OKX hay chạy pipeline phân tích
+    # trong request, nên `limit_conn agent_conn 20;` ở trên (giới hạn số kết
+    # nối đồng thời/IP, áp dụng chung cho toàn vhost) đã đủ chặn lạm dụng —
+    # không cần thêm limit_req làm phức tạp việc probe tần suất cao hợp lệ
+    # từ orchestrator.
+    location = /healthz {
+        proxy_pass http://127.0.0.1:8770;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+# --- Thêm vào khối http{} của /etc/nginx/nginx.conf (bước 2 phía trên) -----
+# Zone dùng $binary_remote_addr (theo IP) — hai mức tách biệt cho hai loại
+# route, xem lý do ở location /api/analyze và /api/ phía trên. agent_analyze
+# ở rate=30r/m/burst=10 KHÔNG phải trần nghiệp vụ (trần thật 5 lượt phân
+# tích/phút/IP nằm ở Starlette, ANALYZE_RATE_LIMIT_* trong web/app.py và chỉ
+# tính lượt gọi tốn CPU thật) — mức này chỉ đủ rộng để không chặn nhầm luồng
+# probe nhiều nhịp của CLI OKX Marketplace (xem comment ở location
+# /api/analyze), để lại vai trò chắn lạm dụng thô cho nginx.
+#
+# $binary_remote_addr ở đây chỉ đúng ý nghĩa (IP thật của khách, không phải
+# IP của Cloudflare) NHỜ khối real_ip_header/set_real_ip_from đặt trong
+# server{} phía trên — hai khối này PHẢI đi cùng nhau, xoá một bên mà giữ
+# bên kia là vô nghĩa (hoặc quay lại đếm nhầm IP Cloudflare, hoặc bật một
+# quy tắc trust IP không áp dụng ở đâu cả).
+#   limit_req_zone  $binary_remote_addr zone=agent_analyze:10m rate=30r/m;
+#   limit_req_zone  $binary_remote_addr zone=agent_general:10m rate=20r/s;
+#   limit_conn_zone $binary_remote_addr zone=agent_conn:10m;

@@ -1,15 +1,34 @@
 """Meta Router - Cung cấp dữ liệu tĩnh/môi trường cho Frontend (V2)."""
-from typing import List, Dict, Any
+import os
+from typing import Any, Dict, List
+
 from fastapi import APIRouter
-from backend.db.mongo import list_symbols
+from backend.db.local_pkl import list_symbols as list_local_symbols
+from backend.db.mongo import list_symbols as list_mongo_symbols
 
 router = APIRouter(prefix="/api/v2", tags=["Meta Data"])
 
+
+def _local_symbols() -> List[str]:
+    symbols = set(list_local_symbols(frame="1m"))
+    symbols.update(list_local_symbols(frame="4h"))
+    return sorted(symbols)
+
+
 @router.get("/symbols")
 def get_symbols() -> List[str]:
-    """Lấy danh sách các Symbol (cặp giao dịch) hiện có trong CSDL mới (MongoDB)."""
-    # Trả về các symbols có trong collection 1m
-    return list_symbols(frame="1m")
+    source = os.environ.get("NORA_DATA_SOURCE", "auto").strip().lower()
+    if source == "local":
+        return _local_symbols()
+    if source == "mongo":
+        return list_mongo_symbols(frame="1m")
+
+    symbols = set(_local_symbols())
+    try:
+        symbols.update(list_mongo_symbols(frame="1m"))
+    except Exception:
+        pass
+    return sorted(symbols)
 
 @router.get("/strategies")
 def get_strategies() -> List[Dict[str, Any]]:

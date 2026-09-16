@@ -1,0 +1,572 @@
+<title>Giám sát rủi ro bot OKX</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F4F6F8; --surface:#FFFFFF; --sunken:#EDF0F4;
+  --ink:#141A21; --ink-2:#47525F; --ink-3:#7C8794; --line:#DFE4EA;
+  --accent:#1F3A5F; --accent-soft:#E7ECF3;
+  --promise:#2E8B62; --safe:#40809B; --latent:#B07A1C; --danger:#B93E35;
+  --promise-bg:#E6F2EC; --safe-bg:#E4EEF3; --latent-bg:#F8EEDA; --danger-bg:#F8E7E5;
+  --shadow:0 1px 2px rgba(20,26,33,.06),0 10px 28px -20px rgba(20,26,33,.35);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E1319; --surface:#161D25; --sunken:#1D252F;
+    --ink:#E9EDF2; --ink-2:#A8B3C0; --ink-3:#6F7C8B; --line:#28313C;
+    --accent:#8FB4DC; --accent-soft:#1B2734;
+    --promise:#5FBF91; --safe:#6FB0CB; --latent:#DFAB4A; --danger:#E2695E;
+    --promise-bg:#132A21; --safe-bg:#122630; --latent-bg:#2E2412; --danger-bg:#301A18;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -20px rgba(0,0,0,.85);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1319; --surface:#161D25; --sunken:#1D252F;
+  --ink:#E9EDF2; --ink-2:#A8B3C0; --ink-3:#6F7C8B; --line:#28313C;
+  --accent:#8FB4DC; --accent-soft:#1B2734;
+  --promise:#5FBF91; --safe:#6FB0CB; --latent:#DFAB4A; --danger:#E2695E;
+  --promise-bg:#132A21; --safe-bg:#122630; --latent-bg:#2E2412; --danger-bg:#301A18;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -20px rgba(0,0,0,.85);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font-family:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.num{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px}
+header{padding-block:40px 24px;border-bottom:1px solid var(--line)}
+h1{margin:0 0 6px;font-size:clamp(26px,3.6vw,38px);font-weight:800;letter-spacing:-.022em;text-wrap:balance}
+.sub{margin:0;color:var(--ink-2);max-width:62ch}
+.prov{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px 18px;font-size:12.5px;color:var(--ink-3)}
+.prov b{color:var(--ink-2);font-weight:500}
+.lede{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:28px;align-items:center;
+  padding-block:30px;border-bottom:1px solid var(--line)}
+.head-fig{font-size:clamp(46px,7vw,68px);font-weight:800;line-height:1;letter-spacing:-.04em;color:var(--danger)}
+.head-fig small{display:block;font-size:15px;font-weight:500;color:var(--ink-2);letter-spacing:0;margin-top:8px}
+.tiers{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:var(--surface);color:var(--ink-2);font:inherit;font-size:13.5px}
+.chip:hover{border-color:var(--ink-3)}
+.chip[aria-pressed="true"]{border-color:currentColor;font-weight:600}
+.chip .dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex:none}
+.chip .ct{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;opacity:.8}
+.c-promise[aria-pressed="true"]{color:var(--promise);background:var(--promise-bg)}
+.c-safe[aria-pressed="true"]{color:var(--safe);background:var(--safe-bg)}
+.c-latent[aria-pressed="true"]{color:var(--latent);background:var(--latent-bg)}
+.c-danger[aria-pressed="true"]{color:var(--danger);background:var(--danger-bg)}
+.c-promise .dot{color:var(--promise)} .c-safe .dot{color:var(--safe)}
+.c-latent .dot{color:var(--latent)} .c-danger .dot{color:var(--danger)}
+.bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding-block:20px}
+.search{flex:1 1 260px;display:flex;align-items:center;gap:9px;background:var(--surface);
+  border:1px solid var(--line);border-radius:10px;padding:9px 13px}
+.search input{flex:1;border:0;background:none;color:var(--ink);font:inherit;outline:none;min-width:0}
+.search input::placeholder{color:var(--ink-3)}
+.search:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.srt{display:flex;gap:2px;background:var(--sunken);border-radius:9px;padding:3px}
+.srt button{border:0;background:none;color:var(--ink-2);font:inherit;font-size:13px;padding:6px 12px;
+  border-radius:7px;cursor:pointer}
+.srt button[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:var(--shadow)}
+</style>
+<style>
+.grp{margin-top:26px}
+.grp-h{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+.grp-h h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.09em;text-transform:uppercase}
+.grp-h span{font-size:12.5px;color:var(--ink-3)}
+.rows{display:flex;flex-direction:column;gap:7px}
+.row{width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer;
+  background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--tier);
+  border-radius:10px;padding:13px 15px;display:grid;gap:4px 16px;
+  grid-template-columns:minmax(0,1fr) auto;transition:border-color .12s,transform .12s}
+.row:hover{border-color:var(--ink-3);border-left-color:var(--tier)}
+.row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.r-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0}
+.r-name{font-weight:600;letter-spacing:-.01em}
+.r-slot{font-size:12px;color:var(--ink-3);font-family:"IBM Plex Mono",monospace}
+.r-cause{grid-column:1;font-size:13.5px;color:var(--ink-2);overflow-wrap:anywhere}
+.r-nums{grid-row:1/3;grid-column:2;display:flex;align-items:center;gap:20px;align-self:center}
+.stat{text-align:right}
+.stat b{display:block;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:19px;font-weight:500;line-height:1.15}
+.stat s{display:block;text-decoration:none;font-size:10.5px;color:var(--ink-3);
+  letter-spacing:.07em;text-transform:uppercase;margin-top:2px}
+.rk b{color:var(--tier)}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:6px;
+  font-size:11.5px;font-weight:600;letter-spacing:.03em;background:var(--tier-bg);color:var(--tier)}
+.badge svg{flex:none}
+.empty{padding:40px 0;text-align:center;color:var(--ink-3)}
+
+dialog{border:0;padding:0;background:none;max-width:min(760px,94vw);width:100%}
+dialog::backdrop{background:rgba(10,14,19,.55);backdrop-filter:blur(2px)}
+.sheet{background:var(--surface);color:var(--ink);border-radius:14px;box-shadow:var(--shadow);
+  max-height:88vh;overflow:auto;border-top:4px solid var(--tier)}
+.sh-h{padding:22px 26px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;
+  background:var(--surface);z-index:2}
+.sh-h h3{margin:0 0 4px;font-size:22px;font-weight:700;letter-spacing:-.02em}
+.sh-x{position:absolute;top:18px;right:18px;border:1px solid var(--line);background:var(--surface);
+  color:var(--ink-2);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:17px;line-height:1}
+.sh-x:hover{color:var(--ink);border-color:var(--ink-3)}
+.sh-b{padding:22px 26px 30px;display:flex;flex-direction:column;gap:24px}
+.verdict-line{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.kpi div{background:var(--surface);padding:11px 13px}
+.kpi b{display:block;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:17px;font-weight:500}
+.kpi s{display:block;text-decoration:none;font-size:10.5px;color:var(--ink-3);
+  text-transform:uppercase;letter-spacing:.06em;margin-top:3px}
+.sec h4{margin:0 0 9px;font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.pct{background:var(--sunken);border-radius:10px;padding:16px 18px 12px}
+.pct-scale{position:relative;height:38px;margin:14px 0 4px}
+.pct-track{position:absolute;top:15px;left:0;right:0;height:5px;border-radius:3px;background:var(--line)}
+.pct-span{position:absolute;top:15px;height:5px;border-radius:3px;background:var(--tier);opacity:.35}
+.pct-m{position:absolute;top:8px;width:2px;height:19px;background:var(--tier);border-radius:1px}
+.pct-m.mid{width:3px;height:25px;top:5px}
+.pct-lab{position:absolute;top:32px;transform:translateX(-50%);font-size:10.5px;color:var(--ink-3);white-space:nowrap}
+.pct-v{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;color:var(--ink-2);
+  font-family:"IBM Plex Mono",monospace;flex-wrap:wrap}
+.pct-note{margin:10px 0 0;font-size:12.5px;color:var(--ink-3)}
+.para{margin:0 0 12px;color:var(--ink-2)}
+.para:last-child{margin-bottom:0}
+.para strong{color:var(--ink);font-weight:600}
+.bullets{margin:0 0 12px;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.bullets li{padding-left:16px;position:relative;color:var(--ink-2);font-size:14.5px}
+.bullets li::before{content:"";position:absolute;left:3px;top:.62em;width:5px;height:5px;
+  border-radius:50%;background:var(--tier)}
+.warn{background:var(--latent-bg);color:var(--ink);border-radius:9px;padding:12px 14px;font-size:13.5px}
+.mk{width:100%;border-collapse:collapse;font-size:13.5px}
+.mk th{text-align:left;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line)}
+.mk td{padding:9px 10px;border-bottom:1px solid var(--line);color:var(--ink-2)}
+.mk td:first-child{color:var(--ink);font-weight:600}
+.mk .pos{font-weight:600}
+.scroll{overflow-x:auto}
+footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);
+  font-size:12.5px;color:var(--ink-3);padding-bottom:50px}
+@media (max-width:640px){
+  .lede{grid-template-columns:1fr;gap:18px}
+  .row{grid-template-columns:1fr}
+  .r-nums{grid-row:auto;grid-column:1;justify-content:flex-start;gap:24px;margin-top:6px}
+  .stat{text-align:left}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+<div class="wrap">
+<header>
+  <h1>Giám sát rủi ro bot copy-trading OKX</h1>
+  <p class="sub">Chấm điểm 30 bot dẫn dắt trên OKX bằng dữ liệu công khai: mô phỏng lại sổ lệnh
+     đã chốt, đo rủi ro đuôi, rồi xếp loại kèm giải thích vì sao.</p>
+  <div class="prov">
+    <span>Nguồn <b>OKX public API</b> — chỉ lệnh đã chốt</span>
+    <span>Mô phỏng <b>10.000 kịch bản</b>/bot (stationary bootstrap)</span>
+    <span>Dữ liệu <b id="stamp">—</b></span>
+  </div>
+</header>
+
+<section class="lede">
+  <div>
+    <p class="head-fig" id="lede-n">—<small id="lede-t">bot cần xử lý trước</small></p>
+  </div>
+  <div>
+    <div class="tiers" id="tiers"></div>
+    <p class="pct-note" style="margin-top:12px">Danh sách xếp <strong>việc cần xử lý lên đầu</strong>:
+       NGUY HIỂM rồi TIỀM ẨN. Bấm một bot để xem vì sao nó bị chấm như vậy.</p>
+  </div>
+</section>
+
+<div class="bar">
+  <label class="search">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.6"/>
+      <path d="M11 11l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+    <input id="q" type="search" placeholder="Tìm theo tên bot, mã uniqueCode hoặc asset…"
+           autocomplete="off" aria-label="Tìm bot">
+  </label>
+  <div class="srt" role="group" aria-label="Sắp xếp">
+    <button type="button" data-sort="risk" aria-pressed="true">Rủi ro cao trước</button>
+    <button type="button" data-sort="quality" aria-pressed="false">Chất lượng cao trước</button>
+    <button type="button" data-sort="trades" aria-pressed="false">Nhiều lệnh nhất</button>
+  </div>
+</div>
+
+<main id="list"></main>
+
+<section class="grp" style="margin-top:44px">
+  <div class="grp-h">
+    <h2>Thế trận thị trường</h2>
+    <span>15 asset — nền để đọc kết quả của bot</span>
+  </div>
+  <div class="scroll">
+    <table class="mk">
+      <thead><tr><th>Asset</th><th>Thế trận</th><th>Xu hướng</th><th>Biến động</th>
+        <th>Thanh khoản</th><th>Chất lượng dữ liệu</th></tr></thead>
+      <tbody id="mk"></tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <p>Điểm rủi ro càng thấp càng an toàn; điểm chất lượng càng cao càng tốt. Mọi con số tính trên
+     <strong>lệnh đã chốt</strong> — vị thế đang mở được nêu riêng vì chúng chưa ghi nhận lãi lỗ.
+     Đánh giá không phải lời khuyên đầu tư.</p>
+</footer>
+</div>
+
+<dialog id="dlg" aria-labelledby="dlg-t">
+  <div class="sheet" id="sheet">
+    <div class="sh-h">
+      <button class="sh-x" type="button" id="dlg-x" aria-label="Đóng">×</button>
+      <h3 id="dlg-t"></h3>
+      <div class="verdict-line" id="dlg-v"></div>
+    </div>
+    <div class="sh-b" id="dlg-b"></div>
+  </div>
+</dialog>
+<script>window.__DASH__={"bots":[{"name":"AI 量化新星 - 趋势策略","code":"865268170633117834","slot":"CEX/ADA","sym":"BNB","verdict":"TIỀM ẨN","action":"WARN","q":78.4,"r":37.016700697800566,"conf":74.27567345822507,"cause":"Số liệu bề mặt che mất rủi ro: 83% lãi gộp chỉ đến từ một pha thị trường","text":["AI 量化新星 - 趋势策略 — BNB/CEX, 71 lệnh đã chốt, vốn tham chiếu 136,684 USDT, 1.4 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: AI 量化新星 - 趋势策略 có kết quả tốt trên sổ (thắng 34%, profit factor 2.23, sụt vốn 15.1%), nhưng 83% lãi gộp đến từ riêng pha thị trường Tăng, động. Đây là một chiến lược hợp với một kiểu thị trường chứ không phải một lợi thế ổn định — khi pha đổi, lợi thế biến mất mà không có cảnh báo trước. Bot đã lỗ ròng ở 2/6 pha.","CHỨNG MINH:","• Profit factor 2.23 (sổ đã chốt) → 2.29 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Điểm rủi ro 37 là bình quân 10 chiều; nặng nhất: Rủi ro danh mục 62, Chất lượng lợi nhuận / R 60","• Monte Carlo 10,000 kịch bản × 71 lệnh: trung vị +29.3% vốn, p05 -6.4%, xấu nhất -30.7%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 12.1%, xác suất lỗ 10%","• 71 lệnh, thắng 34%, payoff 4.37 → lệnh thắng lớn hơn hẳn lệnh thua","• Sụt vốn thực tế 15.1%, Sharpe 5.43, chuỗi thua dài nhất 8 lệnh","KẾT LUẬN: TIỀM ẨN — chất lượng 78/100, rủi ro 37/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Điều kiện xem xét lại: bot kiếm được lợi nhuận ở pha thị trường khác ngoài pha đang phụ thuộc."],"n":71,"win":33.80281690140845,"pf":2.233489288726936,"mpf":2.2854526034630926,"dd":15.142225548617155,"sharpe":5.433655008263777,"openloss":0.0,"openpct":0.0,"cap":136683.63200907182,"mode":"PARTIAL","mc":{"it":10000,"h":71,"worst":-30.72476477855806,"p05":-6.415126908852505,"p50":29.2971631281653,"p95":73.572337774916,"cvar":12.075256175673513,"ploss":9.56,"pruin":0.0,"dd95":14.763823110003164,"psr":0.9922525640529032,"dsr":0.9415356907917807,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Rủi ro danh mục 62","Chất lượng lợi nhuận / R 60","Rủi ro sụt vốn 60"],"dims":{"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":60.0,"tail_risk":50.0,"leverage_exposure":15.0,"behavioral_risk":10.0,"strategy_drift":50.0,"liquidity_execution":15.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":85.0,"consistency":100.0,"drawdown_control":65.0,"honesty":100.0,"robustness":32.5},"flags":["83% lãi gộp chỉ đến từ một pha thị trường"]},{"name":"BTC策略","code":"2DE3E8FEAC245B9C","slot":"CEX/ADA","sym":"BTC","verdict":"AN TOÀN","action":"WARN","q":52.3,"r":43.9584482706161,"conf":69.95598224275452,"cause":"Rủi ro thấp (44), chất lượng mới ở mức trung bình (52)","text":["BTC策略 — BTC/CEX, 538 lệnh đã chốt, vốn tham chiếu 264,850 USDT, 57.9 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: BTC策略 đang lỗ, không phải đang lãi: trên 538 lệnh đã chốt, kỳ vọng mỗi lệnh là -4 USDT, cộng dồn 2,358 USDT lỗ. Chiến lược đã đủ lệnh để nói, và nó đang nói rằng nó mất tiền.","CHỨNG MINH:","• Profit factor 0.90 (sổ đã chốt) → 0.92 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 1,786 USDT = 1% vốn, trên 82 vị thế mở","• Điểm rủi ro 44 là bình quân 10 chiều; nặng nhất: Chất lượng hiệu suất 80, Rủi ro đuôi 70","• Monte Carlo 10,000 kịch bản × 500 lệnh: trung vị -0.9% vốn, p05 -4.2%, xấu nhất -8.7%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 5.0%, xác suất lỗ 67%","• 538 lệnh, thắng 45%, payoff 1.09","KẾT LUẬN: AN TOÀN — chất lượng 52/100, rủi ro 44/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Xếp loại này nói về rủi ro, không nói về lợi nhuận: bot đang lỗ nên đây không phải khuyến nghị copy, chỉ nghĩa là mức thiệt hại có giới hạn. Độ tin cậy của chính đánh giá này chỉ 70%."],"n":538,"win":45.353159851301115,"pf":0.9026614215832018,"mpf":0.9176613807067215,"dd":3.433591176817418,"sharpe":-4.61284150310179,"openloss":1785.939030000001,"openpct":0.6743209540956228,"cap":264849.99749047455,"mode":"PARTIAL","mc":{"it":10000,"h":500,"worst":-8.749918894939098,"p05":-4.1542188205599455,"p50":-0.8903937619793388,"p95":2.511343190728332,"cvar":4.951160335379491,"ploss":66.63,"pruin":0.0,"dd95":4.830743061080595,"psr":0.220191884851205,"dsr":0.052150585318191056,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Chất lượng hiệu suất 80","Rủi ro đuôi 70","Rủi ro danh mục 62"],"dims":{"market_alignment":10.0,"performance_quality":80.0,"return_r_quality":60.0,"drawdown_risk":35.0,"tail_risk":70.0,"leverage_exposure":15.0,"behavioral_risk":55.0,"strategy_drift":40.0,"liquidity_execution":15.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":0.0,"consistency":0.0,"drawdown_control":100.0,"honesty":100.0,"robustness":64.0},"flags":[]},{"name":"Fly-000","code":"26E8167F37D30564","slot":"CEX/AVAX","sym":"SNDK","verdict":"TIỀM ẨN","action":"BLOCK_NEW_TRADES","q":76.2,"r":51.38563273663551,"conf":62.82575773393185,"cause":"Điểm rủi ro 51 ở vùng giữa, chưa đủ an toàn để tin","text":["Fly-000 — SNDK/CEX, 93 lệnh đã chốt, vốn tham chiếu 128,172 USDT, 1.1 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Fly-000 đang lỗ, không phải đang lãi: trên 93 lệnh đã chốt, kỳ vọng mỗi lệnh là -2 USDT, cộng dồn 154 USDT lỗ. Chiến lược đã đủ lệnh để nói, và nó đang nói rằng nó mất tiền.","CHỨNG MINH:","• Profit factor 0.95 (sổ đã chốt) → 14.26 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 170 USDT = 0% vốn, trên 100 vị thế mở","• Điểm rủi ro 51 là bình quân 10 chiều; nặng nhất: Chất lượng hiệu suất 80, Rủi ro đuôi 70","• Monte Carlo 10,000 kịch bản × 93 lệnh: trung vị -0.2% vốn, p05 -1.6%, xấu nhất -3.4%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 1.9%, xác suất lỗ 56%","• 93 lệnh, thắng 43%, payoff 1.26","KẾT LUẬN: TIỀM ẨN — chất lượng 76/100, rủi ro 51/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có. Độ tin cậy của chính đánh giá này chỉ 63%."],"n":93,"win":43.01075268817204,"pf":0.9529668642632914,"mpf":14.260724645380234,"dd":2.3798273587342753,"sharpe":-0.8440505990074263,"openloss":169.7742,"openpct":0.13245768305736866,"cap":128172.40652357569,"mode":"PARTIAL","mc":{"it":10000,"h":93,"worst":-3.396853390167286,"p05":-1.5611429361201323,"p50":-0.1512747237841336,"p95":1.4934730893546984,"cvar":1.8813663562621512,"ploss":55.879999999999995,"pruin":0.0,"dd95":1.8670631513078046,"psr":0.4366776137613902,"dsr":0.2485203178683908,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Chất lượng hiệu suất 80","Rủi ro đuôi 70","Rủi ro danh mục 62"],"dims":{"performance_quality":80.0,"return_r_quality":60.0,"drawdown_risk":35.0,"tail_risk":70.0,"leverage_exposure":15.0,"behavioral_risk":55.0,"strategy_drift":25.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":100.0,"consistency":1.6,"drawdown_control":100.0,"honesty":100.0,"robustness":64.0},"flags":[]},{"name":"Linxixi","code":"721A7DFF5AE7AA8C","slot":"CEX/AVAX","sym":"BTC","verdict":"NGUY HIỂM","action":"REDUCE","q":78.5,"r":85.0,"conf":67.71811536264991,"cause":"rủi ro đuôi mô phỏng cực đoan","text":["Linxixi — BTC/CEX, 68 lệnh đã chốt, vốn tham chiếu 287,528 USDT, 0.8 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Linxixi có thành tích trông khả quan (thắng 53%, profit factor 1.37, sụt vốn 18.1%), nhưng được chọn vì là con tốt nhất trong 2 ứng viên cùng asset — chọn giỏi nhất từ nhiều ứng viên luôn có phần may mắn. Trừ phần đó theo Deflated Sharpe, xác suất bot thật sự có lợi thế chỉ còn 59.1%, gần mức tung đồng xu.","CHỨNG MINH:","• Profit factor 1.37 (sổ đã chốt) → 1.45 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 49.7): rủi ro đuôi mô phỏng cực đoan","• Monte Carlo 10,000 kịch bản × 68 lệnh: trung vị +10.3% vốn, p05 -18.0%, xấu nhất -54.7%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 24.3%, xác suất lỗ 29%","• 68 lệnh, thắng 53%, payoff 1.21","• Sụt vốn thực tế 18.1%, Sharpe 1.57, chuỗi thua dài nhất 6 lệnh","KẾT LUẬN: NGUY HIỂM — chất lượng 78/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: có thêm khoảng 254 lệnh nữa để đủ cơ sở thống kê. Độ tin cậy của chính đánh giá này chỉ 68%."],"n":68,"win":52.94117647058824,"pf":1.3653544225014673,"mpf":1.4468458340355612,"dd":18.111750141612564,"sharpe":1.5709710086243205,"openloss":0.0,"openpct":0.0,"cap":287527.74363708013,"mode":"PARTIAL","mc":{"it":10000,"h":68,"worst":-54.73898780771137,"p05":-18.04526918228626,"p50":10.308643593841634,"p95":42.85861916985212,"cvar":24.314066118660648,"ploss":29.12,"pruin":0.0,"dd95":24.683552712938038,"psr":0.7736495345907599,"dsr":0.5914064741127045,"stress":"SURVIVED","bias":false},"veto":["rủi ro đuôi mô phỏng cực đoan"],"drivers":["Rủi ro đuôi 85","Đồng thuận thị trường 80","Rủi ro danh mục 62"],"dims":{"market_alignment":80.0,"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":40.0,"tail_risk":85.0,"leverage_exposure":40.0,"behavioral_risk":55.0,"strategy_drift":15.0,"liquidity_execution":35.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":55.0,"consistency":95.7,"drawdown_control":65.0,"honesty":100.0,"robustness":81.1},"flags":[]},{"name":"ChinatownOG","code":"722BE7E081829BB1","slot":"CEX/BNB","sym":"BTC","verdict":"NGUY HIỂM","action":"REDUCE","q":54.4,"r":70.0,"conf":71.94216756562388,"cause":"chốt hết sổ mở thì profit factor chỉ còn 0.60","text":["ChinatownOG — BTC/CEX, 81 lệnh đã chốt, vốn tham chiếu 109,753 USDT, 2.0 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Nhìn bảng thì ChinatownOG rất đẹp: thắng 79%, profit factor 13.89, sụt vốn 3.0%. Nhưng đó chỉ là các lệnh bot tự chọn đóng — bot đang giữ 71,409 USDT lỗ chưa chốt (65% vốn), chốt hết thì PF tụt còn 0.60, từ lãi thành lỗ. Cơ chế là chốt lời sớm, ôm lỗ chờ gỡ; khi giá không quay lại, người copy ăn trọn cú hiện lỗ.","CHỨNG MINH:","• Profit factor 13.89 (sổ đã chốt) → 0.60 (chốt cả sổ mở) — chênh lệch này là toàn bộ vấn đề","• Lỗ chưa chốt 71,409 USDT = 65% vốn, trên 37 vị thế mở","• Điểm rủi ro 70 đến từ sàn veto (bình quân 10 chiều chỉ 56.7): chốt hết sổ mở thì profit factor chỉ còn 0.60","• Monte Carlo 10,000 kịch bản × 81 lệnh: trung vị +36.5% vốn, p05 +17.1%, xấu nhất -0.8%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 13.6%, xác suất lỗ 0%","• 81 lệnh, thắng 79%, payoff 3.69 → lệnh thắng lớn hơn hẳn lệnh thua","KẾT LUẬN: NGUY HIỂM — chất lượng 54/100, rủi ro 70/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: bot chốt hết hoặc cắt phần lỗ đang treo, và profit factor sau khi chốt quay lên trên 1."],"n":81,"win":79.01234567901234,"pf":13.890819892200087,"mpf":0.6034366083576083,"dd":2.9892031814193047,"sharpe":10.043080127465291,"openloss":71408.56577273458,"openpct":65.06307220085993,"cap":109752.83422259115,"mode":"PARTIAL","mc":{"it":10000,"h":81,"worst":-0.7564353438494112,"p05":17.072691542171576,"p50":36.5166046256022,"p95":62.61589968576955,"cvar":-13.561198513240425,"ploss":0.01,"pruin":0.0,"dd95":2.8265005520517095,"psr":0.99999999999994,"dsr":0.9999999999973476,"stress":"SURVIVED","bias":true},"veto":["chốt hết sổ mở thì profit factor chỉ còn 0.60"],"drivers":["Chất lượng hiệu suất 100","Đồng thuận thị trường 80","Đòn bẩy / Exposure 75"],"dims":{"market_alignment":80.0,"performance_quality":100.0,"return_r_quality":60.0,"drawdown_risk":15.0,"tail_risk":60.0,"leverage_exposure":75.0,"behavioral_risk":35.0,"strategy_drift":15.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":0.0,"consistency":100.0,"drawdown_control":100.0,"honesty":0.0,"robustness":99.0},"flags":["chốt hết sổ mở thì PF rơi từ 13.89 xuống 0.60","lỗ chưa chốt bằng 65% vốn"]},{"name":"Quaint-SegWit-Laurel","code":"D503A7FA37549816","slot":"CEX/BNB","sym":"SOL","verdict":"NGUY HIỂM","action":"PAUSE","q":35.4,"r":88.0,"conf":60.56699029126214,"cause":"hành vi giao dịch hủy hoại","text":["Quaint-SegWit-Laurel — SOL/CEX, 33 lệnh đã chốt, vốn tham chiếu 166,769 USDT, 0.4 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Quaint-SegWit-Laurel đang lỗ, không phải đang lãi: trên 33 lệnh đã chốt, kỳ vọng mỗi lệnh là -385 USDT, cộng dồn 12,708 USDT lỗ. Chiến lược đã đủ lệnh để nói, và nó đang nói rằng nó mất tiền.","CHỨNG MINH:","• Profit factor 0.33 (sổ đã chốt) → 0.26 (chốt cả sổ mở) — chốt hết sổ mở thì mất 22% lợi thế","• Lỗ chưa chốt 6,343 USDT = 4% vốn, trên 8 vị thế mở","• Điểm rủi ro 88 đến từ sàn veto (bình quân 10 chiều chỉ 59.0): hành vi giao dịch hủy hoại","• Monte Carlo 10,000 kịch bản × 33 lệnh: trung vị -7.5% vốn, p05 -14.9%, xấu nhất -25.0%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 17.0%, xác suất lỗ 97%","• 33 lệnh, thắng 58%, payoff 0.24 → một lệnh thua xoá 4.1 lệnh thắng","KẾT LUẬN: NGUY HIỂM — chất lượng 35/100, rủi ro 88/100. Khuyến nghị: TẠM DỪNG copy cho tới khi bot tự xử lý xong phần rủi ro bên dưới. Độ tin cậy của chính đánh giá này chỉ 61%."],"n":33,"win":57.57575757575758,"pf":0.32728581411698937,"mpf":0.2565262105356963,"dd":21.41112330455133,"sharpe":-3.855749591987193,"openloss":6342.8348,"openpct":3.803364277072758,"cap":166769.05859992286,"mode":"PARTIAL","mc":{"it":10000,"h":33,"worst":-24.988710871199142,"p05":-14.91463027104155,"p50":-7.4633937521911395,"p95":-0.6837365941303264,"cvar":16.978602183171446,"ploss":96.58,"pruin":0.0,"dd95":15.421536549963681,"psr":0.009557722989095907,"dsr":0.0020980723068171336,"stress":"SURVIVED","bias":false},"veto":["hành vi giao dịch hủy hoại"],"drivers":["Chất lượng hiệu suất 100","Hành vi giao dịch 100","Chất lượng lợi nhuận / R 75"],"dims":{"performance_quality":100.0,"return_r_quality":75.0,"drawdown_risk":40.0,"tail_risk":50.0,"leverage_exposure":55.0,"behavioral_risk":100.0,"strategy_drift":35.0,"liquidity_execution":15.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":0.0,"consistency":0.0,"drawdown_control":40.0,"honesty":80.0,"robustness":60.9},"flags":[]},{"name":"Pure-Symbol-Yarrow","code":"241CFF1D95076351","slot":"CEX/BTC","sym":"ETH","verdict":"NGUY HIỂM","action":"REDUCE","q":46.6,"r":85.0,"conf":72.74810273469228,"cause":"rủi ro đuôi mô phỏng cực đoan","text":["Pure-Symbol-Yarrow — ETH/CEX, 502 lệnh đã chốt, vốn tham chiếu 89,911 USDT, 10.8 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Pure-Symbol-Yarrow đang lỗ, không phải đang lãi: trên 502 lệnh đã chốt, kỳ vọng mỗi lệnh là -21 USDT, cộng dồn 10,366 USDT lỗ. Tỷ lệ thắng 82% nghe ổn, nhưng mỗi lệnh thắng chỉ bằng 0.18 lần một lệnh thua, nên trông giỏi trên bảng tỷ lệ thắng mà vẫn lỗ đều trên tài khoản. Chiến lược đã đủ lệnh để nói, và nó đang nói rằng nó mất tiền.","CHỨNG MINH:","• Profit factor 0.78 (sổ đã chốt) → 0.75 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 2,091 USDT = 2% vốn, trên 2 vị thế mở","• Kịch bản sốc (biến động 2x, spread 3x, thanh khoản 1/2): dễ tổn thương","• Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 62.0): rủi ro đuôi mô phỏng cực đoan","• Monte Carlo 10,000 kịch bản × 500 lệnh: trung vị -10.2% vốn, p05 -37.9%, xấu nhất -73.0%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 46.8%, xác suất lỗ 77%","KẾT LUẬN: NGUY HIỂM — chất lượng 47/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy."],"n":502,"win":81.67330677290838,"pf":0.7808245116320386,"mpf":0.7477647317330228,"dd":16.617831614402057,"sharpe":-2.113434976292673,"openloss":2091.06624,"openpct":2.325715435159804,"cap":89910.66612826256,"mode":"PARTIAL","mc":{"it":10000,"h":500,"worst":-73.00396626356041,"p05":-37.89509890252912,"p50":-10.162055078201199,"p95":9.776967282458806,"cvar":46.8115107335491,"ploss":77.25,"pruin":0.0,"dd95":43.16779467336174,"psr":0.18001084632810826,"dsr":0.0007265897979408797,"stress":"VULNERABLE","bias":false},"veto":["rủi ro đuôi mô phỏng cực đoan"],"drivers":["Rủi ro đuôi 100","Đồng thuận thị trường 80","Chất lượng hiệu suất 80"],"dims":{"market_alignment":80.0,"performance_quality":80.0,"return_r_quality":75.0,"drawdown_risk":65.0,"tail_risk":100.0,"leverage_exposure":75.0,"behavioral_risk":30.0,"strategy_drift":15.0,"liquidity_execution":15.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":0.0,"consistency":0.0,"drawdown_control":65.0,"honesty":100.0,"robustness":71.8},"flags":[]},{"name":"脚本test","code":"828556126433358780","slot":"CEX/BTC","sym":"BTC","verdict":"TIỀM ẨN","action":"BLOCK_NEW_TRADES","q":80.6,"r":56.5278478169753,"conf":64.84969002222482,"cause":"Số liệu bề mặt che mất rủi ro: lỗ chưa chốt bằng 24% vốn; sụt vốn vượt vốn ghi nhận nên chưa đo được thật","text":["脚本test — BTC/CEX, 498 lệnh đã chốt, vốn tham chiếu 126,883 USDT, 5.6 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: 脚本test đang ôm 30,407 USDT lỗ chưa chốt, bằng 24% vốn tham chiếu — tiền đã mất nhưng chưa ghi nhận vì vị thế còn mở, nên không xuất hiện trong bất kỳ chỉ số nào (thắng 62%, profit factor 6.28, sụt vốn 100.0%). Bảng số cho thấy một bot đang ổn; tài khoản thật đã mất một phần vốn mà người copy chưa biết.","CHỨNG MINH:","• Profit factor 6.28 (sổ đã chốt) → 3.30 (chốt cả sổ mở) — chốt hết sổ mở thì mất 47% lợi thế","• Lỗ chưa chốt 30,407 USDT = 24% vốn, trên 10 vị thế mở","• Điểm rủi ro 57 là bình quân 10 chiều; nặng nhất: Chất lượng hiệu suất 79, Đòn bẩy / Exposure 75","• Monte Carlo 10,000 kịch bản × 498 lệnh: trung vị +114.4% vốn, p05 -1.6%, xấu nhất -23.8%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 7.1%, xác suất lỗ 6%","• 498 lệnh, thắng 62%, payoff 3.81 → lệnh thắng lớn hơn hẳn lệnh thua","KẾT LUẬN: TIỀM ẨN — chất lượng 81/100, rủi ro 57/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có. Độ tin cậy của chính đánh giá này chỉ 65%."],"n":498,"win":62.24899598393574,"pf":6.2806080783325,"mpf":3.3046437786901715,"dd":100.0,"sharpe":-1.0532039481804496,"openloss":30407.27641,"openpct":23.964815327499874,"cap":126882.9990736767,"mode":"PARTIAL","mc":{"it":10000,"h":498,"worst":-23.77653565284465,"p05":-1.5621943394377562,"p50":114.44654648218,"p95":321.0858196565529,"cvar":7.121197568660747,"ploss":6.02,"pruin":0.0,"dd95":11.459134046024028,"psr":0.9999999481584669,"dsr":0.9988618619151424,"stress":"SURVIVED","bias":true},"veto":[],"drivers":["Chất lượng hiệu suất 79","Đòn bẩy / Exposure 75","Rủi ro sụt vốn 65"],"dims":{"market_alignment":30.0,"performance_quality":78.96481532749988,"return_r_quality":60.0,"drawdown_risk":65.0,"tail_risk":60.0,"leverage_exposure":75.0,"behavioral_risk":55.0,"strategy_drift":15.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":100.0,"consistency":69.5,"honesty":55.0,"robustness":99.0},"flags":["lỗ chưa chốt bằng 24% vốn","sụt vốn vượt vốn ghi nhận nên chưa đo được thật"]},{"name":"Bare-Payee-Fox","code":"44570B03F5CBCEDE","slot":"CEX/DOGE","sym":"LIT","verdict":"TIỀM ẨN","action":"BLOCK_NEW_TRADES","q":69.7,"r":50.72843644949832,"conf":52.76384034519956,"cause":"Số liệu bề mặt che mất rủi ro: chưa từng ghi nhận một lệnh lỗ nào; lỗ chưa chốt bằng 24% vốn","text":["Bare-Payee-Fox — LIT/CEX, 81 lệnh đã chốt, vốn tham chiếu 212,784 USDT, 0.9 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Bare-Payee-Fox đang ôm 50,495 USDT lỗ chưa chốt, bằng 24% vốn tham chiếu — tiền đã mất nhưng chưa ghi nhận vì vị thế còn mở, nên không xuất hiện trong bất kỳ chỉ số nào (thắng 100%, sụt vốn 0.0%). Bảng số cho thấy một bot đang ổn; tài khoản thật đã mất một phần vốn mà người copy chưa biết.","CHỨNG MINH:","• Lỗ chưa chốt 50,495 USDT = 24% vốn, trên 29 vị thế mở","• Điểm rủi ro 51 là bình quân 10 chiều; nặng nhất: Đòn bẩy / Exposure 90, Chất lượng hiệu suất 79","• Monte Carlo 10,000 kịch bản × 81 lệnh: trung vị +17.4% vốn, p05 +13.4%, xấu nhất +9.4%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 12.5%, xác suất lỗ 0%","• Sụt vốn thực tế 0.0%, Sharpe 26.78","• Xác suất có lợi thế thật 100.0% sau khi trừ việc được chọn trong 11 ứng viên","KẾT LUẬN: TIỀM ẨN — chất lượng 70/100, rủi ro 51/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có. Độ tin cậy của chính đánh giá này chỉ 53%."],"n":81,"win":100.0,"pf":null,"mpf":1.3670858286736003,"dd":0.0,"sharpe":26.78124584547034,"openloss":50495.47655,"openpct":23.730878242486888,"cap":212783.85078726147,"mode":"PARTIAL","mc":{"it":10000,"h":81,"worst":9.37403261321868,"p05":13.383276837265283,"p50":17.44470157499223,"p95":21.90260145056281,"cvar":-12.48205462877802,"ploss":0.0,"pruin":0.0,"dd95":0.0,"psr":1.0,"dsr":1.0,"stress":"SURVIVED","bias":true},"veto":[],"drivers":["Đòn bẩy / Exposure 90","Chất lượng hiệu suất 79","Rủi ro danh mục 62"],"dims":{"performance_quality":78.73087824248688,"return_r_quality":20.0,"drawdown_risk":15.0,"tail_risk":60.0,"leverage_exposure":90.0,"behavioral_risk":55.0,"strategy_drift":15.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":55.0,"consistency":100.0,"drawdown_control":100.0,"honesty":10.0,"robustness":100.0},"flags":["chưa từng ghi nhận một lệnh lỗ nào","lỗ chưa chốt bằng 24% vốn"]},{"name":"Zs+++","code":"9A073DDF49603886","slot":"CEX/DOGE","sym":"ETH","verdict":"NGUY HIỂM","action":"EMERGENCY_STOP","q":33.0,"r":100.0,"conf":68.10102557090113,"cause":"rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý","text":["Zs+++ — ETH/CEX, 213 lệnh đã chốt, vốn tham chiếu 263,306 USDT, 2.4 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Zs+++ đang lỗ, không phải đang lãi: trên 213 lệnh đã chốt, kỳ vọng mỗi lệnh là -1,088 USDT, cộng dồn 231,725 USDT lỗ. Chiến lược đã đủ lệnh để nói, và nó đang nói rằng nó mất tiền.","CHỨNG MINH:","• Profit factor 0.56 (sổ đã chốt) → 0.57 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 20,190 USDT = 8% vốn, trên 23 vị thế mở","• Kịch bản sốc (biến động 2x, spread 3x, thanh khoản 1/2): bị thanh lý","• Điểm rủi ro 100 đến từ sàn veto (bình quân 10 chiều chỉ 69.9): rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý","• Monte Carlo 10,000 kịch bản × 213 lệnh: trung vị -81.9% vốn, p05 -249.1%, xấu nhất -534.5%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 297.2%, xác suất lỗ 83%, xác suất cháy vốn 50%","KẾT LUẬN: NGUY HIỂM — chất lượng 33/100, rủi ro 100/100. Khuyến nghị: DỪNG NGAY, không copy trong mọi trường hợp. Điều kiện xem xét lại: xác suất cháy tài khoản trong mô phỏng giảm xuống dưới 5%. Độ tin cậy của chính đánh giá này chỉ 68%."],"n":213,"win":54.929577464788736,"pf":0.5598145587961875,"mpf":0.5684706998393054,"dd":100.0,"sharpe":-3.9305062172005663,"openloss":20190.03538265724,"openpct":7.667907304987278,"cap":263305.67884571914,"mode":"PARTIAL","mc":{"it":10000,"h":213,"worst":-534.5304827589181,"p05":-249.14149106671897,"p50":-81.93853322394159,"p95":49.133090711130805,"cvar":297.2469219479464,"ploss":83.39999999999999,"pruin":50.349999999999994,"dd95":100.0,"psr":0.012450138451737147,"dsr":5.5511233869764975e-05,"stress":"LIQUIDATED","bias":false},"veto":["rủi ro đuôi mô phỏng cực đoan","kịch bản stress dẫn tới thanh lý"],"drivers":["Rủi ro đuôi 100","Rủi ro sụt vốn 90","Chất lượng hiệu suất 80"],"dims":{"performance_quality":80.0,"return_r_quality":75.0,"drawdown_risk":90.0,"tail_risk":100.0,"leverage_exposure":60.0,"behavioral_risk":55.0,"strategy_drift":60.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":0.0,"consistency":0.0,"honesty":100.0,"robustness":28.0},"flags":["sụt vốn vượt vốn ghi nhận nên chưa đo được thật"]},{"name":"FJ Investment","code":"AD2B6E949E5E91EC","slot":"CEX/ETH","sym":"BTC","verdict":"NGUY HIỂM","action":"REDUCE","q":86.2,"r":85.0,"conf":69.16116504854368,"cause":"rủi ro đuôi mô phỏng cực đoan","text":["FJ Investment — BTC/CEX, 75 lệnh đã chốt, vốn tham chiếu 125,073 USDT, 0.9 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: FJ Investment có thành tích trông khả quan (thắng 35%, profit factor 1.96, sụt vốn 100.0%), nhưng được chọn vì là con tốt nhất trong 47 ứng viên cùng asset — chọn giỏi nhất từ nhiều ứng viên luôn có phần may mắn. Trừ phần đó theo Deflated Sharpe, xác suất bot thật sự có lợi thế chỉ còn 27.2%, gần mức tung đồng xu.","CHỨNG MINH:","• Profit factor 1.96 (sổ đã chốt) → 2.37 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 62.4): rủi ro đuôi mô phỏng cực đoan","• Monte Carlo 10,000 kịch bản × 75 lệnh: trung vị +40.9% vốn, p05 -29.0%, xấu nhất -55.8%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 35.9%, xác suất lỗ 25%","• 75 lệnh, thắng 35%, payoff 3.69 → lệnh thắng lớn hơn hẳn lệnh thua","• Sụt vốn thực tế 100.0%, Sharpe 0.91, chuỗi thua dài nhất 9 lệnh","KẾT LUẬN: NGUY HIỂM — chất lượng 86/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Độ tin cậy của chính đánh giá này chỉ 69%."],"n":75,"win":34.66666666666667,"pf":1.9564802686899097,"mpf":2.372634340232682,"dd":100.0,"sharpe":0.9073630869671027,"openloss":0.0,"openpct":0.0,"cap":125073.16067930825,"mode":"PARTIAL","mc":{"it":10000,"h":75,"worst":-55.81160412439642,"p05":-29.019874027653543,"p50":40.91402358808534,"p95":152.64400116281948,"cvar":35.88888932053655,"ploss":25.230000000000004,"pruin":0.0,"dd95":33.96884304292396,"psr":0.9501295890661074,"dsr":0.2721306076215032,"stress":"SURVIVED","bias":false},"veto":["rủi ro đuôi mô phỏng cực đoan"],"drivers":["Rủi ro sụt vốn 100","Rủi ro đuôi 100","Đồng thuận thị trường 80"],"dims":{"market_alignment":80.0,"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":100.0,"tail_risk":100.0,"leverage_exposure":60.0,"behavioral_risk":55.0,"strategy_drift":15.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":85.0,"consistency":89.1,"honesty":100.0,"robustness":66.5},"flags":["sụt vốn vượt vốn ghi nhận nên chưa đo được thật"]},{"name":"xiaomijiahanyangzao","code":"A0EDF7F0D96A7E8C","slot":"CEX/ETH","sym":"ETH","verdict":"TIỀM ẨN","action":"BLOCK_NEW_TRADES","q":65.0,"r":53.746188348414144,"conf":79.43279234893494,"cause":"Điểm rủi ro 54 ở vùng giữa, chưa đủ an toàn để tin","text":["xiaomijiahanyangzao — ETH/CEX, 134 lệnh đã chốt, vốn tham chiếu 546,002 USDT, 1.4 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: xiaomijiahanyangzao không có dấu hiệu bất thường nào đủ nặng để một mình nó quyết định kết quả (thắng 75%, profit factor 4.04, sụt vốn 1.8%). Điểm số đến từ bình quân các chiều rủi ro chứ không từ một lỗi cụ thể, nên đây là mức rủi ro tổng thể chứ không phải một chỗ hỏng cụ thể.","CHỨNG MINH:","• Profit factor 4.04 (sổ đã chốt) → 1.09 (chốt cả sổ mở) — chốt hết sổ mở thì mất 73% lợi thế","• Lỗ chưa chốt 69,963 USDT = 13% vốn, trên 8 vị thế mở","• Điểm rủi ro 54 là bình quân 10 chiều; nặng nhất: Đồng thuận thị trường 80, Đòn bẩy / Exposure 75","• Monte Carlo 10,000 kịch bản × 134 lệnh: trung vị +14.2% vốn, p05 +7.6%, xấu nhất -0.5%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 6.0%, xác suất lỗ 0%","• 134 lệnh, thắng 75%, payoff 1.37","KẾT LUẬN: TIỀM ẨN — chất lượng 65/100, rủi ro 54/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có."],"n":134,"win":74.6268656716418,"pf":4.036719502802492,"mpf":1.089515742026641,"dd":1.8380398258013657,"sharpe":7.144943692656409,"openloss":69963.12775,"openpct":12.81372280131994,"cap":546001.57061922,"mode":"PARTIAL","mc":{"it":10000,"h":134,"worst":-0.522065621951403,"p05":7.5698645591229985,"p50":14.19012035305544,"p95":22.004631935470986,"cvar":-6.046082147604673,"ploss":0.01,"pruin":0.0,"dd95":1.8605114080256504,"psr":0.9999999710549986,"dsr":0.9992448724514151,"stress":"SURVIVED","bias":true},"veto":[],"drivers":["Đồng thuận thị trường 80","Đòn bẩy / Exposure 75","Chất lượng hiệu suất 68"],"dims":{"market_alignment":80.0,"performance_quality":67.81372280131994,"return_r_quality":60.0,"drawdown_risk":15.0,"tail_risk":60.0,"leverage_exposure":75.0,"behavioral_risk":55.0,"strategy_drift":15.0,"liquidity_execution":35.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":35.0,"consistency":100.0,"drawdown_control":100.0,"honesty":10.0,"robustness":100.0},"flags":[]},{"name":"0xleek.eth","code":"B74FC756C8EE894B","slot":"CEX/LINK","sym":"HYPE","verdict":"TIỀM ẨN","action":"WARN","q":78.4,"r":40.36621526090736,"conf":58.51988820241246,"cause":"Số liệu bề mặt che mất rủi ro: chưa từng chạy qua pha giảm","text":["0xleek.eth — HYPE/CEX, 55 lệnh đã chốt, vốn tham chiếu 133,909 USDT, 0.7 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: 0xleek.eth đang có thành tích tốt (thắng 60%, profit factor 1.74, sụt vốn 13.1%), nhưng toàn bộ hình thành mà chưa có lấy một lệnh nào trong pha thị trường giảm. Không phải bot sẽ thua ở chiều xuống — chưa ai biết — mà là không có cơ sở nào để nói nó chịu được, đúng vào chế độ nó chưa từng gặp.","CHỨNG MINH:","• Profit factor 1.74 (sổ đã chốt) → 1.98 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Điểm rủi ro 40 là bình quân 10 chiều; nặng nhất: Đồng thuận thị trường 65, Rủi ro danh mục 62","• Monte Carlo 10,000 kịch bản × 55 lệnh: trung vị +15.8% vốn, p05 -14.5%, xấu nhất -37.3%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 19.8%, xác suất lỗ 23%","• Chưa từng bị thử ở chiều xuống — không có lệnh nào trong pha thị trường giảm","• 55 lệnh, thắng 60%, payoff 1.16","KẾT LUẬN: TIỀM ẨN — chất lượng 78/100, rủi ro 40/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Điều kiện xem xét lại: bot chạy qua một pha thị trường giảm và giữ được kết quả. Độ tin cậy của chính đánh giá này chỉ 59%."],"n":55,"win":60.0,"pf":1.7402616546716694,"mpf":1.979281989836864,"dd":13.066625414091263,"sharpe":2.3029634725071473,"openloss":0.0,"openpct":0.0,"cap":133908.7502545854,"mode":"PARTIAL","mc":{"it":10000,"h":55,"worst":-37.32337097304486,"p05":-14.54564162771481,"p50":15.819948433626633,"p95":56.97359249264624,"cvar":19.80539519090431,"ploss":23.14,"pruin":0.0,"dd95":20.601828611442432,"psr":0.8837881633385292,"dsr":0.6335740413844697,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Đồng thuận thị trường 65","Rủi ro danh mục 62","Chất lượng lợi nhuận / R 60"],"dims":{"market_alignment":65.0,"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":15.0,"tail_risk":45.0,"leverage_exposure":15.0,"behavioral_risk":30.0,"strategy_drift":60.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":70.0,"consistency":100.0,"drawdown_control":65.0,"honesty":100.0,"robustness":54.2},"flags":["chưa từng chạy qua pha giảm"]},{"name":"Shallow-Pair-Frog","code":"35F888C7BB441B2B","slot":"CEX/LINK","sym":"BTC","verdict":"TIỀM NĂNG","action":"WARN","q":93.1,"r":37.016700697800566,"conf":84.89075315590034,"cause":"Rủi ro thấp (37) và chất lượng tốt (93)","text":["Shallow-Pair-Frog — BTC/CEX, 433 lệnh đã chốt, vốn tham chiếu 579,369 USDT, 4.7 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Shallow-Pair-Frog có sổ sách trung thực — điểm quan trọng nhất: profit factor 3.20 trên lệnh đã chốt, và 3.23 nếu chốt luôn mọi vị thế đang mở. Hai con số sát nhau nghĩa là bot cắt lỗ thật chứ không ôm lỗ chờ gỡ, nên thành tích đang thấy là thành tích thật. Sụt vốn thật đã ghi nhận 7.7%.","CHỨNG MINH:","• Profit factor 3.20 (sổ đã chốt) → 3.23 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 736 USDT = 0% vốn, trên 63 vị thế mở","• Điểm rủi ro 37 là bình quân 10 chiều; nặng nhất: Rủi ro danh mục 62, Chất lượng lợi nhuận / R 60","• Monte Carlo 10,000 kịch bản × 433 lệnh: trung vị +22.1% vốn, p05 -5.7%, xấu nhất -20.7%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 8.1%, xác suất lỗ 18%","• 433 lệnh, thắng 45%, payoff 3.87 → lệnh thắng lớn hơn hẳn lệnh thua","KẾT LUẬN: TIỀM NĂNG — chất lượng 93/100, rủi ro 37/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút."],"n":433,"win":45.26558891454965,"pf":3.201617398940787,"mpf":3.2274876075795813,"dd":7.672575065157784,"sharpe":3.315217053894053,"openloss":736.0197000000001,"openpct":0.12703818683233695,"cap":579368.8640813078,"mode":"PARTIAL","mc":{"it":10000,"h":433,"worst":-20.690572049493856,"p05":-5.695498213299634,"p50":22.081200393923616,"p95":69.99474347749363,"cvar":8.087644538814468,"ploss":17.78,"pruin":0.0,"dd95":8.738768233659084,"psr":0.9995690707044058,"dsr":0.993418332464802,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Rủi ro danh mục 62","Chất lượng lợi nhuận / R 60","Đòn bẩy / Exposure 60"],"dims":{"market_alignment":10.0,"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":35.0,"tail_risk":50.0,"leverage_exposure":60.0,"behavioral_risk":55.0,"strategy_drift":15.0,"liquidity_execution":15.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":100.0,"consistency":100.0,"drawdown_control":85.0,"honesty":100.0,"robustness":76.0},"flags":[]},{"name":"FrontierQuantTrader","code":"8F53B7AEDF041739","slot":"CEX/SOL","sym":"XRP","verdict":"TIỀM ẨN","action":"MONITOR","q":88.4,"r":21.531263804596684,"conf":91.70873786407766,"cause":"Số liệu bề mặt che mất rủi ro: 95% lãi gộp chỉ đến từ một pha thị trường","text":["FrontierQuantTrader — XRP/CEX, 77 lệnh đã chốt, vốn tham chiếu 116,118 USDT, 0.9 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: FrontierQuantTrader có kết quả tốt trên sổ (thắng 64%, profit factor 3.28, sụt vốn 1.6%), nhưng 95% lãi gộp đến từ riêng pha thị trường Tăng, động. Đây là một chiến lược hợp với một kiểu thị trường chứ không phải một lợi thế ổn định — khi pha đổi, lợi thế biến mất mà không có cảnh báo trước.","CHỨNG MINH:","• Profit factor 3.28","• Điểm rủi ro 22 là bình quân 10 chiều; nặng nhất: Rủi ro danh mục 62, Rủi ro đuôi 50","• Monte Carlo 10,000 kịch bản × 77 lệnh: trung vị +8.4% vốn, p05 -0.6%, xấu nhất -7.0%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 1.7%, xác suất lỗ 7%","• 77 lệnh, thắng 64%, payoff 1.88 → lệnh thắng lớn hơn hẳn lệnh thua","• Sụt vốn thực tế 1.6%, Sharpe 3.22, chuỗi thua dài nhất 9 lệnh","KẾT LUẬN: TIỀM ẨN — chất lượng 88/100, rủi ro 22/100. Khuyến nghị: CÓ THỂ COPY, theo dõi định kỳ. Điều kiện xem xét lại: bot kiếm được lợi nhuận ở pha thị trường khác ngoài pha đang phụ thuộc."],"n":77,"win":63.63636363636363,"pf":3.2816322760730103,"mpf":null,"dd":1.552292612119085,"sharpe":3.2183055972910566,"openloss":null,"openpct":null,"cap":116118.06218846724,"mode":"PARTIAL","mc":{"it":10000,"h":77,"worst":-7.019764018527138,"p05":-0.5669624755120284,"p50":8.393633907783688,"p95":22.360077178916924,"cvar":1.7292887122771752,"ploss":6.950000000000001,"pruin":0.0,"dd95":3.1052903396773144,"psr":0.9967254987465284,"dsr":0.8065009625250859,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Rủi ro danh mục 62","Rủi ro đuôi 50","Độ bền chiến lược qua các pha 50"],"dims":{"market_alignment":5.0,"performance_quality":5.0,"return_r_quality":20.0,"drawdown_risk":15.0,"tail_risk":50.0,"leverage_exposure":5.0,"behavioral_risk":10.0,"strategy_drift":50.0,"liquidity_execution":5.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":100.0,"consistency":100.0,"drawdown_control":100.0,"robustness":44.8},"flags":["95% lãi gộp chỉ đến từ một pha thị trường"]},{"name":"RuiJie","code":"EF1CC6F40E834D1A","slot":"CEX/SOL","sym":"ETH","verdict":"TIỀM ẨN","action":"WARN","q":79.1,"r":41.0458269113928,"conf":89.38187702265371,"cause":"Số liệu bề mặt che mất rủi ro: chưa từng chạy qua pha giảm","text":["RuiJie — ETH/CEX, 300 lệnh đã chốt, vốn tham chiếu 1,024,810 USDT, 5.0 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: RuiJie đang có thành tích tốt (thắng 93%, profit factor 41.52, sụt vốn 0.2%), nhưng toàn bộ hình thành mà chưa có lấy một lệnh nào trong pha thị trường giảm. Không phải bot sẽ thua ở chiều xuống — chưa ai biết — mà là không có cơ sở nào để nói nó chịu được, đúng vào chế độ nó chưa từng gặp.","CHỨNG MINH:","• Profit factor 41.52 (sổ đã chốt) → 13.50 (chốt cả sổ mở) — chốt hết sổ mở thì mất 67% lợi thế","• Lỗ chưa chốt 8,837 USDT = 1% vốn, trên 10 vị thế mở","• Điểm rủi ro 41 là bình quân 10 chiều; nặng nhất: Đồng thuận thị trường 80, Rủi ro danh mục 62","• Monte Carlo 10,000 kịch bản × 300 lệnh: trung vị +16.7% vốn, p05 +13.4%, xấu nhất +9.0%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 12.6%, xác suất lỗ 0%","• Chưa từng bị thử ở chiều xuống — không có lệnh nào trong pha thị trường giảm","KẾT LUẬN: TIỀM ẨN — chất lượng 79/100, rủi ro 41/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Điều kiện xem xét lại: bot chạy qua một pha thị trường giảm và giữ được kết quả."],"n":300,"win":93.33333333333333,"pf":41.51916338566713,"mpf":13.496356401099895,"dd":0.22618120517238988,"sharpe":27.203452110115727,"openloss":8837.11662,"openpct":0.8623178146806699,"cap":1024809.701197293,"mode":"PARTIAL","mc":{"it":10000,"h":300,"worst":9.017099895191794,"p05":13.415193661957513,"p50":16.728105458589553,"p95":20.40149461104494,"cvar":-12.637376148731157,"ploss":0.0,"pruin":0.0,"dd95":0.2132909659603165,"psr":1.0,"dsr":1.0,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Đồng thuận thị trường 80","Rủi ro danh mục 62","Thanh khoản / Khớp lệnh 60"],"dims":{"market_alignment":80.0,"performance_quality":5.0,"return_r_quality":45.0,"drawdown_risk":15.0,"tail_risk":15.0,"leverage_exposure":40.0,"behavioral_risk":55.0,"strategy_drift":40.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":100.0,"consistency":100.0,"drawdown_control":100.0,"honesty":30.0,"robustness":65.8},"flags":["chưa từng chạy qua pha giảm"]},{"name":"01pp","code":"CA1C48E543EF7A95","slot":"CEX/SUI","sym":"ETH","verdict":"NGUY HIỂM","action":"REDUCE","q":73.9,"r":85.0,"conf":90.44002505480739,"cause":"rủi ro đuôi mô phỏng cực đoan","text":["01pp — ETH/CEX, 310 lệnh đã chốt, vốn tham chiếu 157,074 USDT, 4.1 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: 01pp bị chặn bởi luật veto, không phải bởi điểm bình quân: rủi ro đuôi mô phỏng cực đoan. Veto tồn tại để một lỗi đủ nặng không bị điểm trung bình đẹp che đi — bình quân 10 chiều vẫn là 49.8, nhưng chừng nào lỗi này còn thì bot vẫn không nên copy.","CHỨNG MINH:","• Profit factor 1.84 (sổ đã chốt) → 1.80 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 4,336 USDT = 3% vốn, trên 6 vị thế mở","• Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 49.8): rủi ro đuôi mô phỏng cực đoan","• Monte Carlo 10,000 kịch bản × 310 lệnh: trung vị +96.9% vốn, p05 +32.9%, xấu nhất -50.1%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 17.6%, xác suất lỗ 1%","• 310 lệnh, thắng 65%, payoff 1.00","KẾT LUẬN: NGUY HIỂM — chất lượng 74/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy."],"n":310,"win":64.83870967741936,"pf":1.8416165643419207,"mpf":1.804003301917518,"dd":50.884943358488165,"sharpe":4.707235559493385,"openloss":4335.591,"openpct":2.7602200230868545,"cap":157074.10872091824,"mode":"PARTIAL","mc":{"it":10000,"h":310,"worst":-50.14472675348159,"p05":32.88319150572198,"p50":96.92048668544106,"p95":164.36071977334362,"cvar":-17.616548215679906,"ploss":0.54,"pruin":0.0,"dd95":28.00413933845452,"psr":0.9974411041208331,"dsr":0.9597161647965529,"stress":"SURVIVED","bias":false},"veto":["rủi ro đuôi mô phỏng cực đoan"],"drivers":["Rủi ro đuôi 95","Rủi ro sụt vốn 65","Rủi ro danh mục 62"],"dims":{"market_alignment":10.0,"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":65.0,"tail_risk":95.0,"leverage_exposure":60.0,"behavioral_risk":55.0,"strategy_drift":15.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":70.0,"consistency":100.0,"drawdown_control":15.0,"honesty":100.0,"robustness":88.0},"flags":[]},{"name":"Proud-Peg-Basil","code":"ACE79CAACA13F8B9","slot":"CEX/SUI","sym":"CRCL","verdict":"TIỀM NĂNG","action":"BLOCK_NEW_TRADES","q":69.4,"r":48.30308442900256,"conf":50.813908178377474,"cause":"Rủi ro thấp (48) và chất lượng tốt (69)","text":["Proud-Peg-Basil — CRCL/CEX, 59 lệnh đã chốt, vốn tham chiếu 500,199 USDT, 0.7 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Proud-Peg-Basil không có dấu hiệu bất thường nào đủ nặng để một mình nó quyết định kết quả (thắng 66%, profit factor 2.53, sụt vốn 1.7%). Điểm số đến từ bình quân các chiều rủi ro chứ không từ một lỗi cụ thể, nên đây là mức rủi ro tổng thể chứ không phải một chỗ hỏng cụ thể.","CHỨNG MINH:","• Profit factor 2.53 (sổ đã chốt) → 1.12 (chốt cả sổ mở) — chốt hết sổ mở thì mất 56% lợi thế","• Lỗ chưa chốt 16,255 USDT = 3% vốn, trên 18 vị thế mở","• Điểm rủi ro 48 là bình quân 10 chiều; nặng nhất: Chất lượng lợi nhuận / R 75, Rủi ro danh mục 62","• Monte Carlo 10,000 kịch bản × 59 lệnh: trung vị +3.8% vốn, p05 -0.2%, xấu nhất -6.5%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 1.2%, xác suất lỗ 6%","• 59 lệnh, thắng 66%, payoff 1.30","KẾT LUẬN: TIỀM NĂNG — chất lượng 69/100, rủi ro 48/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có. Điều kiện xem xét lại: có thêm khoảng 0 lệnh nữa để đủ cơ sở thống kê. Độ tin cậy của chính đánh giá này chỉ 51%."],"n":59,"win":66.10169491525424,"pf":2.5304753173461445,"mpf":1.117653720112231,"dd":1.6834042086484404,"sharpe":4.110957909651863,"openloss":16255.21659999999,"openpct":3.2497524313805632,"cap":500198.6133785099,"mode":"PARTIAL","mc":{"it":10000,"h":59,"worst":-6.541124177029492,"p05":-0.21740265216508442,"p50":3.822563485989664,"p95":8.073970625740245,"cvar":1.2360386953364764,"ploss":6.0600000000000005,"pruin":0.0,"dd95":2.744914563268261,"psr":0.9499171224056637,"dsr":0.7230505164680368,"stress":"SURVIVED","bias":true},"veto":[],"drivers":["Chất lượng lợi nhuận / R 75","Rủi ro danh mục 62","Rủi ro đuôi 60"],"dims":{"performance_quality":58.249752431380564,"return_r_quality":75.0,"drawdown_risk":15.0,"tail_risk":60.0,"leverage_exposure":30.0,"behavioral_risk":55.0,"strategy_drift":30.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":35.0,"consistency":100.0,"drawdown_control":100.0,"honesty":30.0,"robustness":100.0},"flags":[]},{"name":"HaveARestin","code":"53AEED5A8E4EBBB2","slot":"CEX/XRP","sym":"XRP","verdict":"NGUY HIỂM","action":"REDUCE","q":54.5,"r":70.0,"conf":64.58684298627385,"cause":"chốt hết sổ mở thì profit factor chỉ còn 0.17","text":["HaveARestin — XRP/CEX, 145 lệnh đã chốt, vốn tham chiếu 131,958 USDT, 1.6 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Nhìn bảng thì HaveARestin rất đẹp: thắng 92%, profit factor 11.28, sụt vốn 0.5%. Nhưng đó chỉ là các lệnh bot tự chọn đóng — bot đang giữ 88,043 USDT lỗ chưa chốt (67% vốn), chốt hết thì PF tụt còn 0.17, từ lãi thành lỗ. Cơ chế là chốt lời sớm, ôm lỗ chờ gỡ; khi giá không quay lại, người copy ăn trọn cú hiện lỗ.","CHỨNG MINH:","• Profit factor 11.28 (sổ đã chốt) → 0.17 (chốt cả sổ mở) — chênh lệch này là toàn bộ vấn đề","• Lỗ chưa chốt 88,043 USDT = 67% vốn, trên 94 vị thế mở","• Điểm rủi ro 70 đến từ sàn veto (bình quân 10 chiều chỉ 52.6): chốt hết sổ mở thì profit factor chỉ còn 0.17","• Monte Carlo 10,000 kịch bản × 145 lệnh: trung vị +7.4% vốn, p05 +6.0%, xấu nhất +3.7%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 5.6%, xác suất lỗ 0%","• 145 lệnh, thắng 92%, payoff 1.02","KẾT LUẬN: NGUY HIỂM — chất lượng 54/100, rủi ro 70/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: bot chốt hết hoặc cắt phần lỗ đang treo, và profit factor sau khi chốt quay lên trên 1. Độ tin cậy của chính đánh giá này chỉ 65%."],"n":145,"win":91.72413793103448,"pf":11.280468247444938,"mpf":0.17053163594114817,"dd":0.529828453201185,"sharpe":16.237685996712656,"openloss":88043.2919,"openpct":66.72085564072796,"cap":131957.67808207832,"mode":"PARTIAL","mc":{"it":10000,"h":145,"worst":3.678207069795192,"p05":5.981775595809166,"p50":7.387847285958108,"p95":8.771062132097066,"cvar":-5.610019831472759,"ploss":0.0,"pruin":0.0,"dd95":0.4454432308933241,"psr":0.9999962417611531,"dsr":0.9984504571673187,"stress":"SURVIVED","bias":true},"veto":["chốt hết sổ mở thì profit factor chỉ còn 0.17"],"drivers":["Chất lượng hiệu suất 100","Rủi ro danh mục 62","Rủi ro đuôi 60"],"dims":{"performance_quality":100.0,"return_r_quality":50.0,"drawdown_risk":15.0,"tail_risk":60.0,"leverage_exposure":55.0,"behavioral_risk":55.0,"strategy_drift":15.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":0.0,"consistency":100.0,"drawdown_control":100.0,"honesty":0.0,"robustness":100.0},"flags":["chốt hết sổ mở thì PF rơi từ 11.28 xuống 0.17","lỗ chưa chốt bằng 67% vốn"]},{"name":"Milies L","code":"87CE370F79220167","slot":"CEX/XRP","sym":"BTC","verdict":"TIỀM NĂNG","action":"WARN","q":83.6,"r":41.385632736635515,"conf":68.87667278929415,"cause":"Rủi ro thấp (41) và chất lượng tốt (84)","text":["Milies L — BTC/CEX, 74 lệnh đã chốt, vốn tham chiếu 255,853 USDT, 0.8 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Milies L không có dấu hiệu bất thường nào đủ nặng để một mình nó quyết định kết quả (thắng 69%, profit factor 4.89, sụt vốn 6.3%). Điểm số đến từ bình quân các chiều rủi ro chứ không từ một lỗi cụ thể, nên đây là mức rủi ro tổng thể chứ không phải một chỗ hỏng cụ thể.","CHỨNG MINH:","• Profit factor 4.89 (sổ đã chốt) → 2.94 (chốt cả sổ mở) — chốt hết sổ mở thì mất 40% lợi thế","• Lỗ chưa chốt 24,387 USDT = 10% vốn, trên 31 vị thế mở","• Điểm rủi ro 41 là bình quân 10 chiều; nặng nhất: Đòn bẩy / Exposure 75, Rủi ro danh mục 62","• Monte Carlo 10,000 kịch bản × 74 lệnh: trung vị +46.6% vốn, p05 +25.0%, xấu nhất +3.2%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 20.2%, xác suất lỗ 0%","• 74 lệnh, thắng 69%, payoff 2.21 → lệnh thắng lớn hơn hẳn lệnh thua","KẾT LUẬN: TIỀM NĂNG — chất lượng 84/100, rủi ro 41/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Độ tin cậy của chính đánh giá này chỉ 69%."],"n":74,"win":68.91891891891892,"pf":4.891955157973194,"mpf":2.9359815976923884,"dd":6.31443547573568,"sharpe":6.543702642167567,"openloss":24387.366850000002,"openpct":9.531794994434394,"cap":255852.82587634085,"mode":"PARTIAL","mc":{"it":10000,"h":74,"worst":3.16277449722565,"p05":25.028075967026915,"p50":46.64108370786813,"p95":71.82631280455419,"cvar":-20.166202486350304,"ploss":0.0,"pruin":0.0,"dd95":4.783682353346984,"psr":0.9999998470414545,"dsr":0.9998402701265202,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Đòn bẩy / Exposure 75","Rủi ro danh mục 62","Chất lượng lợi nhuận / R 60"],"dims":{"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":15.0,"tail_risk":30.0,"leverage_exposure":75.0,"behavioral_risk":35.0,"strategy_drift":30.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":85.0,"consistency":100.0,"drawdown_control":85.0,"honesty":55.0,"robustness":100.0},"flags":[]},{"name":"Dark-Wood-Dahlia","code":"72AFDC179D66D034","slot":"DEX/PEPE","sym":"SNDK","verdict":"TIỀM NĂNG","action":"WARN","q":89.0,"r":44.055535649256875,"conf":50.76307916962666,"cause":"Rủi ro thấp (44) và chất lượng tốt (89)","text":["Dark-Wood-Dahlia — SNDK/CEX, 328 lệnh đã chốt, vốn tham chiếu 235,783 USDT, 8.7 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Dark-Wood-Dahlia có sổ sách trung thực — điểm quan trọng nhất: profit factor 1.40 trên lệnh đã chốt, và 1.55 nếu chốt luôn mọi vị thế đang mở. Hai con số sát nhau nghĩa là bot cắt lỗ thật chứ không ôm lỗ chờ gỡ, nên thành tích đang thấy là thành tích thật. Sụt vốn thật đã ghi nhận 4.7%.","CHỨNG MINH:","• Profit factor 1.40 (sổ đã chốt) → 1.55 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 15,199 USDT = 6% vốn, trên 38 vị thế mở","• Điểm rủi ro 44 là bình quân 10 chiều; nặng nhất: Đòn bẩy / Exposure 75, Thanh khoản / Khớp lệnh 75","• Monte Carlo 10,000 kịch bản × 328 lệnh: trung vị +8.1% vốn, p05 -1.8%, xấu nhất -12.9%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 4.1%, xác suất lỗ 10%","• 328 lệnh, thắng 45%, payoff 1.68 → lệnh thắng lớn hơn hẳn lệnh thua","KẾT LUẬN: TIỀM NĂNG — chất lượng 89/100, rủi ro 44/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút. Điều kiện xem xét lại: có thêm khoảng 27 lệnh nữa để đủ cơ sở thống kê. Độ tin cậy của chính đánh giá này chỉ 51%."],"n":328,"win":45.426829268292686,"pf":1.397079753228321,"mpf":1.5451017799278846,"dd":4.671647189544388,"sharpe":4.399775688158194,"openloss":15198.8907,"openpct":6.446143498425898,"cap":235782.6924534252,"mode":"PARTIAL","mc":{"it":10000,"h":328,"worst":-12.937057223087752,"p05":-1.828612718505476,"p50":8.063561409257641,"p95":21.11886922423642,"cvar":4.0922118379989145,"ploss":9.64,"pruin":0.0,"dd95":6.484696381959299,"psr":0.9430188527307075,"dsr":0.8556269310020972,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Đòn bẩy / Exposure 75","Thanh khoản / Khớp lệnh 75","Rủi ro danh mục 62"],"dims":{"market_alignment":30.0,"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":15.0,"tail_risk":50.0,"leverage_exposure":75.0,"behavioral_risk":55.0,"strategy_drift":15.0,"liquidity_execution":75.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":70.0,"consistency":100.0,"drawdown_control":100.0,"honesty":100.0,"robustness":76.0},"flags":[]},{"name":"Rude-Gems-Leopard","code":"821382564224395312","slot":"DEX/PEPE","sym":"ETH","verdict":"NGUY HIỂM","action":"EMERGENCY_STOP","q":17.2,"r":100.0,"conf":94.6116504854369,"cause":"hành vi giao dịch hủy hoại; rủi ro đuôi mô phỏng cực đoan","text":["Rude-Gems-Leopard — ETH/CEX, 152 lệnh đã chốt, vốn tham chiếu 154,986 USDT, 1.7 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Rude-Gems-Leopard đang lỗ, không phải đang lãi: trên 152 lệnh đã chốt, kỳ vọng mỗi lệnh là -891 USDT, cộng dồn 135,428 USDT lỗ. Tỷ lệ thắng 77% nghe ổn, nhưng mỗi lệnh thắng chỉ bằng 0.19 lần một lệnh thua, nên trông giỏi trên bảng tỷ lệ thắng mà vẫn lỗ đều trên tài khoản. Chiến lược đã đủ lệnh để nói, và nó đang nói rằng nó mất tiền.","CHỨNG MINH:","• Profit factor 0.64","• Kịch bản sốc (biến động 2x, spread 3x, thanh khoản 1/2): bị thanh lý","• Điểm rủi ro 100 đến từ sàn veto (bình quân 10 chiều chỉ 55.9): hành vi giao dịch hủy hoại; rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý","• Monte Carlo 10,000 kịch bản × 152 lệnh: trung vị -82.0% vốn, p05 -294.8%, xấu nhất -690.0%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 354.0%, xác suất lỗ 77%, xác suất cháy vốn 56%","• 152 lệnh, thắng 77%, payoff 0.19 → một lệnh thua xoá 5.2 lệnh thắng","KẾT LUẬN: NGUY HIỂM — chất lượng 17/100, rủi ro 100/100. Khuyến nghị: DỪNG NGAY, không copy trong mọi trường hợp. Điều kiện xem xét lại: xác suất cháy tài khoản trong mô phỏng giảm xuống dưới 5%."],"n":152,"win":76.97368421052632,"pf":0.637737219826217,"mpf":null,"dd":100.0,"sharpe":-2.2823684744637527,"openloss":null,"openpct":null,"cap":154986.13614007446,"mode":"PARTIAL","mc":{"it":10000,"h":152,"worst":-690.040990715526,"p05":-294.84726160120374,"p50":-81.95217982906516,"p95":83.1908287351162,"cvar":354.0335186939515,"ploss":77.13,"pruin":55.86,"dd95":100.0,"psr":0.05026375866086258,"dsr":0.015306893912161335,"stress":"LIQUIDATED","bias":false},"veto":["hành vi giao dịch hủy hoại","rủi ro đuôi mô phỏng cực đoan","kịch bản stress dẫn tới thanh lý"],"drivers":["Rủi ro đuôi 100","Hành vi giao dịch 95","Rủi ro sụt vốn 90"],"dims":{"market_alignment":5.0,"performance_quality":80.0,"return_r_quality":75.0,"drawdown_risk":90.0,"tail_risk":100.0,"leverage_exposure":5.0,"behavioral_risk":95.0,"strategy_drift":25.0,"liquidity_execution":5.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":0.0,"consistency":0.0,"robustness":61.2},"flags":["sụt vốn vượt vốn ghi nhận nên chưa đo được thật"]},{"name":"SharpMine","code":"5FF79768E4F8F7BA","slot":"DEX/SOL","sym":"ETH","verdict":"NGUY HIỂM","action":"REDUCE","q":59.3,"r":85.0,"conf":63.86851595006935,"cause":"rủi ro đuôi mô phỏng cực đoan","text":["SharpMine — ETH/CEX, 77 lệnh đã chốt, vốn tham chiếu 123,281 USDT, 2.2 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: SharpMine đang lỗ, không phải đang lãi: trên 77 lệnh đã chốt, kỳ vọng mỗi lệnh là -143 USDT, cộng dồn 11,020 USDT lỗ. Chiến lược đã đủ lệnh để nói, và nó đang nói rằng nó mất tiền.","CHỨNG MINH:","• Profit factor 0.72 (sổ đã chốt) → 1.81 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 16,091 USDT = 13% vốn, trên 9 vị thế mở","• Kịch bản sốc (biến động 2x, spread 3x, thanh khoản 1/2): dễ tổn thương","• Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 62.8): rủi ro đuôi mô phỏng cực đoan","• Monte Carlo 10,000 kịch bản × 77 lệnh: trung vị -8.5% vốn, p05 -29.0%, xấu nhất -56.3%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 34.9%, xác suất lỗ 77%","KẾT LUẬN: NGUY HIỂM — chất lượng 59/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Độ tin cậy của chính đánh giá này chỉ 64%."],"n":77,"win":27.27272727272727,"pf":0.7214433242725592,"mpf":1.809988304032183,"dd":59.41496847943143,"sharpe":1.6964164981197558,"openloss":16090.595403086885,"openpct":13.051991153240811,"cap":123280.77160159269,"mode":"PARTIAL","mc":{"it":10000,"h":77,"worst":-56.29175196056736,"p05":-28.994745271415216,"p50":-8.473484664386868,"p95":9.68396816767268,"cvar":34.944070806596876,"ploss":76.87,"pruin":0.0,"dd95":32.225579053956295,"psr":0.23735710865701393,"dsr":0.005103995135574413,"stress":"VULNERABLE","bias":true},"veto":["rủi ro đuôi mô phỏng cực đoan"],"drivers":["Rủi ro sụt vốn 100","Rủi ro đuôi 100","Chất lượng hiệu suất 68"],"dims":{"performance_quality":68.0519911532408,"return_r_quality":60.0,"drawdown_risk":100.0,"tail_risk":100.0,"leverage_exposure":60.0,"behavioral_risk":55.0,"strategy_drift":15.0,"liquidity_execution":35.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":70.0,"consistency":27.0,"drawdown_control":15.0,"honesty":100.0,"robustness":79.4},"flags":[]},{"name":"Valid-Launch-Monkey","code":"C69DA71663ACA8A8","slot":"DEX/SOL","sym":"ETH","verdict":"NGUY HIỂM","action":"REDUCE","q":51.6,"r":70.0,"conf":66.56504854368931,"cause":"chốt hết sổ mở thì profit factor chỉ còn 0.27","text":["Valid-Launch-Monkey — ETH/CEX, 54 lệnh đã chốt, vốn tham chiếu 141,915 USDT, 1.0 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Nhìn bảng thì Valid-Launch-Monkey rất đẹp: thắng 72%, profit factor 1.09, sụt vốn 1.2%. Nhưng đó chỉ là các lệnh bot tự chọn đóng — bot đang giữ 9,773 USDT lỗ chưa chốt (7% vốn), chốt hết thì PF tụt còn 0.27, từ lãi thành lỗ. Cơ chế là chốt lời sớm, ôm lỗ chờ gỡ; khi giá không quay lại, người copy ăn trọn cú hiện lỗ.","CHỨNG MINH:","• Profit factor 1.09 (sổ đã chốt) → 0.27 (chốt cả sổ mở) — chênh lệch này là toàn bộ vấn đề","• Lỗ chưa chốt 9,773 USDT = 7% vốn, trên 5 vị thế mở","• Điểm rủi ro 70 đến từ sàn veto (bình quân 10 chiều chỉ 47.5): chốt hết sổ mở thì profit factor chỉ còn 0.27","• Monte Carlo 10,000 kịch bản × 54 lệnh: trung vị +0.2% vốn, p05 -1.2%, xấu nhất -3.0%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 1.6%, xác suất lỗ 40%","• 54 lệnh, thắng 72%, payoff 0.42 → một lệnh thua xoá 2.4 lệnh thắng","KẾT LUẬN: NGUY HIỂM — chất lượng 52/100, rủi ro 70/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: bot chốt hết hoặc cắt phần lỗ đang treo, và profit factor sau khi chốt quay lên trên 1. Độ tin cậy của chính đánh giá này chỉ 67%."],"n":54,"win":72.22222222222221,"pf":1.091572968124696,"mpf":0.2673057995103901,"dd":1.2181623514742204,"sharpe":0.28480853462936173,"openloss":9773.3732,"openpct":6.886757155890674,"cap":141915.46149758194,"mode":"PARTIAL","mc":{"it":10000,"h":54,"worst":-3.0332267063851264,"p05":-1.2121159520076261,"p50":0.21352625029116232,"p95":1.361975611074331,"cvar":1.607032165404188,"ploss":39.97,"pruin":0.0,"dd95":1.6874045516919445,"psr":0.5761477466237884,"dsr":0.048273926586558547,"stress":"SURVIVED","bias":true},"veto":["chốt hết sổ mở thì profit factor chỉ còn 0.27"],"drivers":["Chất lượng hiệu suất 82","Chất lượng lợi nhuận / R 75","Rủi ro danh mục 62"],"dims":{"performance_quality":81.88675715589068,"return_r_quality":75.0,"drawdown_risk":15.0,"tail_risk":60.0,"leverage_exposure":30.0,"behavioral_risk":55.0,"strategy_drift":30.0,"liquidity_execution":15.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":0.0,"consistency":82.8,"drawdown_control":100.0,"honesty":10.0,"robustness":88.0},"flags":["chốt hết sổ mở thì PF rơi từ 1.09 xuống 0.27"]},{"name":"01014588","code":"F1344E1B7AE2D41F","slot":"DEX/UNI","sym":"ETH","verdict":"TIỀM NĂNG","action":"WARN","q":84.7,"r":34.152623027897654,"conf":89.37008100189578,"cause":"Rủi ro thấp (34) và chất lượng tốt (85)","text":["01014588 — ETH/CEX, 169 lệnh đã chốt, vốn tham chiếu 403,694 USDT, 2.0 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: 01014588 có sổ sách trung thực — điểm quan trọng nhất: profit factor 1.64 trên lệnh đã chốt, và 1.64 nếu chốt luôn mọi vị thế đang mở. Hai con số sát nhau nghĩa là bot cắt lỗ thật chứ không ôm lỗ chờ gỡ, nên thành tích đang thấy là thành tích thật. Sụt vốn thật đã ghi nhận 11.8%.","CHỨNG MINH:","• Profit factor 1.64 (sổ đã chốt) → 1.64 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 856 USDT = 0% vốn, trên 3 vị thế mở","• Điểm rủi ro 34 là bình quân 10 chiều; nặng nhất: Rủi ro danh mục 62, Chất lượng lợi nhuận / R 60","• Monte Carlo 10,000 kịch bản × 169 lệnh: trung vị +22.7% vốn, p05 +2.5%, xấu nhất -23.4%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 2.9%, xác suất lỗ 3%","• 169 lệnh, thắng 70%, payoff 0.69 → một lệnh thua xoá 1.5 lệnh thắng","KẾT LUẬN: TIỀM NĂNG — chất lượng 85/100, rủi ro 34/100. Khuyến nghị: THEO DÕI SÁT, chưa cần rút."],"n":169,"win":70.41420118343196,"pf":1.6404752064961639,"mpf":1.6380678427129833,"dd":11.759284786360485,"sharpe":3.7786988362458924,"openloss":856.0,"openpct":0.21204177406518027,"cap":403694.03801388264,"mode":"PARTIAL","mc":{"it":10000,"h":169,"worst":-23.44535615988066,"p05":2.481940210166448,"p50":22.734230565959077,"p95":42.85582981363037,"cvar":2.8943597983526654,"ploss":3.4299999999999997,"pruin":0.0,"dd95":13.923086995444883,"psr":0.9570211777799613,"dsr":0.6018365836665779,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Rủi ro danh mục 62","Chất lượng lợi nhuận / R 60","Thanh khoản / Khớp lệnh 60"],"dims":{"market_alignment":10.0,"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":15.0,"tail_risk":30.0,"leverage_exposure":40.0,"behavioral_risk":55.0,"strategy_drift":15.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":70.0,"consistency":100.0,"drawdown_control":65.0,"honesty":100.0,"robustness":92.4},"flags":[]},{"name":"Ail.Wang","code":"31F3288F9B90B496","slot":"DEX/UNI","sym":"BTC","verdict":"NGUY HIỂM","action":"REDUCE","q":50.8,"r":70.0,"conf":77.5545447441933,"cause":"chốt hết sổ mở thì profit factor chỉ còn 0.23","text":["Ail.Wang — BTC/CEX, 497 lệnh đã chốt, vốn tham chiếu 1,057,346 USDT, 23.4 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: Nhìn bảng thì Ail.Wang rất đẹp: thắng 86%, profit factor 3.19, sụt vốn 0.7%. Nhưng đó chỉ là các lệnh bot tự chọn đóng — bot đang giữ 247,142 USDT lỗ chưa chốt (23% vốn), chốt hết thì PF tụt còn 0.23, từ lãi thành lỗ. Cơ chế là chốt lời sớm, ôm lỗ chờ gỡ; khi giá không quay lại, người copy ăn trọn cú hiện lỗ.","CHỨNG MINH:","• Profit factor 3.19 (sổ đã chốt) → 0.23 (chốt cả sổ mở) — chênh lệch này là toàn bộ vấn đề","• Lỗ chưa chốt 247,142 USDT = 23% vốn, trên 69 vị thế mở","• Điểm rủi ro 70 đến từ sàn veto (bình quân 10 chiều chỉ 61.6): chốt hết sổ mở thì profit factor chỉ còn 0.23","• Monte Carlo 10,000 kịch bản × 497 lệnh: trung vị +3.1% vốn, p05 +1.5%, xấu nhất -0.9%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 1.0%, xác suất lỗ 0%","• 497 lệnh, thắng 86%, payoff 0.52 → một lệnh thua xoá 1.9 lệnh thắng","KẾT LUẬN: NGUY HIỂM — chất lượng 51/100, rủi ro 70/100. Khuyến nghị: GIẢM tỷ trọng đang copy. Điều kiện xem xét lại: bot chốt hết hoặc cắt phần lỗ đang treo, và profit factor sau khi chốt quay lên trên 1."],"n":497,"win":85.91549295774648,"pf":3.1947950107347842,"mpf":0.23407515987446917,"dd":0.7383123380018555,"sharpe":20.254810428960923,"openloss":247142.23870703997,"openpct":23.373825097554025,"cap":1057346.1454235935,"mode":"PARTIAL","mc":{"it":10000,"h":497,"worst":-0.8620900755213428,"p05":1.4546663960698605,"p50":3.055300041322001,"p95":4.690302885489914,"cvar":-1.0251570223267732,"ploss":0.13,"pruin":0.0,"dd95":0.9008905636035869,"psr":0.9999920874182612,"dsr":0.9978674831111151,"stress":"SURVIVED","bias":true},"veto":["chốt hết sổ mở thì profit factor chỉ còn 0.23"],"drivers":["Chất lượng hiệu suất 98","Đồng thuận thị trường 80","Đòn bẩy / Exposure 75"],"dims":{"market_alignment":80.0,"performance_quality":98.37382509755403,"return_r_quality":60.0,"drawdown_risk":15.0,"tail_risk":60.0,"leverage_exposure":75.0,"behavioral_risk":55.0,"strategy_drift":50.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":0.0,"consistency":100.0,"drawdown_control":100.0,"honesty":0.0,"robustness":77.0},"flags":["chốt hết sổ mở thì PF rơi từ 3.19 xuống 0.23","lỗ chưa chốt bằng 23% vốn"]},{"name":"King_GG","code":"811997770117827919","slot":"DEX/WBTC","sym":"BTC","verdict":"NGUY HIỂM","action":"EMERGENCY_STOP","q":59.6,"r":100.0,"conf":63.356557020721624,"cause":"rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý","text":["King_GG — BTC/CEX, 268 lệnh đã chốt, vốn tham chiếu 597,758 USDT, 3.7 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: King_GG đang ôm 257,776 USDT lỗ chưa chốt, bằng 43% vốn tham chiếu — tiền đã mất nhưng chưa ghi nhận vì vị thế còn mở, nên không xuất hiện trong bất kỳ chỉ số nào (thắng 55%, profit factor 1.68, sụt vốn 62.9%). Bảng số cho thấy một bot đang ổn; tài khoản thật đã mất một phần vốn mà người copy chưa biết.","CHỨNG MINH:","• Profit factor 1.68 (sổ đã chốt) → 1.46 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 257,776 USDT = 43% vốn, trên 2 vị thế mở","• Kịch bản sốc (biến động 2x, spread 3x, thanh khoản 1/2): bị thanh lý","• Điểm rủi ro 100 đến từ sàn veto (bình quân 10 chiều chỉ 59.9): rủi ro đuôi mô phỏng cực đoan; kịch bản stress dẫn tới thanh lý","• Monte Carlo 10,000 kịch bản × 268 lệnh: trung vị +146.1% vốn, p05 +6.8%, xấu nhất -147.8%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 27.6%, xác suất lỗ 4%, xác suất cháy vốn 1%","KẾT LUẬN: NGUY HIỂM — chất lượng 60/100, rủi ro 100/100. Khuyến nghị: DỪNG NGAY, không copy trong mọi trường hợp. Độ tin cậy của chính đánh giá này chỉ 63%."],"n":268,"win":54.850746268656714,"pf":1.6793630139542617,"mpf":1.4581096675886203,"dd":62.923482071190996,"sharpe":4.269117469430482,"openloss":257776.42084,"openpct":43.12388812422627,"cap":597757.8369033602,"mode":"PARTIAL","mc":{"it":10000,"h":268,"worst":-147.75945538801798,"p05":6.829421479451328,"p50":146.14445129901455,"p95":312.8566910148057,"cvar":27.556308082867385,"ploss":4.29,"pruin":0.75,"dd95":66.40508754676662,"psr":0.9774122736074142,"dsr":0.39529916598958736,"stress":"LIQUIDATED","bias":true},"veto":["rủi ro đuôi mô phỏng cực đoan","kịch bản stress dẫn tới thanh lý"],"drivers":["Rủi ro đuôi 100","Đòn bẩy / Exposure 95","Chất lượng hiệu suất 80"],"dims":{"market_alignment":10.0,"performance_quality":80.0,"return_r_quality":60.0,"drawdown_risk":65.0,"tail_risk":100.0,"leverage_exposure":95.0,"behavioral_risk":30.0,"strategy_drift":15.0,"liquidity_execution":75.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":55.0,"consistency":100.0,"drawdown_control":0.0,"honesty":80.0,"robustness":67.1},"flags":["lỗ chưa chốt bằng 43% vốn"]},{"name":"k001","code":"0EAF7292CE2FAAC2","slot":"DEX/WBTC","sym":"ETH","verdict":"NGUY HIỂM","action":"REDUCE","q":39.3,"r":85.0,"conf":85.64951456310678,"cause":"rủi ro đuôi mô phỏng cực đoan","text":["k001 — ETH/CEX, 212 lệnh đã chốt, vốn tham chiếu 444,306 USDT, 2.3 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: k001 đang lỗ, không phải đang lãi: trên 212 lệnh đã chốt, kỳ vọng mỗi lệnh là -65 USDT, cộng dồn 13,826 USDT lỗ. Chiến lược đã đủ lệnh để nói, và nó đang nói rằng nó mất tiền.","CHỨNG MINH:","• Profit factor 0.90 (sổ đã chốt) → 0.92 (chốt cả sổ mở) — hai con số sát nhau, sổ không giấu lỗ","• Lỗ chưa chốt 985 USDT = 0% vốn, trên 7 vị thế mở","• Điểm rủi ro 85 đến từ sàn veto (bình quân 10 chiều chỉ 57.7): rủi ro đuôi mô phỏng cực đoan","• Monte Carlo 10,000 kịch bản × 212 lệnh: trung vị -2.9% vốn, p05 -24.0%, xấu nhất -46.4%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất lỗ 29.6%, xác suất lỗ 59%","• 212 lệnh, thắng 57%, payoff 0.68 → một lệnh thua xoá 1.5 lệnh thắng","KẾT LUẬN: NGUY HIỂM — chất lượng 39/100, rủi ro 85/100. Khuyến nghị: GIẢM tỷ trọng đang copy."],"n":212,"win":57.07547169811321,"pf":0.8995895263243805,"mpf":0.9198312925964583,"dd":20.782288750297088,"sharpe":-0.4546217657529707,"openloss":984.555,"openpct":0.2215940596724562,"cap":444305.6828577876,"mode":"PARTIAL","mc":{"it":10000,"h":212,"worst":-46.375687930929026,"p05":-23.984569838291723,"p50":-2.947028558500903,"p95":16.885865714155937,"cvar":29.630265565843256,"ploss":59.150000000000006,"pruin":0.0,"dd95":27.82038333499251,"psr":0.3198779044467599,"dsr":0.0031039704062112428,"stress":"SURVIVED","bias":false},"veto":["rủi ro đuôi mô phỏng cực đoan"],"drivers":["Rủi ro đuôi 100","Chất lượng hiệu suất 80","Chất lượng lợi nhuận / R 75"],"dims":{"market_alignment":65.0,"performance_quality":80.0,"return_r_quality":75.0,"drawdown_risk":65.0,"tail_risk":100.0,"leverage_exposure":15.0,"behavioral_risk":35.0,"strategy_drift":35.0,"liquidity_execution":35.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":0.0,"consistency":5.5,"drawdown_control":40.0,"honesty":100.0,"robustness":52.0},"flags":[]},{"name":"xiaojian888999","code":"819848249304757406","slot":"DEX/WETH","sym":"BTC","verdict":"NGUY HIỂM","action":"PAUSE","q":89.1,"r":88.0,"conf":70.35248824571045,"cause":"hành vi giao dịch hủy hoại","text":["xiaojian888999 — BTC/CEX, 318 lệnh đã chốt, vốn tham chiếu 490,951 USDT, 3.4 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: xiaojian888999 bị chặn bởi luật veto, không phải bởi điểm bình quân: hành vi giao dịch hủy hoại. Veto tồn tại để một lỗi đủ nặng không bị điểm trung bình đẹp che đi — bình quân 10 chiều vẫn là 43.2, nhưng chừng nào lỗi này còn thì bot vẫn không nên copy.","CHỨNG MINH:","• Profit factor 3.13 (sổ đã chốt) → 2.66 (chốt cả sổ mở) — chốt hết sổ mở thì mất 15% lợi thế","• Lỗ chưa chốt 34,840 USDT = 7% vốn, trên 10 vị thế mở","• Điểm rủi ro 88 đến từ sàn veto (bình quân 10 chiều chỉ 43.2): hành vi giao dịch hủy hoại","• Monte Carlo 10,000 kịch bản × 318 lệnh: trung vị +77.6% vốn, p05 +43.8%, xấu nhất +5.8%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 35.8%, xác suất lỗ 0%","• 318 lệnh, thắng 73%, payoff 1.16","KẾT LUẬN: NGUY HIỂM — chất lượng 89/100, rủi ro 88/100. Khuyến nghị: TẠM DỪNG copy cho tới khi bot tự xử lý xong phần rủi ro bên dưới."],"n":318,"win":72.95597484276729,"pf":3.1307952144753974,"mpf":2.6605258289346962,"dd":7.752301444489136,"sharpe":10.52940277881014,"openloss":34840.5,"openpct":7.096533068008516,"cap":490950.99911620945,"mode":"PARTIAL","mc":{"it":10000,"h":318,"worst":5.755872647086562,"p05":43.7599897837447,"p50":77.61675529817254,"p95":117.75319316108455,"cvar":-35.80145085900937,"ploss":0.0,"pruin":0.0,"dd95":8.657619994486446,"psr":0.9999999993447035,"dsr":0.999931521374589,"stress":"SURVIVED","bias":false},"veto":["hành vi giao dịch hủy hoại"],"drivers":["Hành vi giao dịch 100","Rủi ro danh mục 62","Chất lượng lợi nhuận / R 60"],"dims":{"market_alignment":30.0,"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":15.0,"tail_risk":50.0,"leverage_exposure":30.0,"behavioral_risk":100.0,"strategy_drift":15.0,"liquidity_execution":60.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":85.0,"consistency":100.0,"drawdown_control":85.0,"honesty":80.0,"robustness":100.0},"flags":[]},{"name":"亿难贫","code":"952071415C9BAD06","slot":"DEX/WETH","sym":"ETH","verdict":"TIỀM NĂNG","action":"BLOCK_NEW_TRADES","q":81.0,"r":46.91961331915979,"conf":85.62191164865013,"cause":"Rủi ro thấp (47) và chất lượng tốt (81)","text":["亿难贫 — ETH/CEX, 529 lệnh đã chốt, vốn tham chiếu 207,569 USDT, 109.9 lệnh/ngày.","NGUYÊN NHÂN TẠI SAO: 亿难贫 không có dấu hiệu bất thường nào đủ nặng để một mình nó quyết định kết quả (thắng 74%, profit factor 4.18, sụt vốn 0.0%). Điểm số đến từ bình quân các chiều rủi ro chứ không từ một lỗi cụ thể, nên đây là mức rủi ro tổng thể chứ không phải một chỗ hỏng cụ thể.","CHỨNG MINH:","• Profit factor 4.18 (sổ đã chốt) → 2.77 (chốt cả sổ mở) — chốt hết sổ mở thì mất 34% lợi thế","• Lỗ chưa chốt 173 USDT = 0% vốn, trên 85 vị thế mở","• Điểm rủi ro 47 là bình quân 10 chiều; nặng nhất: Đồng thuận thị trường 80, Hành vi giao dịch 75","• Monte Carlo 10,000 kịch bản × 500 lệnh: trung vị +0.5% vốn, p05 +0.2%, xấu nhất +0.1%","• Rủi ro đuôi mô phỏng: đuôi 5% tệ nhất vẫn lãi 0.2%, xác suất lỗ 0%","• 529 lệnh, thắng 74%, payoff 1.50 → lệnh thắng lớn hơn hẳn lệnh thua","KẾT LUẬN: TIỀM NĂNG — chất lượng 81/100, rủi ro 47/100. Khuyến nghị: KHÔNG mở thêm, giữ nguyên phần đang có."],"n":529,"win":73.53497164461248,"pf":4.1785533017580185,"mpf":2.7664036175297673,"dd":0.03328763023384424,"sharpe":50.814324930494216,"openloss":173.30951,"openpct":0.08349486011795179,"cap":207569.07641400746,"mode":"PARTIAL","mc":{"it":10000,"h":500,"worst":0.06348236460513994,"p05":0.2459073237287401,"p50":0.45401005166881203,"p95":0.7134440665714902,"cvar":-0.2025336384955221,"ploss":0.0,"pruin":0.0,"dd95":0.051267082338466,"psr":1.0,"dsr":0.9999999999993923,"stress":"SURVIVED","bias":false},"veto":[],"drivers":["Đồng thuận thị trường 80","Hành vi giao dịch 75","Rủi ro danh mục 62"],"dims":{"market_alignment":80.0,"performance_quality":5.0,"return_r_quality":60.0,"drawdown_risk":15.0,"tail_risk":50.0,"leverage_exposure":60.0,"behavioral_risk":75.0,"strategy_drift":35.0,"liquidity_execution":15.0,"portfolio_risk":61.5900214841823},"qc":{"profitability":85.0,"consistency":100.0,"drawdown_control":100.0,"honesty":55.0,"robustness":65.6},"flags":[]}],"markets":[{"sym":"ADA","venue":"CEX","posture":"ỔN ĐỊNH","trend":"BULLISH","vol":"NORMAL","liq":"ADEQUATE","q":1.0,"ev":["biến động thấp (phân vị 8)","dòng tiền hai chiều cân bằng"]},{"sym":"AVAX","venue":"CEX","posture":"ĐANG PHÁT TRIỂN","trend":"BULLISH","vol":"NORMAL","liq":"ADEQUATE","q":1.0,"ev":["xu hướng tăng","dòng tiền chủ động mua"]},{"sym":"BNB","venue":"CEX","posture":"ỔN ĐỊNH","trend":"BEARISH","vol":"NORMAL","liq":"ADEQUATE","q":1.0,"ev":["biến động thấp (phân vị 5)","sổ lệnh dày (1,761,729 USD trong ±0,2%)"]},{"sym":"BTC","venue":"CEX","posture":"ỔN ĐỊNH","trend":"BULLISH","vol":"NORMAL","liq":"ADEQUATE","q":1.0,"ev":["biến động thấp (phân vị 3)","sổ lệnh dày (1,900,509 USD trong ±0,2%)","dòng tiền hai chiều cân bằng"]},{"sym":"DOGE","venue":"CEX","posture":"RỦI RO","trend":"BEARISH","vol":"NORMAL","liq":"ADEQUATE","q":1.0,"ev":["xu hướng giảm","giá sát biên khoảng (14% biên độ)","vị thế dồn một phía (long, tỷ lệ L/S 4.56)"]},{"sym":"ETH","venue":"CEX","posture":"ỔN ĐỊNH","trend":"BEARISH","vol":"NORMAL","liq":"ADEQUATE","q":1.0,"ev":["biến động thấp (phân vị 5)","sổ lệnh dày (3,883,316 USD trong ±0,2%)","dòng tiền hai chiều cân bằng"]},{"sym":"LINK","venue":"CEX","posture":"RỦI RO","trend":"BEARISH","vol":"NORMAL","liq":"ADEQUATE","q":1.0,"ev":["xu hướng giảm","giá sát biên khoảng (12% biên độ)"]},{"sym":"SOL","venue":"CEX","posture":"ỔN ĐỊNH","trend":"BEARISH","vol":"NORMAL","liq":"ADEQUATE","q":1.0,"ev":["biến động thấp (phân vị 6)","sổ lệnh dày (6,648,955 USD trong ±0,2%)","dòng tiền hai chiều cân bằng"]},{"sym":"SUI","venue":"CEX","posture":"RỦI RO","trend":"BEARISH","vol":"NORMAL","liq":"ADEQUATE","q":1.0,"ev":["xu hướng giảm","vị thế dồn một phía (long, tỷ lệ L/S 3.52)","beta theo BTC cao (1.55), khuếch đại cú sốc chung"]},{"sym":"XRP","venue":"CEX","posture":"RỦI RO","trend":"BEARISH","vol":"NORMAL","liq":"ADEQUATE","q":1.0,"ev":["xu hướng giảm","vị thế dồn một phía (long, tỷ lệ L/S 2.89)","beta theo BTC cao (1.53), khuếch đại cú sốc chung"]},{"sym":"PEPE","venue":"DEX","posture":"ĐANG PHÁT TRIỂN","trend":"BULLISH","vol":"NORMAL","liq":"DEEP","q":1.0,"ev":["xu hướng tăng","dòng tiền chủ động mua"]},{"sym":"SOL","venue":"DEX","posture":"ỔN ĐỊNH","trend":"BEARISH","vol":"NORMAL","liq":"DEEP","q":1.0,"ev":["biến động thấp (phân vị 6)"]},{"sym":"UNI","venue":"DEX","posture":"ĐANG PHÁT TRIỂN","trend":"BULLISH","vol":"NORMAL","liq":"DEEP","q":1.0,"ev":["xu hướng tăng"]},{"sym":"WBTC","venue":"DEX","posture":"ĐANG PHÁT TRIỂN","trend":"BULLISH","vol":"NORMAL","liq":"DEEP","q":1.0,"ev":["xu hướng tăng","dòng tiền chủ động mua"]},{"sym":"WETH","venue":"DEX","posture":"ỔN ĐỊNH","trend":"BEARISH","vol":"NORMAL","liq":"DEEP","q":1.0,"ev":["biến động thấp (phân vị 5)","sổ lệnh dày (1,689,337 USD trong ±0,2%)"]}],"generated":1789408077355};</script>
+<script>
+const TIER = {
+  "TIỀM NĂNG":{k:"promise",o:3,ico:'<path d="M3 8.5l3.2 3.2L13 4.8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'},
+  "AN TOÀN" :{k:"safe",   o:2,ico:'<path d="M8 2.2l4.8 2v4c0 3-2 5-4.8 5.8C5.2 13.2 3.2 11.2 3.2 8.2v-4z" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/>'},
+  "TIỀM ẨN" :{k:"latent", o:1,ico:'<path d="M8 2.6l6 10.8H2z" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/><path d="M8 6.6v3.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".95" fill="currentColor"/>'},
+  "NGUY HIỂM":{k:"danger",o:0,ico:'<circle cx="8" cy="8" r="5.9" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>'}
+};
+const D = window.__DASH__, BOTS = D.bots, MK = D.markets;
+const n1 = (v,d=1) => v==null ? "—" : Number(v).toFixed(d);
+const pc = (v,d=1) => v==null ? "—" : (v>=0?"+":"") + Number(v).toFixed(d) + "%";
+const money = v => v==null ? "—" : Math.abs(v)>=1000 ? Math.round(v).toLocaleString("vi-VN") : Number(v).toFixed(0);
+const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const badge = v => { const t=TIER[v]||TIER["TIỀM ẨN"];
+  return `<span class="badge"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">${t.ico}</svg>${esc(v)}</span>`; };
+const tierVars = v => { const k=(TIER[v]||TIER["TIỀM ẨN"]).k;
+  return `--tier:var(--${k});--tier-bg:var(--${k}-bg)`; };
+
+let active = new Set(), sortKey = "risk", query = "";
+
+document.getElementById("stamp").textContent =
+  new Date(D.generated).toLocaleString("vi-VN",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+
+/* thanh chip theo xếp loại */
+const counts = {};
+BOTS.forEach(b => counts[b.verdict] = (counts[b.verdict]||0)+1);
+const order = Object.keys(TIER).sort((a,b)=>TIER[a].o-TIER[b].o);
+document.getElementById("tiers").innerHTML = order.map(v=>{
+  const t=TIER[v]; return `<button type="button" class="chip c-${t.k}" data-t="${esc(v)}" aria-pressed="false">
+    <span class="dot"></span>${esc(v)} <span class="ct">${counts[v]||0}</span></button>`;
+}).join("");
+const need = (counts["NGUY HIỂM"]||0) + (counts["TIỀM ẨN"]||0);
+document.getElementById("lede-n").firstChild.textContent = need;
+document.getElementById("lede-t").textContent = `trong ${BOTS.length} bot cần xử lý trước`;
+
+/* bảng thị trường */
+const POS = {"RỦI RO":"danger","ĐANG PHÁT TRIỂN":"promise","ỔN ĐỊNH":"safe"};
+document.getElementById("mk").innerHTML = MK.map(m=>{
+  const c = POS[m.posture] ? `var(--${POS[m.posture]})` : "var(--ink-3)";
+  return `<tr><td>${esc(m.sym)} <span class="r-slot">${esc(m.venue)}</span></td>
+    <td class="pos" style="color:${c}">${esc(m.posture||"—")}</td>
+    <td>${esc(m.trend||"—")}</td><td>${esc(m.vol||"—")}</td><td>${esc(m.liq||"—")}</td>
+    <td class="num">${m.q==null?"—":n1(m.q*100,0)+"%"}</td></tr>`;
+}).join("");
+
+/* danh sách bot */
+function render(){
+  const q = query.trim().toLowerCase();
+  let rows = BOTS.filter(b =>
+    (!active.size || active.has(b.verdict)) &&
+    (!q || [b.name,b.code,b.sym,b.slot].some(x=>String(x).toLowerCase().includes(q))));
+  const cmp = {risk:(a,b)=>b.r-a.r, quality:(a,b)=>b.q-a.q, trades:(a,b)=>(b.n||0)-(a.n||0)}[sortKey];
+  const groups = order.map(v => [v, rows.filter(b=>b.verdict===v).sort(cmp)]).filter(([,r])=>r.length);
+  const el = document.getElementById("list");
+  if (!groups.length){ el.innerHTML = `<p class="empty">Không có bot nào khớp bộ lọc.</p>`; return; }
+  el.innerHTML = groups.map(([v,rs]) => `<section class="grp">
+      <div class="grp-h"><h2 style="color:var(--${TIER[v].k})">${esc(v)}</h2><span>${rs.length} bot</span></div>
+      <div class="rows">${rs.map(card).join("")}</div></section>`).join("");
+  el.querySelectorAll(".row").forEach(r => r.addEventListener("click", () => open(r.dataset.code)));
+}
+function card(b){
+  return `<button type="button" class="row" style="${tierVars(b.verdict)}" data-code="${esc(b.code)}">
+    <span class="r-top"><span class="r-name">${esc(b.name)}</span>
+      <span class="r-slot">${esc(b.sym)} · ${esc(b.code.slice(0,8))}</span>${badge(b.verdict)}</span>
+    <span class="r-cause">${esc(b.cause||"")}</span>
+    <span class="r-nums">
+      <span class="stat rk"><b>${n1(b.r,0)}</b><s>Rủi ro</s></span>
+      <span class="stat"><b>${n1(b.q,0)}</b><s>Chất lượng</s></span>
+      <span class="stat"><b>${b.n??"—"}</b><s>Lệnh</s></span>
+    </span></button>`;
+}
+
+/* phiếu chi tiết */
+const dlg = document.getElementById("dlg");
+function open(code){
+  const b = BOTS.find(x=>x.code===code); if(!b) return;
+  document.getElementById("sheet").setAttribute("style", tierVars(b.verdict));
+  document.getElementById("dlg-t").textContent = b.name;
+  document.getElementById("dlg-v").innerHTML =
+    `${badge(b.verdict)}<span class="r-slot">${esc(b.slot)} · ${esc(b.code)}</span>`;
+  document.getElementById("dlg-b").innerHTML = detail(b);
+  dlg.showModal();
+}
+function detail(b){
+  const m = b.mc, out = [];
+  out.push(`<div class="kpi">
+    <div><b style="color:var(--tier)">${n1(b.r,0)}</b><s>Điểm rủi ro</s></div>
+    <div><b>${n1(b.q,0)}</b><s>Chất lượng</s></div>
+    <div><b>${m.ploss==null?"—":n1(m.ploss,0)+"%"}</b><s>Xác suất lỗ</s></div>
+    <div><b>${b.n??"—"}</b><s>Lệnh đã chốt</s></div>
+    <div><b>${b.win==null?"—":n1(b.win,0)+"%"}</b><s>Thắng</s></div>
+    <div><b>${n1(b.pf,2)}</b><s>Profit factor</s></div></div>`);
+
+  if (m.p50!=null){
+    const vals=[m.worst,m.p05,m.p50,m.p95].filter(v=>v!=null);
+    const lo=Math.min(...vals), hi=Math.max(...vals), span=(hi-lo)||1;
+    const x=v=>((v-lo)/span)*100;
+    out.push(`<div class="sec"><h4>Mô phỏng ${m.it?m.it.toLocaleString("vi-VN"):"10.000"} kịch bản × ${m.h} lệnh</h4>
+      <div class="pct"><div class="pct-scale">
+        <span class="pct-track"></span>
+        <span class="pct-span" style="left:${x(m.p05)}%;width:${Math.max(x(m.p95)-x(m.p05),.5)}%"></span>
+        ${[[m.worst,"xấu nhất"],[m.p05,"p05"],[m.p95,"p95"]].filter(p=>p[0]!=null).map(([v,l])=>
+          `<span class="pct-m" style="left:${x(v)}%"></span>
+           <span class="pct-lab" style="left:${x(v)}%">${esc(l)} ${pc(v)}</span>`).join("")}
+        <span class="pct-m mid" style="left:${x(m.p50)}%"></span>
+      </div>
+      <div class="pct-v"><span>trung vị <strong>${pc(m.p50)}</strong> vốn</span>
+        ${m.cvar==null?"":`<span>đuôi 5% tệ nhất ${(-m.cvar)<0?"lỗ":"vẫn lãi"} ${n1(Math.abs(m.cvar))}%</span>`}
+        ${m.pruin?`<span style="color:var(--danger)">cháy vốn ${n1(m.pruin,0)}%</span>`:""}</div>
+      <p class="pct-note">Bốn mốc trên là phân vị thật của ${m.it?m.it.toLocaleString("vi-VN"):"10.000"} lần
+         bốc lại chính sổ lệnh của bot — không phải đường cong ước lượng.</p></div></div>`);
+  }
+  if (m.bias) out.push(`<p class="warn"><strong>Lưu ý về chính con số trên:</strong> mô phỏng chỉ bốc từ
+    lệnh đã chốt, mà bot này đang giữ lỗ chưa chốt — mẫu đã bị lọc bỏ phần thua, nên kết quả lạc quan hơn thực tế.</p>`);
+
+  const paras = (b.text||[]).map(p => p.startsWith("• ")
+    ? {b:p.slice(2)} : {p});
+  let html = "", buf = [];
+  const flush = () => { if(buf.length){ html += `<ul class="bullets">${buf.map(t=>`<li>${fmt(t)}</li>`).join("")}</ul>`; buf=[]; } };
+  paras.forEach(x => { if(x.b) buf.push(x.b); else { flush(); html += `<p class="para">${fmt(x.p)}</p>`; } });
+  flush();
+  out.push(`<div class="sec"><h4>Vì sao chấm như vậy</h4>${html}</div>`);
+
+  if (b.veto?.length) out.push(`<div class="sec"><h4>Luật veto đã kích hoạt</h4>
+    <ul class="bullets">${b.veto.map(v=>`<li>${esc(v)}</li>`).join("")}</ul></div>`);
+  return out.join("");
+}
+function fmt(t){
+  return esc(t).replace(/^([A-ZĐÂÊÔƠƯÁÀẢÃẠÀ-ỹ\s0-9.]{4,40}:)/u, "<strong>$1</strong>");
+}
+
+/* tương tác */
+document.getElementById("tiers").addEventListener("click", e => {
+  const b = e.target.closest(".chip"); if(!b) return;
+  const t = b.dataset.t, on = b.getAttribute("aria-pressed")==="true";
+  on ? active.delete(t) : active.add(t);
+  b.setAttribute("aria-pressed", String(!on)); render();
+});
+document.querySelector(".srt").addEventListener("click", e => {
+  const b = e.target.closest("button[data-sort]"); if(!b) return;
+  sortKey = b.dataset.sort;
+  document.querySelectorAll(".srt button").forEach(x =>
+    x.setAttribute("aria-pressed", String(x===b)));
+  render();
+});
+document.getElementById("q").addEventListener("input", e => { query = e.target.value; render(); });
+document.getElementById("dlg-x").addEventListener("click", () => dlg.close());
+dlg.addEventListener("click", e => { if(e.target===dlg) dlg.close(); });
+render();
+</script>
+<style>
+.live{margin-top:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  padding:0;display:none;overflow:hidden}
+.live.on{display:block}
+.lv-h{padding:16px 18px;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:baseline;
+  border-bottom:1px solid var(--line)}
+.lv-h h3{margin:0;font-size:17px;font-weight:700;letter-spacing:-.015em}
+.lv-h .r-slot{font-size:12px}
+.lv-p{display:flex;flex-wrap:wrap;gap:22px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.lv-p div{min-width:84px}
+.lv-p b{display:block;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;font-size:16px;font-weight:500}
+.lv-p s{display:block;text-decoration:none;font-size:10.5px;color:var(--ink-3);
+  text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.lv-a{padding:14px 18px}
+.lv-a h4{margin:0 0 9px;font-size:11.5px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-3)}
+.asset{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border-radius:7px;
+  font-size:12.5px;margin:0 6px 6px 0;border:1px solid var(--line);background:var(--surface)}
+.asset .sym{font-weight:600}
+.asset .n{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3)}
+.a-live{border-color:var(--promise);color:var(--promise);background:var(--promise-bg)}
+.a-hold{border-color:var(--latent);color:var(--latent);background:var(--latent-bg)}
+.a-gone{color:var(--ink-3)}
+.lv-note{margin:10px 0 0;padding:11px 13px;border-radius:8px;background:var(--latent-bg);
+  color:var(--ink);font-size:13px;border-left:3px solid var(--latent)}
+.lv-f{padding:14px 18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;
+  gap:12px;align-items:center;background:var(--sunken)}
+.lv-f p{margin:0;font-size:13px;color:var(--ink-2);flex:1 1 220px}
+.go{border:0;background:var(--accent);color:#fff;font:inherit;font-weight:600;font-size:14px;
+  padding:10px 20px;border-radius:9px;cursor:pointer;white-space:nowrap}
+.go:hover{filter:brightness(1.14)}
+.go:disabled{opacity:.55;cursor:default}
+:root[data-theme="dark"] .go{color:#0E1319}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .go{color:#0E1319}}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid currentColor;
+  border-right-color:transparent;border-radius:50%;animation:sp .7s linear infinite;
+  vertical-align:-2px;margin-right:7px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.lim{background:var(--latent-bg);border-left:3px solid var(--latent);border-radius:9px;
+  padding:13px 15px;font-size:13.5px;color:var(--ink)}
+.lim b{display:block;margin-bottom:4px;color:var(--latent)}
+.na{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.na span{font-size:11.5px;padding:3px 8px;border-radius:5px;background:var(--sunken);
+  color:var(--ink-3);font-family:"IBM Plex Mono",monospace}
+.off{padding:14px 18px;font-size:13px;color:var(--ink-2)}
+</style>
+<div class="wrap"><div class="live" id="live"></div></div>
+<script>
+/* Hai bước tách bạch: tra cứu rẻ (~0,2s, 2-3 request) để tìm đúng bot, rồi mới
+   hỏi có muốn chạy engine hay không. Chạy engine ngay lúc gõ là lãng phí --
+   phần lớn lượt gõ chỉ để tìm, không để phân tích. */
+let API = false, lookupSeq = 0;
+fetch("api/bots").then(r => { API = r.ok; }).catch(()=>{});
+
+const CODE_RE = /^[A-Za-z0-9]{8,64}$/;
+const liveEl = document.getElementById("live");
+const A_CLASS = {"ĐANG GIAO DỊCH":"a-live","CHỈ ĐANG ÔM":"a-hold","ĐÃ RỜI":"a-gone"};
+
+let tmr = null;
+function onQuery(){
+  clearTimeout(tmr);
+  const q = query.trim();
+  const known = BOTS.some(b => b.code.toLowerCase() === q.toLowerCase());
+  if (!CODE_RE.test(q) || known){ liveEl.className = "live"; liveEl.innerHTML = ""; return; }
+  if (!API){
+    liveEl.className = "live on";
+    liveEl.innerHTML = `<div class="off">Bản xem thử chỉ chứa ${BOTS.length} bot đã chấm sẵn.
+      Tra cứu mã bất kỳ cần service <code>run_web</code> chạy kèm để gọi OKX.</div>`;
+    return;
+  }
+  tmr = setTimeout(() => lookup(q), 350);
+}
+
+async function lookup(code){
+  const seq = ++lookupSeq;
+  liveEl.className = "live on";
+  liveEl.innerHTML = `<div class="off"><span class="spin"></span>Đang hỏi OKX về mã ${esc(code)}…</div>`;
+  try{
+    const r = await fetch("api/lookup", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify({code})});
+    const d = await r.json();
+    if (seq !== lookupSeq) return;          // người dùng đã gõ tiếp, bỏ kết quả cũ
+    renderLookup(d, code);
+  }catch(e){
+    if (seq === lookupSeq)
+      liveEl.innerHTML = `<div class="off">Không gọi được service: ${esc(String(e))}</div>`;
+  }
+}
+
+function renderLookup(d, code){
+  if (d.status === "NOT_FOUND" || d.status === "ERROR"){
+    liveEl.innerHTML = `<div class="off"><strong>Không tìm thấy bot</strong><br>
+      ${esc(d.message || d.note || "OKX không có dữ liệu công khai cho mã này.")}</div>`;
+    return;
+  }
+  const p = d.profile || {}, assets = d.assets || [];
+  const money = v => v==null ? "—" : Math.round(v).toLocaleString("vi-VN");
+  const order = {"ĐANG GIAO DỊCH":0,"CHỈ ĐANG ÔM":1,"ĐÃ RỜI":2};
+  const sorted = [...assets].sort((a,b)=>(order[a.state]??9)-(order[b.state]??9));
+
+  liveEl.innerHTML = `
+    <div class="lv-h"><h3>${esc(d.name || code)}</h3>
+      <span class="r-slot">${esc(d.code || code)}</span></div>
+    <div class="lv-p">
+      <div><b>${money(p.aum)}</b><s>AUM (USDT)</s></div>
+      <div><b>${money(p.pnl)}</b><s>Tổng PnL</s></div>
+      <div><b>${p.lead_days ?? "—"}</b><s>Ngày dẫn dắt</s></div>
+      <div><b>${d.open_total ?? "—"}</b><s>Vị thế mở</s></div>
+      <div><b>${assets.length || "—"}</b><s>Asset</s></div>
+    </div>
+    ${assets.length ? `<div class="lv-a"><h4>Asset đang trade</h4>
+      ${sorted.map(a=>`<span class="asset ${A_CLASS[a.state]||""}">
+        <span class="sym">${esc(a.asset)}</span>
+        <span class="n">${a.open_positions||0} mở${a.last_close_days!=null
+          ? " · "+n1(a.last_close_days,1)+"d" : ""}</span></span>`).join("")}
+      ${d.note ? `<p class="lv-note">${esc(d.note)}</p>` : ""}</div>` : ""}
+    ${d.status === "LIMITED" ? `<div class="lv-a"><p class="lv-note">${esc(d.note||"")}</p></div>` : ""}
+    <div class="lv-f">
+      <p>${d.status === "LIMITED"
+          ? "Chỉ chạy được đánh giá hạn chế từ đường vốn tuần — độ tin cậy thấp."
+          : "Chạy engine trên lệnh đã chốt: mô phỏng 10.000 kịch bản, chấm điểm, giải thích. 8–15 giây."}</p>
+      <button type="button" class="go" id="go">Phân tích bot này</button>
+    </div>`;
+  document.getElementById("go").addEventListener("click", ev => analyze(code, ev.currentTarget));
+}
+
+async function analyze(code, btn){
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin"></span>Đang chấm điểm…`;
+  try{
+    const r = await fetch("api/analyze", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify({code})});
+    const d = await r.json();
+    if (d.status === "NOT_FOUND" || d.status === "ERROR"){
+      btn.disabled = false; btn.textContent = "Thử lại";
+      liveEl.querySelector(".lv-f p").textContent = d.message || "Không phân tích được.";
+      return;
+    }
+    showLive(d);
+    btn.disabled = false; btn.textContent = "Xem lại báo cáo";
+  }catch(e){
+    btn.disabled = false; btn.textContent = "Thử lại";
+    liveEl.querySelector(".lv-f p").textContent = "Không gọi được service: " + e;
+  }
+}
+
+function showLive(d){
+  const lim = d.status === "LIMITED";
+  const v = d.verdict || "ĐÁNH GIÁ HẠN CHẾ";
+  document.getElementById("sheet").setAttribute("style", tierVars(TIER[v] ? v : "TIỀM ẨN"));
+  document.getElementById("dlg-t").textContent = d.name || d.code;
+  document.getElementById("dlg-v").innerHTML =
+    `${TIER[v] ? badge(v) : `<span class="badge">${esc(v)}</span>`}
+     <span class="r-slot">${esc(d.code)}</span>`;
+
+  const perf = (d.evidence && d.evidence.performance) || {}, m = d.mc || {};
+  let html = "";
+  if (lim) html += `<div class="lim"><b>Bot này không công khai sổ lệnh</b>
+    ${esc(d.limited_reason||"")} Đánh giá dựa trên đường vốn tuần và thống kê tổng hợp.
+    <div class="na">${(d.unavailable||[]).map(u=>`<span>${esc(u)} · không tính được</span>`).join("")}</div></div>`;
+
+  html += `<div class="kpi">
+    <div><b style="color:var(--tier)">${n1(d.risk,0)}</b><s>Điểm rủi ro</s></div>
+    <div><b>${n1(d.quality,0)}</b><s>Chất lượng</s></div>
+    <div><b>${n1(d.confidence,0)}</b><s>Độ tin cậy</s></div>
+    <div><b>${perf.trade_count ?? "—"}</b><s>Lệnh đã chốt</s></div>
+    <div><b>${perf.win_rate==null?"—":n1(perf.win_rate,0)+"%"}</b><s>Thắng</s></div>
+    <div><b>${perf.profit_factor==null?"—":n1(perf.profit_factor,2)}</b><s>Profit factor</s></div></div>`;
+
+  const as = d.assets || [];
+  if (as.length) html += `<div class="sec"><h4>Asset (${as.length})</h4>
+    ${as.map(a=>`<span class="asset ${A_CLASS[a.state]||""}"><span class="sym">${esc(a.asset)}</span>
+      <span class="n">${a.open_positions||0} mở</span></span>`).join("")}</div>`;
+
+  if (m && m.is_valid){
+    html += `<div class="sec"><h4>Mô phỏng ${(m.iterations||0).toLocaleString("vi-VN")} kịch bản × ${m.horizon_trades} lệnh</h4>
+      <div class="pct"><div class="pct-v">
+        <span>trung vị <strong>${pc(m.profit_pct_p50)}</strong> vốn</span>
+        <span>p05 ${pc(m.profit_pct_p05)}</span><span>xấu nhất ${pc(m.profit_pct_worst)}</span>
+        ${m.p_ruin?`<span style="color:var(--danger)">cháy vốn ${n1(m.p_ruin,0)}%</span>`:""}
+      </div></div></div>`;
+  } else if (lim){
+    html += `<p class="pct-note">Không chạy được Monte Carlo: chỉ có PnL theo tuần,
+      chưa đủ mẫu tối thiểu. Không suy diễn phân phối rủi ro từ mẫu quá mỏng.</p>`;
+  }
+
+  let body = "", buf = [];
+  const flush = () => { if(buf.length){ body += `<ul class="bullets">${buf.map(t=>`<li>${fmt(t)}</li>`).join("")}</ul>`; buf=[]; } };
+  (d.text||[]).forEach(p => { if(p.startsWith("• ")) buf.push(p.slice(2));
+    else { flush(); body += `<p class="para">${fmt(p)}</p>`; } });
+  flush();
+  if (body) html += `<div class="sec"><h4>Vì sao chấm như vậy</h4>${body}</div>`;
+
+  document.getElementById("dlg-b").innerHTML = html;
+  dlg.showModal();
+}
+
+document.getElementById("q").addEventListener("input", onQuery);
+</script>

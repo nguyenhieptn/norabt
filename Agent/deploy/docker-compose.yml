@@ -1,0 +1,182 @@
+# Triển khai agent-web (Agent/backend/web/app.py) bằng Docker -- CHƯA chạy,
+# chỉ là cấu hình chờ duyệt. Xem Agent/deploy/README.md để biết thứ tự thao
+# tác đầy đủ (kể cả những bước bắt buộc cần người thật làm: DNS, certbot).
+#
+# Cách ly với 6 container đang chạy trên host (fms-frontend, fms-backend,
+# fms-mongodb, giapha-db, nora-tg-bot, nora-vault-sync) và với MySQL/MongoDB/
+# PHP-FPM/nginx chạy trực tiếp trên host:
+#   - Không khai báo `networks:` dùng chung -- Compose tự tạo một network
+#     riêng cho project này, không tham gia network của container nào khác.
+#   - Không mount volume nào ngoài Agent/data của chính dự án này.
+#   - Cổng duy nhất chạm ra ngoài container là 8770, và chỉ bind vào loopback
+#     của HOST (127.0.0.1) -- không bao giờ 0.0.0.0. nginx chạy trên host
+#     (ngoài Docker) là lớp duy nhất chạm internet, xem
+#     Agent/deploy/nginx-agent.conf.template.
+#   - Tài nguyên bị ép trần cứng (cpus/mem_limit dưới đây) nên dù agent-web
+#     có lỗi/leak cũng không thể kéo sập MySQL/MongoDB/PHP-FPM hay 6
+#     container kia trên cùng máy 24 core/30GB.
+#   - Nếu container này chết/bị OOM-kill, `restart: unless-stopped` tự khởi
+#     động lại nó -- không có tiến trình nào khác trên host phụ thuộc vào nó
+#     nên việc nó down không lan sang dịch vụ khác, và ngược lại.
+
+services:
+  agent-web:
+    build:
+      # Context = Agent/ (một cấp trên deploy/), không phải repo root và
+      # không phải deploy/ -- Dockerfile cần COPY Agent/backend +
+      # Agent/requirements.txt, mà Docker cấm COPY ra ngoài context qua "..".
+      # Xem đầu Agent/deploy/Dockerfile và Agent/deploy/.dockerignore để biết
+      # lý do đầy đủ.
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: norabt-agent-web:latest
+    container_name: norabt-agent-web
+
+    # Run as the host's own uid:gid, not the image's baked-in agent(10001).
+    # The candle cache is a bind mount owned by host uid 1000; a container uid
+    # that doesn't match simply cannot write it (Permission denied on the
+    # atomic-write temp file), and chowning the host dir to 10001 would just
+    # move the problem onto the host user instead. Still non-root either way.
+    user: "1000:1000"
+    restart: unless-stopped
+
+    # CHỈ bind vào loopback của HOST. Tuyệt đối không đổi thành "8770:8770"
+    # hay "0.0.0.0:8770:8770" -- làm vậy là mở thẳng cổng 8770 ra internet,
+    # bỏ qua toàn bộ rate limit/TLS/kiểm soát truy cập nginx đang lo (server
+    # Starlette phía sau chưa có xác thực riêng, xem web/app.py's docstring).
+    ports:
+      - "127.0.0.1:8770:8770"
+
+    env_file:
+      # Nạp OKX_API_KEY/OKX_API_SECRET/OKX_API_PASSPHRASE/OKX_SIMULATED (và
+      # mọi biến khác trong Agent/.env, xem Agent/.env.example) làm biến môi
+      # trường THẬT của tiến trình lúc "docker compose up". File .env không
+      # bao giờ được copy vào image (xem Dockerfile + .dockerignore) -- nó
+      # chỉ tồn tại trên host và chỉ compose đọc nó ở bước này. Nếu file này
+      # chưa tồn tại, `docker compose` sẽ báo lỗi ngay thay vì âm thầm chạy
+      # thiếu credentials -- đây là hành vi mong muốn, xem README bước 3.
+      - ../.env
+
+    volumes:
+      # Toàn bộ Agent/data chỉ-đọc: run_report.py/crawler ghi dữ liệu này từ
+      # NGOÀI container (chạy trực tiếp trên host), agent-web chỉ cần đọc lại
+      # (list_bots/list_markets trong web/data.py là plain JSON read).
+      - ../data:/app/Agent/data:ro
+
+      # The dashboard HTML is authored outside backend/ and is deliberately NOT
+      # baked into the image: it changes far more often than the code, and a
+      # read-only bind means editing it needs no rebuild, only a browser reload.
+      - ../web:/app/Agent/web:ro
+      # Ngoại lệ duy nhất: cache nến 1H đã đóng, đường dẫn mặc định của
+      # CandleCache (xem Agent/backend/sources/market_source.py --
+      # Path(config.DATA_DIR)/"cache"/"candles"). LiveMarketDataSource tự ghi
+      # thêm vào cache này mỗi khi POST /api/analyze cần nến của một mã mới,
+      # nên riêng nhánh con này phải cho ghi -- mount SAU dòng data:ro ở trên
+      # để nó override đúng một nhánh con thành rw, phần còn lại của data/
+      # vẫn chỉ-đọc (hai mount trỏ tới hai target khác nhau trong container
+      # nên thứ tự liệt kê ở đây không ảnh hưởng tới kết quả, chỉ giữ để dễ
+      # đọc: cha trước, con sau).
+      - ../data/cache/candles:/app/Agent/data/cache/candles:rw
+
+      # Nhánh con ghi-được thứ hai, CÙNG KHUÔN với candles ở trên: wallet-
+      # address identity (Agent/backend/web/identity.py) tạo/cập nhật hồ sơ
+      # người dùng tại data/users/<user_ref>/profile.json ngay TRONG
+      # container này mỗi khi có người khai địa chỉ ví qua POST /api/session
+      # hoặc chấm điểm một bot lúc đã đăng nhập (POST /api/analyze gọi
+      # identity.record_analysis) -- khác hẳn candles/cache (agent-web tự
+      # ghi cache nến của chính nó) và khác hẳn phần còn lại của data/ (bot/
+      # đánh giá do run_report.py/crawler ghi từ NGOÀI container, xem comment
+      # data:ro ở trên) -- đây là dữ liệu do CHÍNH tiến trình bên trong
+      # container này sinh ra, nên nhánh này PHẢI ghi được, còn mọi nhánh con
+      # khác của data/ (assessment, analysis, universe, ...) vẫn giữ nguyên
+      # chỉ-đọc như trước: agent-web không có lý do gì để tự ghi vào đó.
+      # Mount SAU dòng data:ro ở trên để override đúng một nhánh con thành
+      # rw, giống hệt cơ chế candles (hai mount trỏ tới hai target khác nhau
+      # trong container nên thứ tự liệt kê ở đây không ảnh hưởng tới kết
+      # quả, chỉ giữ để dễ đọc: cha trước, con sau).
+      #
+      # BẮT BUỘC trước lần "docker compose up" đầu tiên: thư mục
+      # Agent/data/users/ trên HOST phải đã tồn tại VÀ thuộc quyền uid 1000
+      # (host user chạy compose) trước khi container khởi động -- nếu chưa
+      # có, Docker tự tạo nó lúc mount và gán quyền root, và container này
+      # (chạy `user: "1000:1000"`, xem trên) vẫn không ghi được vào một thư
+      # mục do root tạo, tái diễn ĐÚNG lỗi mount chỉ-đọc mà nhánh mount này
+      # định sửa. Xem README bước tạo thư mục kèm .gitkeep.
+      - ../data/users:/app/Agent/data/users:rw
+
+    # --- Giới hạn tài nguyên -----------------------------------------------
+    # Ràng buộc cứng của dự án: TOÀN BỘ phần việc (không chỉ service này)
+    # phải ≤12 core / ≤14GB RAM trên máy 24 core/30GB đã dùng ~8GB. Cấp 2
+    # core / 2GB riêng cho agent-web là đủ, vì:
+    #   - Monte Carlo (Agent/backend/mcp/analytics/simulation/monte_carlo.py,
+    #     BATCH_SIZE = 2_000) chạy numpy THEO LÔ thay vì vector hoá toàn bộ số
+    #     lần lặp cùng lúc -- đây chính là cơ chế chặn đỉnh RAM của phép mô
+    #     phỏng nặng nhất trong POST /api/analyze, không phụ thuộc RAM cấp
+    #     cho container.
+    #   - Sổ lệnh (ledger) lớn nhất trong dataset hiện có nặng ~339KB JSON
+    #     (539 lệnh, bot_2DE3E8FEAC245B9C/BTC) -- vài trăm KB, không phải vài
+    #     trăm MB, nên phần parse + tính chỉ số tốn không đáng kể so với batch
+    #     Monte Carlo ở trên.
+    #   - POST /api/analyze đã tự giới hạn 5 request/phút/IP
+    #     (ANALYZE_RATE_LIMIT_MAX_REQUESTS trong web/app.py), nên không một
+    #     client nào có thể dồn nhiều lô Monte Carlo chạy đồng thời.
+    #   - 2 core đủ cho vài request /api/analyze CPU-bound xen kẽ mà không
+    #     giành CPU của MySQL/MongoDB/PHP-FPM hay 6 container khác đang chạy
+    #     trên cùng máy 24 core.
+    cpus: 2
+    mem_limit: 2g
+    # = mem_limit -- tắt swap thêm cho riêng container này. Vượt 2GB là dấu
+    # hiệu bất thường (leak/bug), nên để nó bị OOM-kill và tự khởi động lại
+    # (restart: unless-stopped) thay vì âm thầm tràn sang swap và kéo chậm cả
+    # máy dùng chung với các dịch vụ khác.
+    memswap_limit: 2g
+
+    # Siết thêm ở tầng Linux, không đổi hành vi của ứng dụng: ảnh đã chạy
+    # bằng user "agent" (không phải root, xem Dockerfile) nên tiến trình vốn
+    # không cần bất kỳ capability đặc biệt hay quyền leo thang nào.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Giới hạn dung lượng log của Docker (json-file driver) -- log KHÔNG được
+    # phép ăn hết đĩa của một máy đang chạy chung với 6 container khác + các
+    # dịch vụ hệ thống. 10MB x 5 file = tối đa 50MB cho service này.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    healthcheck:
+      # Dùng python3 sẵn có trong image thay vì cài thêm curl/wget -- image
+      # runtime chủ đích không có gói nào ngoài các thư viện trong
+      # requirements.txt, giữ bề mặt tấn công/kích thước tối thiểu.
+      #
+      # Gate theo NỘI DUNG JSON ("status": "ok"), không chỉ mã HTTP: route
+      # /healthz (Agent/backend/web/app.py) luôn trả HTTP 200 kể cả khi
+      # "degraded" (đọc đĩa lỗi) -- đúng quy ước "không bao giờ trả traceback
+      # thô, luôn JSON sạch" của toàn bộ app -- nên healthcheck phải tự phân
+      # biệt hai trường hợp đó bằng nội dung, không thể chỉ dựa vào mã HTTP.
+      # OKX không phản hồi (`okx_public_reachable: false`) KHÔNG làm
+      # healthcheck fail -- đó là điều kiện bên ngoài mà khởi động lại
+      # container không sửa được, xem README phần "OKX chặn IP".
+      test:
+        - "CMD"
+        - "python3"
+        - "-c"
+        - |
+          import json, sys, urllib.request
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8770/healthz", timeout=5) as r:
+                  body = json.load(r)
+          except Exception:
+              sys.exit(1)
+          sys.exit(0 if body.get("status") == "ok" else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Đủ thời gian cho lần khởi động đầu tiên (import numpy/pydantic +
+      # dựng WebDataService) trước khi một lần healthcheck thất bại bắt đầu
+      # được tính vào "retries".
+      start_period: 20s

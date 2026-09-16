@@ -17,7 +17,10 @@ if [ ! -f "$BASE/nora/frontend/dist/index.html" ]; then
     taskset -c 0-3 nice -n 10 npm run build
 fi
 
-pkill -f "uvicorn backend.api.main" 2>/dev/null && sleep 2 || true
+pkill -TERM -f "uvicorn backend.api.main" 2>/dev/null && sleep 1 || true
+pkill -9 -f "uvicorn backend.api.main" 2>/dev/null || true
+fuser -k 18010/tcp 2>/dev/null || true
+sleep 1
 
 cd "$BASE/nora"
 setsid nohup taskset -c 4-7 nice -n 5 "$PYBIN" -m uvicorn backend.api.main:app \

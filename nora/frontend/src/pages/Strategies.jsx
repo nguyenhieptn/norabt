@@ -49,7 +49,8 @@ export default function KhoAlpha() {
                   <tr>
                     <th>Mã</th><th>Tên</th><th>Nhóm</th><th>Loại</th>
                     <th className="n">Chốt lãi</th><th className="n">Cắt lỗ</th>
-                    <th className="n">Đòn bẩy</th><th className="n">Độ dài</th>
+                    <th className="n">Đòn bẩy</th>
+                    <th style={{ textAlign: 'right' }}>Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -68,7 +69,16 @@ export default function KhoAlpha() {
                       <td className="n">{s.takeprofit ?? '—'}</td>
                       <td className="n">{s.stoploss ?? '—'}</td>
                       <td className="n">{s.margin ?? '—'}</td>
-                      <td className="n" style={{ color: 'var(--ink-3)' }}>{int(s.content_size)}</td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <Link
+                          className="btn pri"
+                          to="/library/base"
+                          style={{ fontSize: 11.5, padding: '2px 8px' }}
+                          title="Tạo lần chạy Backtest trong Base với chiến lược này"
+                        >
+                          Chạy Backtest ➔
+                        </Link>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -1,0 +1,98 @@
+%% Tổng quan hệ thống AI Risk Supervisor (QC Agent) cho bot copy-trading OKX
+%% Vẽ bằng Mermaid: https://mermaid.live  — hoặc `mmdc -i system_flow.mmd -o system_flow.png`
+flowchart TB
+
+subgraph SRC["NGUỒN DỮ LIỆU CÔNG KHAI"]
+  OKX["OKX REST API<br/>candles · books · OI · taker · funding<br/>lead-traders · subpositions"]
+  DEXS["DexScreener<br/>pool thanh khoản on-chain"]
+  GOP["GoPlus<br/>an toàn token"]
+end
+
+subgraph CRAWL["TẦNG THU THẬP — scripts/"]
+  SCAN["scan_lead_traders.py<br/>259 trader, 13 trang"]
+  PROF["profile_traders.py<br/>hồ sơ sổ lệnh hạng 1-150"]
+  SEL["select_bots.py<br/>15 asset x 2 bot = 30 bot"]
+  CB["crawl_bots.py<br/>đa luồng, retry 3 lần"]
+  CM["crawl_market_data.py<br/>orderbook · taker · OI · sentiment"]
+  CP["crawl_phase_candles.py<br/>nến tham chiếu 30 instrument"]
+  CTS["crawl_token_security.py"]
+  MAC["build_macro_context.py<br/>tương quan/beta với BTC"]
+end
+
+subgraph STORE["BƯỚC 1 — DỮ LIỆU (Agent/data/)"]
+  DMKT[("cex/ · dex/<br/>15 asset: nến, sổ lệnh,<br/>OI, taker, macro")]
+  DBOT[("bot_*/<br/>30 bot: overview +<br/>trade_list")]
+  DPH[("phases/<br/>nến tham chiếu")]
+  DUNI[("universe/<br/>bảng xếp hạng +<br/>lựa chọn bot")]
+end
+
+subgraph L1["BƯỚC 2A — PHÂN TÍCH THỊ TRƯỜNG"]
+  MS["MarketService<br/>chấm từng nguồn theo mốc dữ liệu"]
+  MR["MarketResult<br/>10 nhóm trạng thái + data_quality"]
+  MP["MarketPosture<br/>RỦI RO / PHÁT TRIỂN / ỔN ĐỊNH<br/>chấm theo trọng số, kèm bằng chứng"]
+end
+
+subgraph L2["BƯỚC 2B — PHÂN TÍCH VÀ MÔ PHỎNG BOT"]
+  LG["TradeLedgerManager<br/>kiểm danh tính + hợp lệ hoá"]
+  CAP["CapitalResolver<br/>dựng vốn từ PnL tuần"]
+  PERF["PerformanceMetrics<br/>DeferredLoss · Drawdown"]
+  BEH["BehavioralDetector<br/>đối chứng thắng/thua"]
+  PHA["StrategyPhaseAnalyzer<br/>đặt từng lệnh vào 6 pha thị trường"]
+  MC["MonteCarlo block-bootstrap<br/>10k kịch bản × số lệnh của chính bot<br/>phân vị lợi nhuận + xấu nhất<br/>+ StressSimulator"]
+  BR["BotResult<br/>quan sát, KHÔNG phán quyết"]
+end
+
+subgraph L3["BƯỚC 3 — QC: CHẤM ĐIỂM VÀ XẾP LOẠI"]
+  LENS["10 lăng kính rủi ro"]
+  FUSE["RiskScoreFusion<br/>bình quân gia quyền · sàn veto · quy tắc khẩn cấp"]
+  QUAL["QualityScorer<br/>sinh lời · ổn định · kiểm soát sụt vốn<br/>trung thực · độ bền"]
+  VERD["Verdict 4 hạng<br/>AN TOÀN · TIỀM NĂNG<br/>TIỀM ẨN · NGUY HIỂM"]
+  BRA["BotRiskAssessment<br/>điểm rủi ro + điểm chất lượng<br/>hạng · nguyên nhân · đề xuất"]
+end
+
+subgraph CTRL["TẦNG ĐIỀU KHIỂN (tách riêng)"]
+  CD["ControlDecisionEngine<br/>READ_ONLY: ghi nhận, không đặt lệnh"]
+end
+
+subgraph REP["BÁO CÁO — run_report.py"]
+  R0["Report 1: kiểm kê dữ liệu<br/>bảng 1.1 market · bảng 1.2 bot"]
+  R1["Report 2A: thị trường 15 asset"]
+  R2["Report 2B: 15 cặp bot + Monte Carlo"]
+  R3["Report 3: chấm điểm và xếp loại 30 bot"]
+  RG["Report thiếu dữ liệu"]
+end
+
+OKX --> SCAN & CB & CM & CP
+DEXS --> CM
+GOP --> CTS
+SCAN --> PROF --> SEL --> CB
+SEL --> DUNI
+CB --> DBOT
+CM & CTS & MAC --> DMKT
+CP --> DPH
+
+DMKT --> MS --> MR --> MP
+DBOT --> LG --> CAP --> PERF --> BR
+LG --> BEH --> BR
+LG --> PHA --> BR
+DPH --> PHA
+DMKT --> PHA
+PERF --> MC --> BR
+
+MR -. "bối cảnh hỗ trợ" .-> LENS
+BR == "bằng chứng chính" ==> LENS
+LENS --> FUSE --> VERD --> BRA --> CD
+BR --> QUAL --> VERD
+
+DMKT --> R0
+DBOT --> R0
+MP --> R1
+BR --> R2
+MP --> R2
+BRA --> R3
+BRA --> RG
+
+classDef main fill:#1f6feb,stroke:#0d419d,color:#fff
+classDef sup fill:#8b949e,stroke:#484f58,color:#fff
+class L2,L3,BR,BRA,LENS,FUSE,QUAL,VERD,MC main
+class L1,MR,MP sup
