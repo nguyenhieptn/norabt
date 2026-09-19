@@ -1315,6 +1315,105 @@ td.mono {
   box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
 }
 
+/* --- Re-analyze Confirmation Popover --- */
+.reanalyze-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+/* Full-screen invisible backdrop — click outside = dismiss */
+.reanalyze-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: transparent;
+  cursor: default;
+}
+
+.reanalyze-confirm-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 1000;
+  width: 320px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px 20px 16px;
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.25),
+    0 12px 40px -4px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(251, 191, 36, 0.18);
+  animation: popover-in 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.reanalyze-confirm-icon {
+  font-size: 22px;
+  margin-bottom: 8px;
+  line-height: 1;
+}
+
+.reanalyze-confirm-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-1);
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+
+.reanalyze-confirm-body {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.6;
+  margin-bottom: 16px;
+  border-left: 3px solid var(--amber);
+  padding-left: 10px;
+}
+
+.reanalyze-confirm-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.reanalyze-btn-confirm {
+  background: var(--amber) !important;
+  color: #000 !important;
+  border-color: var(--amber) !important;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 7px 14px;
+  flex: 1;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.reanalyze-btn-confirm:hover {
+  background: #fbbf24 !important;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.4);
+}
+
+.reanalyze-btn-cancel {
+  font-size: 12px;
+  padding: 7px 12px;
+  color: var(--ink-2) !important;
+}
+
+.reanalyze-btn-cancel:hover {
+  color: var(--ink-1) !important;
+  background: var(--s0) !important;
+}
+
 /* --- Pager (Pagination) --- */
 .pager {
   display: flex;

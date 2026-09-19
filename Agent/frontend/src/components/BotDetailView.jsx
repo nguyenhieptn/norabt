@@ -1,11 +1,13 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 export default function BotDetailView({ code, onBack, isUser = false }) {
   const [htmlContent, setHtmlContent] = useState("");
   const [botMeta, setBotMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const containerRef = useRef(null);
+  const reAnalyzeBtnRef = useRef(null);
 
   const isUserView = isUser || window.location.hash.startsWith("#/user");
 
@@ -475,14 +477,55 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
                 ← Back to list
               </button>
               {botMeta.hasRefresh && (
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => loadReport(true)}
-                  title="Re-scan the latest data from OKX and recalculate from scratch"
-                >
-                  ⚡ Re-analyze
-                </button>
+                <div className="reanalyze-wrapper" style={{ position: "relative" }}>
+                  <button
+                    ref={reAnalyzeBtnRef}
+                    type="button"
+                    className="btn"
+                    onClick={() => setConfirmOpen((v) => !v)}
+                    title="Re-scan the latest data from OKX and recalculate from scratch"
+                  >
+                    ⚡ Re-analyze
+                  </button>
+
+                  {confirmOpen && (
+                    <>
+                      {/* backdrop trong suốt để click ngoài đóng popup */}
+                      <div
+                        className="reanalyze-backdrop"
+                        onClick={() => setConfirmOpen(false)}
+                      />
+                      <div className="reanalyze-confirm-popover" role="dialog" aria-modal="true">
+                        <div className="reanalyze-confirm-icon">⚡</div>
+                        <div className="reanalyze-confirm-title">Re-analyze this bot?</div>
+                        <div className="reanalyze-confirm-body">
+                          This will fetch live data from OKX and re-run all 10,000 Monte Carlo
+                          simulations from scratch. The current snapshot will be overwritten.
+                          This may take 30–60 seconds.
+                        </div>
+                        <div className="reanalyze-confirm-actions">
+                          <button
+                            type="button"
+                            className="btn reanalyze-btn-confirm"
+                            onClick={() => {
+                              setConfirmOpen(false);
+                              loadReport(true);
+                            }}
+                          >
+                            ⚡ Confirm re-analyze
+                          </button>
+                          <button
+                            type="button"
+                            className="btn reanalyze-btn-cancel"
+                            onClick={() => setConfirmOpen(false)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
             </div>
             <div className="report-head-divider" />

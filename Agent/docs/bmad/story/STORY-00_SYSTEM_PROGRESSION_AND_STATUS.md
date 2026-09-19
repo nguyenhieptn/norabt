@@ -6,7 +6,7 @@
 > **Status:** ACTIVE / OPERATIONAL  
 > **Methodology Version:** 2.4.0  
 > **Parent Scope:** NoraBT AI Risk Supervisor & Copier Guard  
-> **Updated:** 2026-09-18  
+> **Updated:** 2026-09-19  
 
 ---
 
@@ -32,6 +32,7 @@ timeline
     Phase 4 (16-17/09) : Nền tảng SPA : Thẻ tóm tắt Bot : Quyền Quản trị Admin : Đổi Sáng/Tối
     Phase 5 (17-18/09) : Nhận định Định tính : Bỏ nhãn AI thô : Popup Công thức Toán : Snapshot Banner
     Phase 6 (18/09)    : NORA BRUTAL AI TRADING : 70% OKX Fintech + 30% Neo-Brutalism : Màu Deep Slate Obsidian
+    Phase 7 (19/09)    : Chuyển toàn bộ sản phẩm sang tiếng Anh : Đổi LLM sang agy/Gemini : Gom core về một đường : Dọn kiến trúc
 ```
 
 ---
@@ -51,7 +52,7 @@ timeline
 - **Bối cảnh:** Cần mở rộng năng lực thẩm định của Nora thành một Agent Service có thể tích hợp vào hệ sinh thái AI của OKX (OKX AI Marketplace) và cho phép các AI Agent khác truy vấn dữ liệu.
 - **Hành động đã hoàn thành:**
   - Triển khai máy chủ **MCP Server (Model Context Protocol)** trên nền JSON-RPC 2.0.
-  - Công bố 5 công cụ chính: `assess_bot`, `list_assessed_bots`, `get_bot_assessment`, `check_readiness`, `list_available_markets`.
+  - Công bố 6 công cụ: `list_assets`, `list_bots`, `list_assessed_bots`, `get_assessment`, `assess_bot`, `get_market` (đối chiếu `@mcp.tool()` trong `Agent/backend/agent_server.py`).
   - Thiết kế cơ chế thanh toán vi mô **chuẩn x402** qua USDC trên mạng X Layer của OKX, bảo đảm tính minh bạch và kinh tế học token (Agent Economy).
   - Tích hợp lớp đệm **Redis Cache** (`norabt-agent-redis`) để tối ưu thời gian phản hồi từ 5s xuống dưới 50ms cho các truy vấn đọc lại.
 
@@ -115,7 +116,8 @@ timeline
 | **Web API Service (Port 8770)**| `OPERATIONAL` | 100% | `norabt-agent-web` | Phục vụ REST API & Server Render |
 | **React SPA Dashboard** | `OPERATIONAL` | 100% | Nginx / Web Bundle | Single-page App đầy đủ 3 phân hệ |
 | **Brutal AI Design System** | `OPERATIONAL` | 100% | Frontend & Backend | Hài hòa Deep Slate Obsidian |
-| **Bộ Kiểm thử Tự động** | `PASSED` | **99/99 PASS** | Host Pytest Suite | Không có hồi quy kỹ thuật |
+| **Bộ Kiểm thử Tự động** | `PASSED` | **1561/1561 PASS** | Host Pytest Suite | Không có hồi quy kỹ thuật |
+| **Nghiệm thu Đầu-Cuối** | `PASSED` | **17/17 ĐẠT** | `Agent/scripts/acceptance_check.py` | Chỉ kiểm hiện vật thật, không đọc log |
 
 ---
 
@@ -133,6 +135,37 @@ timeline
 4. **Hài Hòa Màu Sắc Giữa Header và Nội Dung:**
    - *Vấn đề:* Ban đầu Header dùng màu xanh neon và badge vàng quá chói, trong khi phần nội dung dùng nền đen tuyền và số liệu đỏ rực, gây cảm giác rời rạc, khó chịu khi nhìn lâu.
    - *Khắc phục:* Quy chuẩn toàn bộ hệ thống về bảng màu **Deep Slate Obsidian** (`#0B0E17`, `#101522`, `#151C2C`), hạ độ bão hòa của các số cảnh báo sang màu Rose `#FB7185` và Amber `#FBBF24`, tạo độ liền mạch 100%.
+
+---
+
+### Giai Đoạn 7: Quốc tế hoá, Hợp nhất Lõi & Dọn Kiến trúc (19/09/2026)
+
+- **Bối cảnh:** Agent niêm yết trên marketplace OKX toàn cầu nên mọi chuỗi
+  người dùng đọc phải là tiếng Anh. Đồng thời, quá trình rà soát phát hiện
+  hệ thống đã sinh ra nhiều đường xử lý song song cho cùng một việc.
+- **Hành động đã hoàn thành:**
+  - **Quốc tế hoá:** ~2.300 chuỗi hiển thị trên 60+ file. Chú thích và
+    docstring giữ tiếng Việt (hồ sơ thiết kế). Schema `bot_assessment.v2`
+    → `v3`, 13 khoá JSON đổi sang tiếng Anh.
+  - **Nhãn kết luận sang HAI TRỤC** (sụt vốn × chất lượng, 6 nhãn); thang
+    một chiều cũ (`AN TOÀN`/`TIỀM NĂNG`/`TIỀM ẨN`/`NGUY HIỂM`) bỏ hẳn.
+  - **Đổi LLM sang `agy` / `gemini-3.8-flash-medium`** với 5 cổng kiểm
+    duyệt (độ dài · độ dễ đọc · từ cấm · khoá số · ngữ nghĩa). Tri thức
+    chuẩn hoá lại theo đúng công thức engine tính — sửa 5 định nghĩa sai.
+    Lượt chấm 31 bot: 0 câu dự phòng; tối ưu 45 → 11 phút.
+  - **Gom 4 đường chấm-điểm-và-ghi về MỘT lõi.** `live/poller` từng trôi
+    khỏi hai đường kia theo ba hướng, trong đó nghiêm trọng nhất là mỗi
+    lượt poll thành công **xoá một đoạn nhận định**.
+  - **Sửa hai lỗi đang sống:** `persist()` ghi đè `index.json` khiến MCP
+    báo 30/31 bot "chưa được chấm"; và `rank_in_cohort` bị bịa thành 1 mỗi
+    lần chấm lại lẻ.
+  - **Bảy chỗ nội dung bị rơi** giữa chuỗi `cohort → store → data →
+    report_page` (core tính đủ, tầng trung gian đánh rơi khoá).
+  - **Dọn kiến trúc:** xoá 9 cây assessment song song (8,6 MB), log 9,5 MB,
+    5 bản sao lưu config, `ui-starter` (boilerplate), `web/concepts`
+    (mockup), mã chết (import/hằng số/phương thức/file), và sửa 6 tài liệu
+    mô tả sai hành vi hiện tại.
+- **Kiểm chứng:** 1561 test qua / 0 hỏng · nghiệm thu đầu-cuối 17/17 ĐẠT.
 
 ---
 
