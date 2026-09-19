@@ -145,7 +145,7 @@ class DataReportService:
             None,
         )
         if folder is None:
-            return row.model_copy(update={"blocking": ["chưa crawl"]})
+            return row.model_copy(update={"blocking": ["not crawled"]})
 
         overview = json.loads((folder / "overview.json").read_text(encoding="utf-8"))
         ledger = json.loads((folder / "trade_list.json").read_text(encoding="utf-8"))
@@ -158,23 +158,23 @@ class DataReportService:
 
         foreign = sum(1 for t in trades if str(t.get("uniqueCode", code)) != code)
         if foreign:
-            blocking.append(f"{foreign} lệnh của trader khác")
+            blocking.append(f"{foreign} trades belong to a different trader")
         if not trades:
-            blocking.append("không có lệnh đóng")
+            blocking.append("no closed trades")
         for field in TRADE_FIELDS:
             gaps = sum(1 for t in trades if t.get(field) in (None, ""))
             if not gaps:
                 continue
             (blocking if gaps == len(trades) else notes).append(
-                f"{gaps}/{len(trades)} lệnh trống {field}"
+                f"{gaps}/{len(trades)} trades missing {field}"
             )
         if not weekly:
-            blocking.append("không có chuỗi PnL tuần")
+            blocking.append("no weekly PnL series")
 
         profile_fields = ("aum", "pnl", "pnlRatio", "winRatio")
         missing_profile = [f for f in profile_fields if overview.get(f) in (None, "")]
         if missing_profile:
-            blocking.append("overview thiếu " + ",".join(missing_profile))
+            blocking.append("overview missing " + ",".join(missing_profile))
 
         on_asset = sum(
             1
@@ -182,7 +182,7 @@ class DataReportService:
             if str(t.get("instId", "")).split("-")[0].upper() == underlying
         )
         if on_asset == 0:
-            blocking.append(f"không có lệnh nào trên {underlying}")
+            blocking.append(f"no trades on {underlying}")
 
         last_close = max((int(t.get("closeTime") or 0) for t in trades), default=0)
         age_days = (now - last_close) / 86_400_000 if last_close else None
@@ -190,11 +190,11 @@ class DataReportService:
             age_days is not None and age_days <= ACTIVE_WITHIN_DAYS
         )
         if not active:
-            blocking.append("không còn hoạt động")
+            blocking.append("no longer active")
 
         failures = (overview.get("provenance") or {}).get("fetch_failures") or []
         if failures:
-            notes.append(f"{len(failures)} request phải thử lại")
+            notes.append(f"{len(failures)} requests had to be retried")
 
         return row.model_copy(
             update={
@@ -243,7 +243,7 @@ class DataReportService:
         bots: List[BotDataRow] = []
         for record in records:
             slot = f"{record['venue']}/{record['symbol']}"
-            for role, key in (("CHẠY NGON", "top"), ("YẾU HƠN", "mid")):
+            for role, key in (("LEAD", "top"), ("LAGGARD", "mid")):
                 entry = record.get(key)
                 if entry and (not only_codes or entry["code"] in only_codes):
                     bots.append(
@@ -260,8 +260,8 @@ class DataReportService:
             ),
             bots_complete=sum(1 for b in bots if not b.blocking),
             notes=[
-                "Bước này chỉ kiểm kê dữ liệu; mọi diễn giải nằm ở bước 2.",
-                "CHẶN = thiếu thứ mà phép tính rủi ro không chạy được nếu không có.",
-                "GHI CHÚ = khiếm khuyết OKX để trống, ghi rõ số lượng, không tự điền.",
+                "This step only inventories data; all interpretation happens in step 2.",
+                "BLOCKING = missing something the risk math cannot run without.",
+                "NOTES = a gap OKX itself leaves blank; the count is reported, not filled in.",
             ],
         )

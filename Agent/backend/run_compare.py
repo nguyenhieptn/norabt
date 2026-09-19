@@ -50,6 +50,9 @@ from Agent.backend.okx.client import OkxClient
 from Agent.backend.qc.reporting.cohort import BotEvaluationRow, CohortAssessmentService
 from Agent.backend.qc.reporting.render import _cell, _header, _stamp, _wrap
 from Agent.backend.run_report import (
+    PRODUCTION_SIMULATION_HORIZON,
+    PRODUCTION_SIMULATION_ITERATIONS,
+    PRODUCTION_SIMULATION_SEED,
     apply_live_source,
     build_live_sources,
     default_selection_codes,
@@ -220,22 +223,22 @@ def compare_same_data(
 
 
 def render_same_data(cmp: SameDataComparison) -> str:
-    columns = (("TRƯỜNG", 42), ("QUA FILE", 34), ("QUA NGUỒN GIẢ", 34))
+    columns = (("FIELD", 42), ("VIA FILE", 34), ("VIA FAKE SOURCE", 34))
     lines = _header(
         columns,
-        "SO SÁNH KIỂU A — CÙNG DỮ LIỆU, HAI ĐƯỜNG XỬ LÝ",
+        "TYPE A COMPARISON -- SAME DATA, TWO PROCESSING PATHS",
         f"Bot {cmp.unique_code} ({cmp.asset}/{cmp.venue_type}) | "
-        "FileBotDataSource vs BotDataSource giả trong bộ nhớ, cùng một payload",
+        "FileBotDataSource vs an in-memory fake BotDataSource, same payload",
     )
     width = len(lines[4])
     if not cmp.diffs:
         lines.append(
-            "Khớp tuyệt đối trên toàn bộ BotResult — không lệch một trường nào."
+            "Exact match across the whole BotResult -- no field differs."
         )
     else:
         for path, file_value, fake_value in cmp.diffs:
             tag = (
-                " (chấp nhận: trường thời gian)"
+                " (accepted: time field)"
                 if _top_field(path) in SAME_DATA_TIME_FIELDS
                 else " !!"
             )
@@ -251,16 +254,17 @@ def render_same_data(cmp: SameDataComparison) -> str:
     lines.append("-" * width)
     if cmp.identical:
         tolerated = len(cmp.diffs)
-        extra = f" ({tolerated} trường thời gian được bỏ qua)" if tolerated else ""
+        extra = f" ({tolerated} time fields ignored)" if tolerated else ""
         lines.append(
-            "KẾT LUẬN: ĐÚNG — cùng một payload cho ra BotResult giống hệt nhau qua "
-            f"cả hai đường{extra}. Kiến trúc nguồn dữ liệu (BotDataSource) hoạt động đúng."
+            "CONCLUSION: PASS -- the same payload produces an identical BotResult "
+            f"through both paths{extra}. The data-source architecture (BotDataSource) "
+            "works correctly."
         )
     else:
         lines.append(
-            f"KẾT LUẬN: SAI — {len(cmp.fatal_diffs)} trường lệch ngoài nhóm thời gian. "
-            "Đây là BUG trong kiến trúc nguồn dữ liệu (cùng một payload phải ra cùng "
-            "một kết quả), không phải do dữ liệu trôi."
+            f"CONCLUSION: FAIL -- {len(cmp.fatal_diffs)} field(s) differ outside the "
+            "time-field group. This is a BUG in the data-source architecture (the same "
+            "payload must produce the same result), not data drift."
         )
     return "\n".join(lines)
 
@@ -289,24 +293,24 @@ def run_same_data(args: argparse.Namespace) -> int:
     venue_type, asset = _locate_bot_folder(data_dir, code)
     if asset is None:
         print(
-            f"Không tìm thấy thư mục đã crawl cho mã {code} dưới {data_dir} "
-            "(cần biết bot này thuộc asset/venue nào để gọi get_bot_result).",
+            f"No crawled folder found for code {code} under {data_dir} "
+            "(need to know this bot's asset/venue to call get_bot_result).",
             file=sys.stderr,
         )
         return 1
-    print(f"[same-data] Bot {code} thuộc {venue_type}/{asset}.", file=sys.stderr)
-    print(f"[same-data] Đang gọi OKX lấy overview cho {code}...", file=sys.stderr)
+    print(f"[same-data] Bot {code} belongs to {venue_type}/{asset}.", file=sys.stderr)
+    print(f"[same-data] Calling OKX for {code}'s overview...", file=sys.stderr)
     client = OkxClient()
     live_source = LiveBotDataSource(client=client)
     try:
         overview = live_source.get_overview(code)
-        print(f"[same-data] Đang gọi OKX lấy sổ lệnh cho {code}...", file=sys.stderr)
+        print(f"[same-data] Calling OKX for {code}'s ledger...", file=sys.stderr)
         ledger = live_source.get_ledger(code)
     except BotSourceError as exc:
-        print(f"Không lấy được dữ liệu live cho {code}: {exc}", file=sys.stderr)
+        print(f"Could not fetch live data for {code}: {exc}", file=sys.stderr)
         return 1
     if overview is None or ledger is None:
-        print(f"OKX không trả về dữ liệu cho mã {code}.", file=sys.stderr)
+        print(f"OKX returned no data for code {code}.", file=sys.stderr)
         return 1
 
     now_ms = int(time.time() * 1000)
@@ -329,10 +333,10 @@ def run_same_data(args: argparse.Namespace) -> int:
 # Kiểu B -- live now vs the on-disk crawl, classified rather than equated.
 # --------------------------------------------------------------------------- #
 
-GROUP_SAME = "GIỐNG"
-GROUP_TIME = "THỜI GIAN"
-GROUP_DRIFT = "DỮ LIỆU TRÔI"
-GROUP_ANOMALY = "BẤT THƯỜNG"
+GROUP_SAME = "MATCH"
+GROUP_TIME = "TIME"
+GROUP_DRIFT = "DATA DRIFT"
+GROUP_ANOMALY = "ANOMALY"
 GROUP_ORDER = (GROUP_SAME, GROUP_TIME, GROUP_DRIFT, GROUP_ANOMALY)
 
 # Fields that drift purely with the calendar (OKX's own leadDays counter keeps
@@ -392,7 +396,7 @@ def classify_bot_comparison(
             nick_name=nick_name,
             group=GROUP_ANOMALY,
             explanation=(
-                "Một trong hai đường không lấy được dữ liệu để đánh giá "
+                "One of the two paths could not fetch data to evaluate "
                 f"(file: {file_row.error or 'ok'}; live: {live_row.error or 'ok'})."
             ),
             file_tier=file_row.risk_tier,
@@ -416,7 +420,7 @@ def classify_bot_comparison(
             unique_code=file_row.unique_code,
             nick_name=nick_name,
             group=GROUP_SAME,
-            explanation="Khớp tuyệt đối.",
+            explanation="Exact match.",
             file_tier=file_row.risk_tier,
             live_tier=live_row.risk_tier,
             tier_changed=tier_changed,
@@ -431,8 +435,8 @@ def classify_bot_comparison(
             nick_name=nick_name,
             group=GROUP_TIME,
             explanation=(
-                f"Chỉ lệch {', '.join(sorted(top_fields))} — do thời gian trôi "
-                "(OKX tự tăng mỗi ngày), không phải do dữ liệu."
+                f"Only {', '.join(sorted(top_fields))} differs -- due to time "
+                "passing (OKX increments it every day), not the data."
             ),
             file_tier=file_row.risk_tier,
             live_tier=live_row.risk_tier,
@@ -447,8 +451,9 @@ def classify_bot_comparison(
             nick_name=nick_name,
             group=GROUP_DRIFT,
             explanation=(
-                f"Chỉ lệch ở thị trường ({', '.join(changed_market)}) — thị trường đã "
-                "đổi kể từ lúc crawl file, không phải bug ở phía bot."
+                f"Only the market differs ({', '.join(changed_market)}) -- the "
+                "market has changed since the file was crawled, not a bug on the "
+                "bot side."
             ),
             file_tier=file_row.risk_tier,
             live_tier=live_row.risk_tier,
@@ -463,8 +468,9 @@ def classify_bot_comparison(
             nick_name=nick_name,
             group=GROUP_DRIFT,
             explanation=(
-                f"Bot đã khớp thêm {trade_delta:+d} lệnh kể từ lúc crawl file — "
-                "giải thích được sai khác ở các chỉ số hiệu suất/rủi ro bên dưới."
+                f"The bot closed {trade_delta:+d} more trades since the file was "
+                "crawled -- this explains the differences in the performance/risk "
+                "metrics below."
             ),
             file_tier=file_row.risk_tier,
             live_tier=live_row.risk_tier,
@@ -477,9 +483,9 @@ def classify_bot_comparison(
         nick_name=nick_name,
         group=GROUP_ANOMALY,
         explanation=(
-            "Số lệnh (trade_count) giống hệt nhau nhưng các chỉ số khác lại lệch "
-            f"({', '.join(sorted(top_fields))}) mà không có lời giải bằng thời gian, "
-            "thị trường hay số lệnh mới — cần soi kỹ."
+            "trade_count is identical but other metrics differ "
+            f"({', '.join(sorted(top_fields))}) with no explanation from time, "
+            "market or new trades -- needs a closer look."
         ),
         file_tier=file_row.risk_tier,
         live_tier=live_row.risk_tier,
@@ -504,7 +510,7 @@ def compare_cohorts(
                     unique_code=code,
                     nick_name=row.nick_name if row else code,
                     group=GROUP_ANOMALY,
-                    explanation=f"Bot chỉ xuất hiện ở đường {only_where}, không có ở đường kia.",
+                    explanation=f"Bot only appears on the {only_where} path, not the other one.",
                     file_tier=file_row.risk_tier if file_row else None,
                     live_tier=live_row.risk_tier if live_row else None,
                     tier_changed=True,
@@ -520,22 +526,22 @@ def render_live_vs_file(
 ) -> str:
     columns = (
         ("BOT", 22),
-        ("NHÓM", 14),
+        ("GROUP", 14),
         ("TIER FILE", 11),
         ("TIER LIVE", 11),
-        ("GIẢI THÍCH", 58),
+        ("EXPLANATION", 58),
     )
     lines = _header(
         columns,
-        "SO SÁNH KIỂU B — LIVE BÂY GIỜ vs FILE ĐÃ CRAWL (BƯỚC 3)",
-        f"{_stamp(generated_at_ms)} | {len(comparisons)} bot | "
-        "phân loại: GIỐNG / THỜI GIAN / DỮ LIỆU TRÔI / BẤT THƯỜNG",
+        "TYPE B COMPARISON -- LIVE NOW vs CRAWLED FILE (STEP 3)",
+        f"{_stamp(generated_at_ms)} | {len(comparisons)} bots | "
+        "groups: MATCH / TIME / DATA DRIFT / ANOMALY",
     )
     width = len(lines[4])
     counts = {g: 0 for g in GROUP_ORDER}
     for cmp in comparisons:
         counts[cmp.group] = counts.get(cmp.group, 0) + 1
-        mark = " ⚠ ĐỔI XẾP LOẠI" if cmp.tier_changed else ""
+        mark = " ⚠ TIER CHANGED" if cmp.tier_changed else ""
         lines.append(
             " ".join(
                 [
@@ -553,31 +559,31 @@ def render_live_vs_file(
 
     lines.append("-" * width)
     lines.append(
-        "Tổng hợp: " + " · ".join(f"{g} {counts.get(g, 0)}" for g in GROUP_ORDER)
+        "Summary: " + " · ".join(f"{g} {counts.get(g, 0)}" for g in GROUP_ORDER)
     )
     changed = [c for c in comparisons if c.tier_changed]
     if changed:
-        lines.append(f"ĐỔI XẾP LOẠI GIỮA HAI ĐƯỜNG ({len(changed)} bot):")
+        lines.append(f"TIER CHANGED BETWEEN THE TWO PATHS ({len(changed)} bots):")
         for c in changed:
             lines.append(
-                f"  - {c.nick_name} ({c.unique_code}): {c.file_tier} → {c.live_tier}; {c.explanation}"
+                f"  - {c.nick_name} ({c.unique_code}): {c.file_tier} -> {c.live_tier}; {c.explanation}"
             )
     else:
-        lines.append("Không có bot nào đổi xếp loại (risk_tier) giữa hai đường.")
+        lines.append("No bot changed risk_tier between the two paths.")
 
     anomalies = counts.get(GROUP_ANOMALY, 0)
     lines.append("=" * width)
     if anomalies:
         lines.append(
-            f"KẾT LUẬN: kiến trúc live CHƯA tương đương hoàn toàn với file — "
-            f"{anomalies}/{len(comparisons)} bot rơi vào nhóm BẤT THƯỜNG, cần soi kỹ "
-            "trước khi tin tưởng kết quả live."
+            f"CONCLUSION: the live architecture is NOT yet fully equivalent to file -- "
+            f"{anomalies}/{len(comparisons)} bots fall into the ANOMALY group, needing a "
+            "closer look before trusting the live results."
         )
     else:
         lines.append(
-            "KẾT LUẬN: kiến trúc live cho kết quả tương đương với file trên toàn bộ "
-            f"{len(comparisons)} bot — mọi khác biệt đều giải thích được bằng thời gian "
-            "trôi hoặc dữ liệu trôi; nhóm BẤT THƯỜNG rỗng."
+            "CONCLUSION: the live architecture gives results equivalent to file across "
+            f"all {len(comparisons)} bots -- every difference is explained by time or "
+            "data drift; the ANOMALY group is empty."
         )
     return "\n".join(lines)
 
@@ -592,11 +598,11 @@ def run_live_vs_file(args: argparse.Namespace) -> int:
     # runs that are supposed to be compared apples-to-apples.
     now_ms = int(time.time() * 1000)
 
-    label = f"{len(only_codes)} bot đã chọn" if only_codes else "toàn bộ bot đã crawl"
-    print(f"[live-vs-file] So sánh trên {label}.", file=sys.stderr)
+    label = f"{len(only_codes)} selected bots" if only_codes else "all crawled bots"
+    print(f"[live-vs-file] Comparing on {label}.", file=sys.stderr)
 
     print(
-        "[live-vs-file] [FILE] Đang chấm bằng dữ liệu đã crawl sẵn...", file=sys.stderr
+        "[live-vs-file] [FILE] Scoring with already-crawled data...", file=sys.stderr
     )
     file_cohort = CohortAssessmentService(data_dir, mode).scan(
         as_of_ms=now_ms,
@@ -606,7 +612,7 @@ def run_live_vs_file(args: argparse.Namespace) -> int:
         only_codes=only_codes,
     )
 
-    print("[live-vs-file] [LIVE] Đang chấm trực tiếp qua OKX...", file=sys.stderr)
+    print("[live-vs-file] [LIVE] Scoring directly against OKX...", file=sys.stderr)
     bot_source, market_source = build_live_sources()
     live_service = CohortAssessmentService(data_dir, mode)
     apply_live_source(
@@ -625,12 +631,12 @@ def run_live_vs_file(args: argparse.Namespace) -> int:
             only_codes=only_codes,
         )
     except BotSourceError as exc:
-        print(f"Lỗi khi chấm live qua OKX: {exc}", file=sys.stderr)
+        print(f"Error scoring live via OKX: {exc}", file=sys.stderr)
         return 1
     except MarketDataUnavailableError as exc:
         # Defensive only -- CohortAssessmentService._resolve_market already
         # catches this per bot; see run_report.py's own note on the same point.
-        print(f"Lỗi thị trường khi chấm live qua OKX: {exc}", file=sys.stderr)
+        print(f"Market error scoring live via OKX: {exc}", file=sys.stderr)
         return 1
 
     comparisons = compare_cohorts(file_cohort.rows, live_cohort.rows)
@@ -646,10 +652,11 @@ def run_live_vs_file(args: argparse.Namespace) -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Chứng minh kiến trúc nguồn dữ liệu live (Agent/backend/sources) "
-            "hoạt động đúng, bằng hai phép so sánh: same-data (cùng dữ liệu, "
-            "hai đường xử lý phải khớp tuyệt đối) và live-vs-file (live bây "
-            "giờ so với file đã crawl, phân loại khác biệt thay vì đòi khớp)."
+            "Prove the live data-source architecture (Agent/backend/sources) "
+            "works correctly, via two comparisons: same-data (same data, two "
+            "processing paths must match exactly) and live-vs-file (live now "
+            "vs a crawled file, classifying differences instead of demanding "
+            "a match)."
         )
     )
     parser.add_argument(
@@ -660,24 +667,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--bot",
         help=(
-            "uniqueCode. Bắt buộc với --mode same-data. Với --mode "
-            "live-vs-file, thu hẹp so sánh về đúng một bot thay vì cả 30 bot "
-            "đã chọn."
+            "uniqueCode. Required with --mode same-data. With --mode "
+            "live-vs-file, narrows the comparison to a single bot instead of "
+            "all 30 selected bots."
         ),
     )
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--iterations", type=int, default=10_000)
+    # Cùng hằng số lượt chấm thật dùng, không chép lại con số: hai bản viết
+    # tay bằng nhau hôm nay vẫn trôi khỏi nhau ngày mai, và khi đó bản so
+    # sánh "file vs live" sẽ đo bằng thước khác thước sản xuất mà không ai
+    # thấy.
+    parser.add_argument("--seed", type=int, default=PRODUCTION_SIMULATION_SEED)
+    parser.add_argument(
+        "--iterations", type=int, default=PRODUCTION_SIMULATION_ITERATIONS
+    )
     parser.add_argument(
         "--horizon",
         type=int,
-        default=None,
-        help="số lệnh mỗi kịch bản Monte Carlo; bỏ trống dùng đúng số lệnh của bot",
+        default=PRODUCTION_SIMULATION_HORIZON,
+        help="trades per Monte Carlo scenario; leave blank to use the bot's own trade count",
     )
     args = parser.parse_args(argv)
 
     if args.mode == "same-data":
         if not args.bot:
-            parser.error("--mode same-data cần --bot <uniqueCode>")
+            parser.error("--mode same-data requires --bot <uniqueCode>")
         return run_same_data(args)
     return run_live_vs_file(args)
 

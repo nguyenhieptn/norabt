@@ -334,9 +334,9 @@ def usd_price_to_atomic_amount(
     try:
         value = Decimal(text)
     except InvalidOperation as exc:
-        raise ValueError(f"usd_price={usd_price!r} không phải số hợp lệ") from exc
+        raise ValueError(f"usd_price={usd_price!r} is not a valid number") from exc
     if value < 0:
-        raise ValueError(f"usd_price={usd_price!r} phải >= 0")
+        raise ValueError(f"usd_price={usd_price!r} must be >= 0")
     atomic = (value * (Decimal(10) ** decimals)).to_integral_value(
         rounding=ROUND_HALF_UP
     )
@@ -400,7 +400,7 @@ class PaymentRequirements:
             )
         except KeyError as exc:
             raise ValueError(
-                f"PaymentRequirements thiếu trường bắt buộc: {exc}"
+                f"PaymentRequirements is missing a required field: {exc}"
             ) from exc
 
 
@@ -472,27 +472,28 @@ class PaymentPayload:
         actually check that.
         """
         if not header_value or not header_value.strip():
-            raise ValueError("PAYMENT-SIGNATURE header rỗng")
+            raise ValueError("PAYMENT-SIGNATURE header is empty")
         try:
             raw = base64.b64decode(header_value.encode("ascii"), validate=True)
         except (binascii.Error, ValueError) as exc:
             raise ValueError(
-                f"PAYMENT-SIGNATURE header không phải base64 hợp lệ: {exc}"
+                f"PAYMENT-SIGNATURE header is not valid base64: {exc}"
             ) from exc
         try:
             data = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError(
-                f"PAYMENT-SIGNATURE header giải mã base64 xong nhưng không phải "
-                f"JSON hợp lệ: {exc}"
+                f"PAYMENT-SIGNATURE header decoded from base64 but is not "
+                f"valid JSON: {exc}"
             ) from exc
         if not isinstance(data, dict):
             raise ValueError(
-                "PAYMENT-SIGNATURE header giải mã ra không phải JSON object"
+                "PAYMENT-SIGNATURE header decoded to something that is not "
+                "a JSON object"
             )
         if "accepted" not in data:
             raise ValueError(
-                "PAYMENT-SIGNATURE thiếu trường 'accepted' (PaymentRequirements)"
+                "PAYMENT-SIGNATURE is missing the 'accepted' field (PaymentRequirements)"
             )
         return cls(
             payload=dict(data.get("payload") or {}),
@@ -520,19 +521,20 @@ def build_payment_requirements(
     spec = TOOL_PRICING.get(tool_name)
     if spec is None:
         raise ValueError(
-            f"tool_name={tool_name!r} không có trong TOOL_PRICING; chỉ 6 tool "
-            f"của agent_server.py mới được khai giá: {sorted(TOOL_PRICING)}"
+            f"tool_name={tool_name!r} is not in TOOL_PRICING; only the 6 "
+            f"tools in agent_server.py have a declared price: {sorted(TOOL_PRICING)}"
         )
     settings = settings or X402Settings.from_env()
     if not settings.pay_to_address:
         raise ValueError(
-            "Thiếu X402_PAY_TO_ADDRESS (địa chỉ ví EVM nhận tiền) -- chưa thể "
-            "dựng PaymentRequirements thật; xem Agent/docs/okx_marketplace.md"
+            "Missing X402_PAY_TO_ADDRESS (the EVM wallet address that "
+            "receives payment) -- cannot build real PaymentRequirements "
+            "yet; see Agent/docs/okx_marketplace.md"
         )
     if not settings.asset_address:
         raise ValueError(
-            "Thiếu X402_ASSET_ADDRESS (địa chỉ hợp đồng token thanh toán, ví "
-            "dụ USDC trên X Layer) -- xem Agent/docs/okx_marketplace.md"
+            "Missing X402_ASSET_ADDRESS (the payment token's contract "
+            "address, e.g. USDC on X Layer) -- see Agent/docs/okx_marketplace.md"
         )
     amount = usd_price_to_atomic_amount(spec.usd_price, settings.asset_decimals)
     return PaymentRequirements(
@@ -673,28 +675,28 @@ def _local_requirements_mismatch(
     """
     if accepted.scheme != requirements.scheme:
         return (
-            f"scheme không khớp: client dùng {accepted.scheme!r}, server yêu "
-            f"cầu {requirements.scheme!r}"
+            f"scheme mismatch: client used {accepted.scheme!r}, server "
+            f"requires {requirements.scheme!r}"
         )
     if accepted.network != requirements.network:
         return (
-            f"network không khớp: client dùng {accepted.network!r}, server "
-            f"yêu cầu {requirements.network!r}"
+            f"network mismatch: client used {accepted.network!r}, server "
+            f"requires {requirements.network!r}"
         )
     if accepted.asset != requirements.asset:
         return (
-            f"token thanh toán (asset) không khớp: client dùng "
-            f"{accepted.asset!r}, server yêu cầu {requirements.asset!r}"
+            f"payment token (asset) mismatch: client used "
+            f"{accepted.asset!r}, server requires {requirements.asset!r}"
         )
     if accepted.amount != requirements.amount:
         return (
-            f"số tiền (amount) không khớp: client trả {accepted.amount!r}, "
-            f"server yêu cầu {requirements.amount!r}"
+            f"amount mismatch: client paid {accepted.amount!r}, "
+            f"server requires {requirements.amount!r}"
         )
     if accepted.pay_to != requirements.pay_to:
         return (
-            f"địa chỉ nhận tiền (payTo) không khớp: client gửi tới "
-            f"{accepted.pay_to!r}, server yêu cầu {requirements.pay_to!r}"
+            f"payTo address mismatch: client sent to "
+            f"{accepted.pay_to!r}, server requires {requirements.pay_to!r}"
         )
     return None
 
@@ -841,14 +843,14 @@ def verify_payment(
     # env read.
     if not settings.enabled:
         raise RuntimeError(
-            "x402 đang TẮT (X402_ENABLED=false, mặc định) -- không được gọi "
-            "verify_payment() khi tính năng chưa bật; xem "
-            "Agent/docs/okx_marketplace.md"
+            "x402 is OFF (X402_ENABLED=false, the default) -- "
+            "verify_payment() must not be called while the feature is "
+            "disabled; see Agent/docs/okx_marketplace.md"
         )
     if not payment_signature_header:
         raise ValueError(
-            "Thiếu PAYMENT-SIGNATURE header -- client chưa gửi bằng chứng "
-            "thanh toán nào để verify"
+            "Missing PAYMENT-SIGNATURE header -- the client did not send "
+            "any proof of payment to verify"
         )
     # Decoding is real (not a stub): it proves the header is well-formed
     # JSON shaped like a PaymentPayload. It proves nothing about payment.
@@ -856,6 +858,11 @@ def verify_payment(
 
     missing = settings.missing_for_real_payments
     if missing:
+        # NOTE ON LANGUAGE: this string is deliberately left in Vietnamese.
+        # Agent/test/test_payments.py::test_verify_payment_raises_config_error_when_okx_credentials_missing
+        # asserts `"TUYỆT ĐỐI không được coi như đã thanh toán" in message`
+        # verbatim, and that test file is out of scope for this translation
+        # pass; translating this string would silently break it.
         raise X402ConfigError(
             "x402 đang BẬT nhưng thiếu cấu hình bắt buộc để verify thanh toán "
             f"thật: {', '.join(missing)}. TUYỆT ĐỐI không được coi như đã "
@@ -878,7 +885,8 @@ def verify_payment(
                 is_valid=False,
                 invalid_reason="replay",
                 invalid_message=(
-                    "PAYMENT-SIGNATURE này đã được dùng để thanh toán trước đó"
+                    "This PAYMENT-SIGNATURE has already been used for a "
+                    "previous payment"
                 ),
             )
 
@@ -895,13 +903,17 @@ def verify_payment(
         # the same three values), but a client swapped in by a caller/test
         # could still raise this -- treated the same as any other config gap.
         raise X402ConfigError(
-            f"Thiếu credential khi gọi facilitator OKX: {exc}"
+            f"Missing credentials when calling the OKX facilitator: {exc}"
         ) from exc
     except OkxApiError as exc:
         raise X402FacilitatorError(
-            f"Facilitator OKX trả lỗi khi verify thanh toán: {exc}"
+            f"OKX facilitator returned an error while verifying payment: {exc}"
         ) from exc
     except OkxTransportError as exc:
+        # NOTE: this string is deliberately left in Vietnamese. It is
+        # asserted verbatim by test_payments.py::test_verify_payment_raises_on_facilitator_transport_error
+        # via `pytest.raises(..., match="mạng lỗi hoặc timeout")`. Translating
+        # it would break that test; Agent/test/ is out of scope for this change.
         raise X402FacilitatorError(
             f"Không gọi được facilitator OKX để verify thanh toán (mạng lỗi "
             f"hoặc timeout): {exc}"
@@ -910,8 +922,8 @@ def verify_payment(
     verdict = _extract_verify_verdict(raw)
     if verdict is None:
         raise X402FacilitatorError(
-            "Facilitator trả về dữ liệu không đúng định dạng VerifyResponse "
-            f"(thiếu hoặc sai kiểu trường 'isValid'): {raw!r}"
+            "Facilitator returned data that is not shaped like a "
+            f"VerifyResponse (missing or wrong type for field 'isValid'): {raw!r}"
         )
     is_valid, invalid_reason, invalid_message, payer = verdict
     if not is_valid:
@@ -933,8 +945,8 @@ def verify_payment(
                 is_valid=False,
                 invalid_reason="replay",
                 invalid_message=(
-                    "PAYMENT-SIGNATURE này vừa được dùng bởi một yêu cầu khác "
-                    "(race điều kiện phát lại)"
+                    "This PAYMENT-SIGNATURE was just used by another request "
+                    "(replay race condition)"
                 ),
             )
         _used_payment_fingerprints[fingerprint] = time.monotonic() + _REPLAY_TTL_SECONDS

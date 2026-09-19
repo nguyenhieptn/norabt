@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Nora Dispatch — Báo Cáo Điều Tra: Pure-Symbol-Yarrow</title>
+  <link rel="stylesheet" href="../tokens.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* Reset & Base Setup */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg, #0b0f19);
+      color: var(--text, #f8fafc);
+      font-family: var(--sans, 'Inter', sans-serif);
+      line-height: 1.7;
+      font-size: 16px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Editorial Masthead */
+    .masthead {
+      border-bottom: 1px solid var(--border, #1e293b);
+      background: rgba(11, 15, 25, 0.95);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(12px);
+    }
+    .masthead-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .masthead-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .masthead-logo {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-weight: 700;
+      font-size: 1.15rem;
+      letter-spacing: 0.05em;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .logo-badge {
+      background: #00f0ff;
+      color: #000;
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: var(--mono, monospace);
+      font-weight: 700;
+    }
+    .masthead-meta {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-family: var(--mono, monospace);
+      font-size: 0.78rem;
+      color: var(--muted, #94a3b8);
+    }
+    .anchor-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      color: #00f0ff;
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+    .anchor-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #00f0ff;
+      box-shadow: 0 0 8px #00f0ff;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    /* Layout Wrapper */
+    .article-container {
+      max-width: 1140px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 48px;
+      position: relative;
+    }
+
+    /* Main Editorial Body */
+    .article-main {
+      max-width: 740px;
+    }
+    .kicker {
+      font-family: var(--mono, monospace);
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #f43f5e;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .headline {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: clamp(2.2rem, 3.2vw, 2.9rem);
+      font-weight: 700;
+      line-height: 1.18;
+      letter-spacing: -0.02em;
+      color: #ffffff;
+      margin-bottom: 16px;
+    }
+    .standfirst {
+      font-size: 1.18rem;
+      line-height: 1.6;
+      color: #cbd5e1;
+      font-weight: 400;
+      margin-bottom: 24px;
+      border-left: 3px solid #f43f5e;
+      padding-left: 16px;
+    }
+    .byline-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--border, #1e293b);
+      border-bottom: 1px solid var(--border, #1e293b);
+      padding: 12px 0;
+      margin-bottom: 32px;
+      font-size: 0.82rem;
+      color: var(--muted, #94a3b8);
+      font-family: var(--mono, monospace);
+    }
+    .byline-author {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .author-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #00f0ff, #8b5cf6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: #000;
+      font-size: 0.7rem;
+    }
+
+    /* Article Content Typography */
+    .prose p {
+      margin-bottom: 20px;
+      color: #e2e8f0;
+      font-size: 1.05rem;
+      line-height: 1.8;
+    }
+    .prose p.lead {
+      font-size: 1.15rem;
+      color: #f8fafc;
+      font-weight: 400;
+      line-height: 1.75;
+    }
+    .dropcap::first-letter {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 3.8rem;
+      float: left;
+      line-height: 0.8;
+      margin: 6px 12px 0 0;
+      color: #00f0ff;
+      font-weight: 700;
+    }
+
+    .section-title {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 1.45rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin: 36px 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-title::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 18px;
+      background: #00f0ff;
+      border-radius: 2px;
+    }
+
+    /* Pull Quote Box */
+    .pull-quote {
+      margin: 32px 0;
+      padding: 24px;
+      background: rgba(244, 63, 94, 0.06);
+      border-left: 4px solid #f43f5e;
+      border-radius: 0 12px 12px 0;
+    }
+    .pull-quote blockquote {
+      font-family: 'Newsreader', Georgia, serif;
+      font-size: 1.35rem;
+      font-style: italic;
+      color: #fecdd3;
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+    .pull-quote cite {
+      font-family: var(--mono, monospace);
+      font-size: 0.8rem;
+      color: #fda4af;
+      font-style: normal;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* The Fact-Check Box (Bóc Mẽ Sự Thật) */
+    .fact-check-box {
+      background: #111726;
+      border: 1px solid #1e293b;
+      border-radius: 14px;
+      padding: 24px;
+      margin: 32px 0;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+    .fact-check-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #1e293b;
+    }
+    .fact-check-title {
+      font-family: var(--mono, monospace);
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #00f0ff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .fact-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .fact-card {
+      background: rgba(17, 23, 38, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 16px;
+      border-radius: 10px;
+    }
+    .fact-card.illusion {
+      border-top: 3px solid #64748b;
+    }
+    .fact-card.reality {
+      border-top: 3px solid #f43f5e;
+      background: rgba(244, 63, 94, 0.05);
+    }
+    .fact-label {
+      font-size: 0.75rem;
+      font-family: var(--mono, monospace);
+      text-transform: uppercase;
+      color: var(--muted, #94a3b8);
+      margin-bottom: 6px;
+    }
+    .fact-value {
+      font-family: var(--mono, monospace);
+      font-size: 1.6rem;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .fact-sub {
+      font-size: 0.8rem;
+      color: var(--muted, #94a3b8);
+      margin-top: 6px;
+    }
+
+    /* VETO Alert Callout */
+    .veto-callout {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(139, 92, 246, 0.1));
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      padding: 24px;
+      border-radius: 14px;
+      margin: 32px 0;
+      position: relative;
+      overflow: hidden;
+    }
+    .veto-callout::before {
+      content: 'VETO';
+      position: absolute;
+      right: -10px;
+      bottom: -15px;
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 5rem;
+      font-weight: 900;
+      color: rgba(239, 68, 68, 0.06);
+      pointer-events: none;
+    }
+    .veto-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #ef4444;
+      color: #fff;
+      font-family: var(--mono, monospace);
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+    }
+    .veto-desc {
+      font-size: 0.95rem;
+      color: #fecdd3;
+      line-height: 1.6;
+    }
+
+    /* Infographic Bar Chart */
+    .infographic-card {
+      background: #111726;
+      border: 1px solid #1e293b;
+      border-radius: 14px;
+      padding: 20px;
+      margin: 28px 0;
+    }
+    .chart-bar-item {
+      margin-bottom: 16px;
+    }
+    .chart-bar-header {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--mono, monospace);
+      font-size: 0.82rem;
+      margin-bottom: 6px;
+    }
+    .bar-track {
+      height: 10px;
+      background: #1e293b;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 5px;
+      transition: width 1s ease;
+    }
+
+    /* Sticky Sidebar (Scorecard & Action) */
+    .sticky-sidebar {
+      position: sticky;
+      top: 80px;
+      height: fit-content;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .scorecard-card {
+      background: #111726;
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+    .scorecard-header {
+      font-family: var(--mono, monospace);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted, #94a3b8);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .hero-gauge-container {
+      text-align: center;
+      padding: 16px 0;
+      border-bottom: 1px solid #1e293b;
+      margin-bottom: 20px;
+    }
+    .hero-score {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 4rem;
+      font-weight: 800;
+      line-height: 1;
+      color: #ef4444;
+      text-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+    }
+    .hero-scale {
+      font-family: var(--mono, monospace);
+      font-size: 0.85rem;
+      color: var(--muted, #94a3b8);
+    }
+    .verdict-tag {
+      display: inline-block;
+      padding: 6px 14px;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #ef4444;
+      font-family: var(--mono, monospace);
+      font-size: 0.8rem;
+      font-weight: 700;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+
+    .sidebar-stats-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-row-label { color: var(--muted, #94a3b8); }
+    .stat-row-val {
+      font-family: var(--mono, monospace);
+      font-weight: 600;
+      color: #f8fafc;
+    }
+
+    .action-cta-box {
+      background: #111726;
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 20px;
+    }
+    .cta-button {
+      width: 100%;
+      padding: 12px;
+      background: #ef4444;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-family: var(--sans, sans-serif);
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.2s;
+    }
+    .cta-button:hover {
+      background: #dc2626;
+    }
+
+    @media (max-width: 900px) {
+      .article-container {
+        grid-template-columns: 1fr;
+      }
+      .sticky-sidebar {
+        position: relative;
+        top: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Masthead Báo Chí -->
+  <header class="masthead">
+    <div class="masthead-inner">
+      <div class="masthead-brand">
+        <span class="masthead-logo">NORA DISPATCH <span class="logo-badge">EXPOSÉ</span></span>
+        <span style="color: #475569;">|</span>
+        <span style="font-size: 0.8rem; color: var(--muted);">Tạp Chí Giám Sát Rủi Ro Định Lượng</span>
+      </div>
+      <div class="masthead-meta">
+        <span class="anchor-pill"><span class="anchor-dot"></span> Snapshot: 2024-03-28 14:00 UTC</span>
+        <span>•</span>
+        <span>Độ tin cậy: 69.5%</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Container Đọc Báo -->
+  <div class="article-container">
+
+    <!-- Thân Bài Phóng Sự Chính -->
+    <main class="article-main">
+      
+      <div class="kicker">
+        <span>🛑 ĐIỀU TRA ĐỘC QUYỀN · HỒ SƠ BOT COPY-TRADING</span>
+      </div>
+
+      <h1 class="headline">
+        Bóc Mẽ Pure-Symbol-Yarrow: Cái Bẫy Tỷ Lệ Thắng 82% và Nghịch Lý Lỗ Ròng Hơn $10,000
+      </h1>
+
+      <p class="standfirst">
+        Làm thế nào một bot giao dịch ETH với hơn 500 lệnh chốt và win-rate áp đảo lại bị Hệ thống Giám sát QC Nora hạ điểm xuống mức Nguy Hiểm và kích hoạt Veto khẩn cấp? Lời giải nằm ở bài toán "ăn hạt vừng, nhả tảng đá".
+      </p>
+
+      <div class="byline-bar">
+        <div class="byline-author">
+          <div class="author-avatar">AI</div>
+          <div>
+            <strong>Nora QC Risk Supervisor</strong>
+            <span style="color: #64748b; margin-left: 6px;">· Báo cáo định lượng tự động</span>
+          </div>
+        </div>
+        <div>
+          <span>Thời gian đọc: 3 phút</span>
+        </div>
+      </div>
+
+      <!-- Nội Dung Bài Viết -->
+      <article class="prose">
+        <p class="lead dropcap">
+          Bắt đầu khảo sát sổ lệnh của <strong>Pure-Symbol-Yarrow</strong> (mã định danh <code>241CFF1D95076351</code>, giao dịch cặp ETH trên sàn CEX), bất kỳ nhà đầu tư phổ thông nào cũng sẽ bị ấn tượng ngay bởi bảng thành tích hào nhoáng: <strong>tỷ lệ thắng 81.7%</strong> trên tổng số 502 lệnh đã đóng. Thế nhưng, đằng sau màu xanh rực rỡ ấy là một thực tế phũ phàng: tài khoản thực tế đang <strong>âm lũy kế 10,366 USDT</strong>.
+        </p>
+
+        <!-- Trích dẫn điểm nhấn (Pull Quote) -->
+        <div class="pull-quote">
+          <blockquote>
+            "Pure-Symbol-Yarrow đang lỗ, không phải đang lãi. Tỷ lệ thắng 82% nghe rất kêu, nhưng mỗi lệnh thắng chỉ ăn được 0.18 lần một lệnh thua. Trông thì rất giỏi trên bảng xếp hạng nhưng lại mất tiền đều đặn trên tài khoản."
+          </blockquote>
+          <cite>— Trích nhận định chuyên môn từ QC Fusion Engine</cite>
+        </div>
+
+        <h2 class="section-title">Chương 1: Nghịch Lý Tỷ Lệ Thắng và Cái Bẫy Payoff Ratio</h2>
+
+        <p>
+          Lối đánh của bot này là giao dịch lướt sóng cực ngắn (trung bình 10.8 lệnh mỗi ngày), áp dụng chiến thuật <em>ngược đà</em> (mean-reversion): mua khi giá vừa nhúng đỏ và vội vã bán non khi giá vừa nhích xanh. Cách chơi này liên tục mang lại những khoản lãi bỏ túi rất nhỏ nhưng đều đặn, tạo ra một cảm giác chiến thắng giả tạo.
+        </p>
+
+        <p>
+          Tuy nhiên, khi thị trường đi vào một xu hướng mạnh (trending) bất lợi, bot không cắt lỗ kịp thời mà ôm lệnh hoặc để lệnh thua dội ngược. Hậu quả là <strong>Payoff Ratio chỉ đạt 0.18</strong> — nghĩa là bot phải thắng tới 6 lệnh liên tiếp mới bù đắp nổi thiệt hại của một lần thua duy nhất. Tỷ số Sharpe âm <code>-2.11</code> và mức sụt vốn lịch sử <code>16.6%</code> là bằng chứng thép khẳng định chiến lược này hoàn toàn không có lợi thế toán học bền vững.
+        </p>
+
+        <!-- Hộp Fact-Check Đối Chiếu Thực Tế -->
+        <div class="fact-check-box">
+          <div class="fact-check-header">
+            <span class="fact-check-title">🔍 HỘP ĐỐI CHỨNG SỰ THẬT (FACT-CHECK)</span>
+            <span style="font-size: 0.75rem; color: #64748b; font-family: var(--mono);">Cỡ mẫu: 502 lệnh</span>
+          </div>
+          <div class="fact-grid">
+            <div class="fact-card illusion">
+              <div class="fact-label">ẢO ẢNH TRÊN SÀN (KHOE THÀNH TÍCH)</div>
+              <div class="fact-value" style="color: #10b981;">81.7%</div>
+              <div class="fact-sub">Tỷ lệ thắng danh nghĩa trên 502 lệnh chốt</div>
+            </div>
+            <div class="fact-card reality">
+              <div class="fact-label">BẢN CHẤT THẬT (TÀI SẢN RÒNG)</div>
+              <div class="fact-value" style="color: #ef4444;">-$10,366</div>
+              <div class="fact-sub">Tổng PnL thực tế bị bào mòn (Expectancy -21 USDT)</div>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="section-title">Chương 2: Lỗ Hoãn Nhận — Sổ Đang Mở Đang Giấu Điều Gì?</h2>
+
+        <p>
+          Một trong những rủi ro chết người trong copy-trading là <em>lỗ hoãn nhận (deferred loss)</em>: bot chỉ chốt các lệnh thắng để làm đẹp lịch sử và giấu biệt các khoản lỗ lớn trong sổ vị thế mở. 
+        </p>
+
+        <p>
+          Khi thuật toán kiểm tra của Nora đánh dấu theo giá thị trường (mark-to-market), Pure-Symbol-Yarrow hiện đang giữ 2 vị thế mở với khoản lỗ chưa chốt là <strong>2,091 USDT</strong> (khoảng 2.3% trên nền vốn tham chiếu 89,911 USDT). Profit Factor từ mức <code>0.78</code> của sổ đã chốt rơi tiếp xuống <code>0.75</code> khi tính cả sổ mở. Dù mức lỗ mở chưa tới ngưỡng bóp méo toàn diện kết luận (dưới 10% vốn), nhưng nó cùng chiều khẳng định bot vẫn đang chìm sâu trong chu kỳ thua lỗ.
+        </p>
+
+        <!-- VETO Callout Alert -->
+        <div class="veto-callout">
+          <span class="veto-badge">🛑 CẢNH BÁO VETO TỐI CAO ĐÃ KÍCH HOẠT</span>
+          <p class="veto-desc">
+            Điểm rủi ro tổng thể của bot bị đẩy vọt lên <strong>85/100</strong> (mức Khẩn Cấp - CRITICAL). Điểm số này không phải là trung bình gia quyền thông thường (vốn chỉ là 62.0), mà bị ghi đè bởi <strong>Sàn Veto Tuyệt Đối</strong> do phát hiện <em>rủi ro đuôi mô phỏng cực đoan</em> trong thử nghiệm stress-test.
+          </p>
+        </div>
+
+        <h2 class="section-title">Chương 3: 10,000 Kịch Bản Monte Carlo Nói Gì Về Tương Lai?</h2>
+
+        <p>
+          Để nhìn xuyên qua quá khứ, cỗ máy giả lập Monte Carlo của Nora đã chạy 10,000 kịch bản ngẫu nhiên với chân trời 500 lệnh giao dịch tiếp theo. Kết quả cho thấy một bức tranh tương lai ảm đạm:
+        </p>
+
+        <!-- Thước Đo Minh Hoạ Đuôi Rủi Ro -->
+        <div class="infographic-card">
+          <div class="chart-bar-item">
+            <div class="chart-bar-header">
+              <span>Xác suất vẫn tiếp tục lỗ sau 500 lệnh</span>
+              <strong style="color: #ef4444;">77.2%</strong>
+            </div>
+            <div class="bar-track">
+              <div class="bar-fill" style="width: 77.2%; background: #ef4444;"></div>
+            </div>
+          </div>
+
+          <div class="chart-bar-item">
+            <div class="chart-bar-header">
+              <span>Mức sụt vốn trong kịch bản xấu (Phân vị 95)</span>
+              <strong style="color: #f59e0b;">43.2%</strong>
+            </div>
+            <div class="bar-track">
+              <div class="bar-fill" style="width: 43.2%; background: #f59e0b;"></div>
+            </div>
+          </div>
+
+          <div class="chart-bar-item">
+            <div class="chart-bar-header">
+              <span>Tổn thất kịch bản đuôi 5% tệ nhất</span>
+              <strong style="color: #f43f5e;">-46.8% vốn</strong>
+            </div>
+            <div class="bar-track">
+              <div class="bar-fill" style="width: 46.8%; background: #f43f5e;"></div>
+            </div>
+          </div>
+        </div>
+
+        <p>
+          Trong kịch bản xấu nhất được mô phỏng, bot có thể làm bốc hơi tới <strong>73.0% tài khoản</strong> của người theo lệnh nếu xảy ra cú sốc biến động giá gấp 2 lần hoặc thanh khoản thị trường giảm một nửa.
+        </p>
+
+        <h2 class="section-title">Lời Kết: Khuyến Nghị Cho Nhà Đầu Tư</h2>
+        <p>
+          Kết luận chính thức của hệ thống: <strong>SỤT VỐN: CAO · CHẤT LƯỢNG: YẾU</strong>. Điểm chất lượng chỉ đạt 46.6/100, phản ánh lợi nhuận hoàn toàn không có tính bền bỉ. Khuyến nghị hành động dứt khoát: <strong>REDUCE (Cắt giảm vốn ngay lập tức hoặc ngừng sao chép)</strong>. Việc bám trụ theo đuổi một bot có win-rate 82% nhưng âm vốn bản chất chỉ là việc đổi lấy sự an tâm tâm lý ngắn hạn bằng sự sụp đổ tài chính trong dài hạn.
+        </p>
+      </article>
+
+    </main>
+
+    <!-- Cột Phải Sticky: Thẻ Tóm Tắt & Hành Động Nhanh -->
+    <aside class="sticky-sidebar">
+      
+      <div class="scorecard-card">
+        <div class="scorecard-header">
+          <span>THẺ ĐIỂM GIÁM SÁT</span>
+          <span>QC SUPERVISOR</span>
+        </div>
+
+        <div class="hero-gauge-container">
+          <div class="hero-score">85</div>
+          <div class="hero-scale">ĐIỂM RỦI RO / 100 (CỰC KỲ CAO)</div>
+          <div class="verdict-tag">SỤT VỐN CAO · CHẤT LƯỢNG YẾU</div>
+        </div>
+
+        <div class="sidebar-stats-list">
+          <div class="stat-row">
+            <span class="stat-row-label">Mã Bot</span>
+            <span class="stat-row-val">241CFF1D95...</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row-label">Tài sản</span>
+            <span class="stat-row-val">ETH · CEX</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row-label">Vốn tham chiếu</span>
+            <span class="stat-row-val">$89,911</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row-label">Số lệnh đóng</span>
+            <span class="stat-row-val">502 lệnh</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row-label">Win Rate</span>
+            <span class="stat-row-val" style="color: #10b981;">81.7%</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row-label">Profit Factor</span>
+            <span class="stat-row-val" style="color: #ef4444;">0.78 → 0.75</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row-label">Lỗ chưa chốt</span>
+            <span class="stat-row-val" style="color: #ef4444;">-$2,091 (2.3%)</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row-label">Điểm chất lượng</span>
+            <span class="stat-row-val">46.6 / 100</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-row-label">Quyết định bởi</span>
+            <span class="stat-row-val" style="color: #ef4444;">VETO FLOOR</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-cta-box">
+        <div style="font-family: var(--mono); font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px;">
+          KHUYẾN NGHỊ HÀNH ĐỘNG
+        </div>
+        <div style="font-size: 1.1rem; font-weight: 700; color: #ef4444; margin-bottom: 12px;">
+          HẠ TỶ TRỌNG (REDUCE)
+        </div>
+        <button class="cta-button" onclick="alert('Đã ghi nhận yêu cầu bảo vệ rủi ro: Khuyến nghị ngừng sao chép bot này.');">
+          🛑 CẢNH BÁO BẢO VỆ VỐN
+        </button>
+      </div>
+
+    </aside>
+
+  </div>
+
+</body>
+</html>

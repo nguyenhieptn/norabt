@@ -1,10 +1,28 @@
-"""Place a bot in one of four buckets a reader can act on.
+"""Place a bot on two independent axes a reader can act on, instead of one
+collapsed risk ladder.
 
-Why four and not a risk ladder: "tiềm ẩn" is not a middling amount of risk, it is
-risk that the surface numbers hide -- a bot showing profit factor 11 and a 0.5 %
-drawdown while carrying 86k of unrealised loss belongs there, not two rungs below
-a bot that is visibly bleeding. So the bucket reads risk, quality and concealment
-together instead of slicing one score.
+Why two axes and not four buckets ("NGUY HIỂM"/"TIỀM ẨN"/"TIỀM NĂNG"/"AN TOÀN"):
+out-of-sample validation on 36 bots (Agent/docs/out_of_sample_validation.md)
+found the risk score correlates with forward drawdown (rank rho 0.64, 95% CI
+[0.39, 0.80]) but NOT with forward PnL (rho 0.205, 95% CI [-0.195, 0.539] --
+contains zero). The old single "NGUY HIỂM" label conflated the two: a bot
+scoring high on the risk axis is not thereby predicted to lose money, yet the
+label read exactly that way. Splitting the label into a drawdown axis and a
+quality axis stops the label from claiming more than the data supports --
+each axis says only what it was actually validated to say.
+
+  - Drawdown axis (CAO/THẤP): thresholded on `risk_score`, the axis the
+    validation actually supports.
+  - Quality axis (TỐT/YẾU): thresholded on `quality_score`, independent of
+    the drawdown axis by construction -- a bot can be "SỤT VỐN: CAO · CHẤT
+    LƯỢNG: TỐT" (the out-of-sample top-risk cohort's own median: +21.5% PnL,
+    9.0% drawdown, 30% blew up at least once -- both things are true at once).
+
+`HIDDEN RISK` stays a full override of both axes: it is not a middling
+amount of risk, it is risk the surface numbers hide -- a bot showing profit
+factor 11 and a 0.5% drawdown while carrying 86k of unrealised loss belongs
+there regardless of where either axis would otherwise place it, because
+neither axis's number can be trusted for this bot yet.
 """
 
 from __future__ import annotations
@@ -17,17 +35,44 @@ from Agent.backend.mcp.analytics.simulation.monte_carlo import (
 )
 from Agent.backend.mcp.schemas.bot_result import BotResult
 
-VERDICT_DANGEROUS = "NGUY HIỂM"
-VERDICT_LATENT = "TIỀM ẨN"
-VERDICT_PROMISING = "TIỀM NĂNG"
-VERDICT_SAFE = "AN TOÀN"
-VERDICT_UNKNOWN = "THIẾU BẰNG CHỨNG"
+# Two-axis labels (task's own exact strings -- do not reword).
+VERDICT_HIGH_DD_GOOD_Q = "DRAWDOWN: HIGH · QUALITY: GOOD"
+VERDICT_HIGH_DD_WEAK_Q = "DRAWDOWN: HIGH · QUALITY: WEAK"
+VERDICT_LOW_DD_GOOD_Q = "DRAWDOWN: LOW · QUALITY: GOOD"
+VERDICT_LOW_DD_WEAK_Q = "DRAWDOWN: LOW · QUALITY: WEAK"
+VERDICT_HIDDEN_RISK = "HIDDEN RISK"
+VERDICT_UNKNOWN = "INSUFFICIENT EVIDENCE"
 
+# Reused verbatim from the pre-existing thresholds: DANGEROUS_RISK already
+# gated the old "NGUY HIỂM" bucket, PROMISING_QUALITY already gated the old
+# "TIỀM NĂNG" bucket. No new cut points invented for this redesign.
 DANGEROUS_RISK = 70.0
-LATENT_RISK = 50.0
 PROMISING_QUALITY = 65.0
-# Below this the record is not good enough to call promising however calm it looks.
-SAFE_MIN_QUALITY = 40.0
+
+# The one sentence every verdict must carry alongside it (task's own exact
+# wording) -- what the validation actually found, and what it did not.
+# Sở cứ của điểm số, viết cho người ĐỌC BÁO CÁO chứ không cho người đọc code.
+#
+# Bản cũ chỉ nêu đúng một con số tương quan do chính hệ thống này tự đo. Đó là
+# "chúng ta tự chấm chúng ta": người ngoài không có cách nào kiểm chứng, nên nó
+# không phải sở cứ mà chỉ là một lời tự khai. Sở cứ thật phải là những phương
+# pháp định lượng có tên tuổi, công bố học thuật, ai cũng tra được -- phần đo
+# đạc nội bộ lùi xuống thành ghi chú kiểm chứng, đúng vị trí của nó.
+VERDICT_BASIS_VI = (
+    "Method: 10,000 scenarios simulated with a stationary bootstrap (Politis "
+    "and Romano, 1994) on the closed trades of the bot itself \u2014 this preserves "
+    "the autocorrelation of the sequence and assumes no normal distribution. Tail "
+    "risk is measured with VaR at the 95% level and CVaR (expected shortfall). "
+    "Sharpe quality is measured with the Probabilistic Sharpe Ratio and the "
+    "Deflated Sharpe Ratio (Bailey and L\u00f3pez de Prado, 2012 and 2014) \u2014 which "
+    "strip out the edge that appears by luck alone when many candidates are "
+    "screened \u2014 together with the Minimum Track Record Length, which states "
+    "how many trades are needed before a Sharpe ratio means anything. "
+    "Out-of-sample validation on 36 bots: the Spearman rank correlation "
+    "between the risk score and later drawdown is 0.64 (95% confidence "
+    "interval [0.39\u20130.80]). This score does NOT predict profit or loss \u2014 the "
+    "confidence interval for its correlation with return contains zero."
+)
 
 
 @dataclass
@@ -46,25 +91,25 @@ def _hidden_risk_flags(bot: BotResult) -> List[str]:
 
     booked, marked = deferred.booked_profit_factor, deferred.marked_profit_factor
     if booked is not None and marked is not None and booked >= 1.0 > marked:
-        flags.append(f"chốt hết sổ mở thì PF rơi từ {booked:.2f} xuống {marked:.2f}")
+        flags.append(f"closing the whole open book drops the PF from {booked:.2f} to {marked:.2f}")
     if deferred.never_realized_a_loss and bot.performance.trade_count >= 20:
-        flags.append("chưa từng ghi nhận một lệnh lỗ nào")
+        flags.append("has never booked a single losing trade")
     if (
         deferred.open_loss_to_capital_pct is not None
         and deferred.open_loss_to_capital_pct >= 20.0
     ):
-        flags.append(f"lỗ chưa chốt bằng {deferred.open_loss_to_capital_pct:.0f}% vốn")
+        flags.append(f"unrealised loss equals {deferred.open_loss_to_capital_pct:.0f}% of capital")
     if (
         strategy.regime_dependence_pct is not None
         and strategy.regime_dependence_pct >= 70.0
     ):
         flags.append(
-            f"{strategy.regime_dependence_pct:.0f}% lãi gộp chỉ đến từ một pha thị trường"
+            f"{strategy.regime_dependence_pct:.0f}% of gross profit comes from a single market phase"
         )
     if bot.performance.trade_count >= 20 and not strategy.tested_in_downtrend:
-        flags.append("chưa từng chạy qua pha giảm")
+        flags.append("has never run through a downtrend phase")
     if drawdown.max_dd_pct_capped:
-        flags.append("sụt vốn vượt vốn ghi nhận nên chưa đo được thật")
+        flags.append("drawdown exceeds the recorded capital, so the true figure could not be measured")
     return flags
 
 
@@ -94,10 +139,10 @@ def _horizon_notes(bot: BotResult) -> List[str]:
             outcome = by_label.get(key)
             if outcome is not None and outcome.probability_of_profit is not None:
                 per_horizon.append(
-                    f"{key} {outcome.horizon_trades} lệnh: "
-                    f"{outcome.probability_of_profit:.0f}% khả năng có lãi"
+                    f"{key} {outcome.horizon_trades} trades: "
+                    f"{outcome.probability_of_profit:.0f}% probability of profit"
                 )
-        note = f"Kết quả phụ thuộc vào horizon đo ({label})"
+        note = f"The result depends on the measured horizon ({label})"
         if per_horizon:
             note += ": " + "; ".join(per_horizon)
         notes.append(note)
@@ -107,14 +152,14 @@ def _horizon_notes(bot: BotResult) -> List[str]:
         span = getattr(sim, "observed_span_days", None)
         if days is not None and span is not None:
             notes.append(
-                f"Horizon mô phỏng ({sim.horizon_trades} lệnh ≈ {days:.0f} ngày) "
-                f"dài hơn dữ liệu quan sát được ({span:.0f} ngày): kết luận ở đây "
-                "là ngoại suy vượt quá dữ liệu thực tế"
+                f"The simulated horizon ({sim.horizon_trades} trades ≈ {days:.0f} days) "
+                f"is longer than the observed history ({span:.0f} days): this "
+                "conclusion is an extrapolation beyond the actual data"
             )
         else:
             notes.append(
-                "Horizon mô phỏng vượt quá dữ liệu quan sát được: kết luận ở đây "
-                "là ngoại suy"
+                "The simulated horizon exceeds the observed history: this "
+                "conclusion is an extrapolation"
             )
     return notes
 
@@ -138,6 +183,37 @@ def decide(
     return verdict
 
 
+def label_from_scores(
+    risk_score: Optional[float],
+    quality_score: Optional[float],
+    hidden_flags: Optional[List[str]],
+) -> str:
+    """The two-axis label as a pure function of the three inputs that are
+    always available -- both fresh off `decide()` and read back from an old
+    `assessment.json` on disk (`cham_diem.risk_score`/`quality_score`/
+    `hidden_risk_flags`). Kept separate from `_decide_bucket` so a caller
+    replaying old data never has to reconstruct a `BotResult` just to get a
+    label out of stored scores; see `Agent/backend/web/admin_page.py` and
+    `Agent/backend/web/data.py`'s own callers for exactly that backward-
+    compatibility use.
+
+    Deliberately NOT a string-to-string remap of the old 4 labels: the old
+    label alone does not carry enough information to recover which of the
+    new 6 states applies (a bot once called "NGUY HIỂM" could have been high
+    risk with good OR weak quality), so the only correct migration is to
+    recompute from the scores underneath it.
+    """
+    if risk_score is None:
+        return VERDICT_UNKNOWN
+    if hidden_flags:
+        return VERDICT_HIDDEN_RISK
+    drawdown_high = risk_score >= DANGEROUS_RISK
+    quality_good = quality_score is not None and quality_score >= PROMISING_QUALITY
+    if drawdown_high:
+        return VERDICT_HIGH_DD_GOOD_Q if quality_good else VERDICT_HIGH_DD_WEAK_Q
+    return VERDICT_LOW_DD_GOOD_Q if quality_good else VERDICT_LOW_DD_WEAK_Q
+
+
 def _decide_bucket(
     bot: BotResult,
     risk_score: Optional[float],
@@ -147,58 +223,37 @@ def _decide_bucket(
     hidden = _hidden_risk_flags(bot)
 
     if risk_score is None:
-        return Verdict(VERDICT_UNKNOWN, "Chưa chấm được điểm rủi ro", hidden)
+        return Verdict(VERDICT_UNKNOWN, "Could not score risk yet", hidden)
 
-    if risk_score >= DANGEROUS_RISK:
+    # Hidden risk overrides BOTH axes: neither the drawdown score nor the
+    # quality score can be trusted once the surface numbers are shown to be
+    # hiding something, so there is nothing left for either axis to say.
+    if hidden:
+        return Verdict(
+            VERDICT_HIDDEN_RISK,
+            "The surface numbers hide risk: " + "; ".join(hidden[:2]),
+            hidden,
+        )
+
+    drawdown_high = risk_score >= DANGEROUS_RISK
+    if drawdown_high:
         # Name what pushed the score up. Restating the threshold told the reader
         # nothing they could not read off the score column itself.
         if risk_drivers:
             reason = "; ".join(risk_drivers[:2])
-        elif hidden:
-            reason = hidden[0]
         else:
-            reason = f"điểm rủi ro {risk_score:.0f} vượt ngưỡng {DANGEROUS_RISK:.0f}"
-        return Verdict(VERDICT_DANGEROUS, reason, hidden)
-
-    if hidden:
-        return Verdict(
-            VERDICT_LATENT,
-            "Số liệu bề mặt che mất rủi ro: " + "; ".join(hidden[:2]),
-            hidden,
-        )
-
-    if risk_score >= LATENT_RISK:
-        return Verdict(
-            VERDICT_LATENT,
-            f"Điểm rủi ro {risk_score:.0f} ở vùng giữa, chưa đủ an toàn để tin",
-            hidden,
-        )
+            reason = f"risk score {risk_score:.0f} is above the {DANGEROUS_RISK:.0f} threshold"
+    else:
+        reason = f"risk score {risk_score:.0f} is below the {DANGEROUS_RISK:.0f} threshold"
 
     if quality_score is None:
-        return Verdict(
-            VERDICT_SAFE,
-            f"Rủi ro thấp ({risk_score:.0f}) nhưng chưa chấm được chất lượng",
-            hidden,
-        )
+        reason += "; quality could not be scored, so it is classed as QUALITY: WEAK"
+        label = VERDICT_HIGH_DD_WEAK_Q if drawdown_high else VERDICT_LOW_DD_WEAK_Q
+    elif quality_score >= PROMISING_QUALITY:
+        reason += f"; quality {quality_score:.0f} is at a good level"
+        label = VERDICT_HIGH_DD_GOOD_Q if drawdown_high else VERDICT_LOW_DD_GOOD_Q
+    else:
+        reason += f"; quality {quality_score:.0f} has not reached a good level"
+        label = VERDICT_HIGH_DD_WEAK_Q if drawdown_high else VERDICT_LOW_DD_WEAK_Q
 
-    if quality_score >= PROMISING_QUALITY:
-        return Verdict(
-            VERDICT_PROMISING,
-            f"Rủi ro thấp ({risk_score:.0f}) và chất lượng tốt ({quality_score:.0f})",
-            hidden,
-        )
-
-    if quality_score >= SAFE_MIN_QUALITY:
-        return Verdict(
-            VERDICT_SAFE,
-            f"Rủi ro thấp ({risk_score:.0f}), chất lượng mới ở mức trung bình "
-            f"({quality_score:.0f})",
-            hidden,
-        )
-
-    return Verdict(
-        VERDICT_SAFE,
-        f"Rủi ro thấp ({risk_score:.0f}) nhưng hiệu quả kém ({quality_score:.0f}): "
-        "an toàn vì gần như không kiếm được gì",
-        hidden,
-    )
+    return Verdict(label, reason, hidden)

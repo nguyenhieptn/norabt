@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Bento Journal — Tạp Chí Tin Tức Tình Báo AI (OKX AI Edition)</title>
+  <link rel="stylesheet" href="../tokens.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* Reset & Theme */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #06080d;
+      color: #f8fafc;
+      font-family: var(--sans, 'Inter', sans-serif);
+      line-height: 1.6;
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+      padding-bottom: 60px;
+    }
+
+    /* Top Breaking News Ticker (Kiểu Tạp Chí Tài Chính) */
+    .news-ticker-bar {
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      padding: 8px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 0.8rem;
+      font-family: var(--mono, monospace);
+    }
+    .ticker-tag {
+      background: #ef4444;
+      color: #fff;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+    .ticker-marquee {
+      color: #94a3b8;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .ticker-marquee span { color: #f8fafc; font-weight: 600; }
+
+    /* Bento Navigation Header */
+    .bento-nav {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand-title {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 1.3rem;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand-badge {
+      background: linear-gradient(135deg, #00f0ff, #8b5cf6);
+      color: #000;
+      font-size: 0.68rem;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: var(--mono, monospace);
+    }
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .search-pill {
+      background: #111726;
+      border: 1px solid #1e293b;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.82rem;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+    .search-pill kbd {
+      background: #1e293b;
+      color: #cbd5e1;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-family: var(--mono, monospace);
+    }
+
+    /* Main Bento Layout Container */
+    .bento-wrapper {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 20px;
+    }
+
+    /* Base Bento Card */
+    .bento-card {
+      background: #111726;
+      border: 1px solid #1e293b;
+      border-radius: 18px;
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .bento-card:hover {
+      border-color: #334155;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+    .card-eyebrow {
+      font-family: var(--mono, monospace);
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted, #94a3b8);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* HERO BENTO CARD: Tiêu điểm Báo Chí (Col span 8) */
+    .hero-bento {
+      grid-column: span 8;
+      background: linear-gradient(145deg, #111726, #161f32);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      position: relative;
+    }
+    .hero-badge-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .tag-breaking {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      font-family: var(--mono, monospace);
+    }
+    .hero-title {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 1.85rem;
+      font-weight: 700;
+      line-height: 1.25;
+      color: #fff;
+      margin-bottom: 14px;
+    }
+    .hero-editorial-lead {
+      font-size: 1rem;
+      color: #cbd5e1;
+      line-height: 1.7;
+      margin-bottom: 20px;
+    }
+    .hero-editorial-lead strong {
+      color: #00f0ff;
+    }
+    .hero-footer-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding-top: 16px;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      font-family: var(--mono, monospace);
+    }
+
+    /* SCORECARD BENTO CARD: Đồng Hồ Rủi Ro (Col span 4) */
+    .scorecard-bento {
+      grid-column: span 4;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background: #111726;
+      border: 1px solid #1e293b;
+    }
+    .gauge-center-box {
+      text-align: center;
+      padding: 10px 0;
+    }
+    .gauge-big-num {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 4.8rem;
+      font-weight: 800;
+      line-height: 1;
+      color: #ef4444;
+      text-shadow: 0 0 25px rgba(239, 68, 68, 0.35);
+    }
+    .gauge-label {
+      font-family: var(--mono, monospace);
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+    .verdict-banner {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #ef4444;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-family: var(--mono, monospace);
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-align: center;
+      margin: 12px 0;
+    }
+    .action-badge-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #161f32;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 0.82rem;
+    }
+
+    /* 4 TIỂU MỤC CHUYÊN ĐỀ BÁO CHÍ (Col span 6 each, or Col span 3) */
+    .feature-bento-1 {
+      grid-column: span 6;
+    }
+    .feature-bento-2 {
+      grid-column: span 6;
+    }
+    .feature-bento-3 {
+      grid-column: span 6;
+    }
+    .feature-bento-4 {
+      grid-column: span 6;
+    }
+
+    .feature-title {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .feature-desc {
+      font-size: 0.88rem;
+      color: #cbd5e1;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    /* Visual Infographics inside Bento */
+    .metric-duo-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .metric-tile {
+      background: #0b0f19;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .tile-label {
+      font-size: 0.72rem;
+      font-family: var(--mono, monospace);
+      color: #94a3b8;
+      text-transform: uppercase;
+    }
+    .tile-value {
+      font-family: var(--mono, monospace);
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #fff;
+      margin-top: 4px;
+    }
+
+    /* Monte Carlo Histogram Simulator Mock */
+    .mc-viz {
+      background: #0b0f19;
+      border-radius: 10px;
+      padding: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    .mc-bar-track {
+      display: flex;
+      align-items: flex-end;
+      gap: 4px;
+      height: 48px;
+      margin: 10px 0;
+    }
+    .mc-bar-col {
+      flex: 1;
+      background: #3b82f6;
+      border-radius: 2px;
+      transition: height 0.3s;
+    }
+    .mc-bar-col.danger {
+      background: #ef4444;
+    }
+
+    /* BẢNG XẾP HẠNG TUẦN SAN BENTO (Col span 12) */
+    .leaderboard-bento {
+      grid-column: span 12;
+      background: #111726;
+    }
+    .cohort-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      margin-top: 12px;
+    }
+    .cohort-table th {
+      text-align: left;
+      padding: 10px 14px;
+      font-family: var(--mono, monospace);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      color: #94a3b8;
+      border-bottom: 1px solid #1e293b;
+    }
+    .cohort-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      font-family: var(--mono, monospace);
+    }
+    .cohort-table tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .active-row {
+      background: rgba(0, 240, 255, 0.04) !important;
+      border-left: 3px solid #00f0ff;
+    }
+
+    @media (max-width: 960px) {
+      .hero-bento, .scorecard-bento, .feature-bento-1, .feature-bento-2, .feature-bento-3, .feature-bento-4 {
+        grid-column: span 12;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Dòng Tin Tức Chạy Đầu Trang -->
+  <div class="news-ticker-bar">
+    <span class="ticker-tag">BẢN TIN QUAN TRẮC</span>
+    <div class="ticker-marquee">
+      Anchor Snapshot: <span>14:00:00 UTC</span> · Hệ thống phát hiện <span>4/30 bot</span> bị sàn VETO hạ hạng vì Lỗ Hoãn Nhận · <span>Pure-Symbol-Yarrow</span> dẫn đầu mức sụt vốn mô phỏng (43.2%)
+    </div>
+  </div>
+
+  <!-- Header Điều Hướng Kiểu Tạp Chí -->
+  <header class="bento-nav">
+    <div class="brand-title">
+      NORA BENTO <span class="brand-badge">OKX AI EDITION</span>
+    </div>
+    <div class="nav-actions">
+      <div class="search-pill" onclick="alert('Tìm kiếm nhanh bot qua mã uniqueCode hoặc tên...');">
+        <span>Tra cứu nhanh bot</span>
+        <kbd>⌘K</kbd>
+      </div>
+      <button style="background: #1e293b; border: 1px solid #334155; color: #fff; padding: 6px 14px; border-radius: 8px; font-size: 0.8rem; cursor: pointer;">
+        Crawl Mới
+      </button>
+    </div>
+  </header>
+
+  <!-- Lưới Bento Grid Chính -->
+  <div class="bento-wrapper">
+
+    <!-- HERO CARD: TIÊU ĐIỂM TIN NÓNG (Col span 8) -->
+    <div class="bento-card hero-bento">
+      <div class="hero-badge-row">
+        <span class="tag-breaking">BÀI BÁO ĐIỀU TRA</span>
+        <span style="font-family: var(--mono); font-size: 0.75rem; color: #94a3b8;">MÃ: 241CFF1D95076351 · CEX / ETH</span>
+      </div>
+
+      <h1 class="hero-title">
+        Pure-Symbol-Yarrow: Nghịch Lý Tỷ Lệ Thắng 82% Nhưng Vẫn Lỗ $10,366
+      </h1>
+
+      <p class="hero-editorial-lead">
+        Bot giao dịch theo kiểu <strong>lướt sóng ngắn hạn ngược đà</strong>, tần suất 10.8 lệnh/ngày. Cách chơi này tạo ra nghịch lý điển hình: thắng tới 81.7% trên 502 lệnh đóng nhưng <strong>payoff ratio chỉ 0.18</strong> (thắng ăn ít, thua lỗ nặng). Kết quả chung phụ thuộc 44% vào một pha thị trường hẹp, Sharpe ratio <code>-2.11</code> và đang gồng lỗ âm $2,091 ngoài sổ mở.
+      </p>
+
+      <div class="hero-footer-bar">
+        <span>Nguồn: Nora QC Fusion Core</span>
+        <span>Thời gian snapshot: 2024-03-28</span>
+        <span style="color: #00f0ff;">Độ tin cậy: 69.5% (TỐT)</span>
+      </div>
+    </div>
+
+    <!-- SCORECARD GAUGE: TỔNG KẾT RỦI RO (Col span 4) -->
+    <div class="bento-card scorecard-bento">
+      <div>
+        <div class="card-eyebrow">
+          <span>⚡ ĐÁNH GIÁ TỔNG LỰC</span>
+        </div>
+        <div class="gauge-center-box">
+          <div class="gauge-big-num">85</div>
+          <div class="gauge-label">ĐIỂM RỦI RO QUAN TRẮC (0 - 100)</div>
+        </div>
+        <div class="verdict-banner">
+          SỤT VỐN: CAO · CHẤT LƯỢNG: YẾU
+        </div>
+      </div>
+
+      <div>
+        <div class="action-badge-row">
+          <span style="color: #94a3b8;">Hành Động Đề Xuất:</span>
+          <strong style="color: #ef4444; font-family: var(--mono); font-size: 0.95rem;">HẠ TỶ TRỌNG (REDUCE)</strong>
+        </div>
+        <div style="font-size: 0.75rem; color: #64748b; text-align: center; margin-top: 8px;">
+          *Áp sàn VETO do rủi ro đuôi mô phỏng kịch bản sốc
+        </div>
+      </div>
+    </div>
+
+    <!-- CHUYÊN ĐỀ 1: HIỆU SUẤT & BẢN CHẤT GIAO DỊCH (Col span 6) -->
+    <div class="bento-card feature-bento-1">
+      <div class="card-eyebrow">
+        <span>CHUYÊN ĐỀ 01 · HIỆU SUẤT GIAO DỊCH</span>
+      </div>
+      <div class="feature-title">
+        <span>Ảo Ảnh Win Rate vs Thực Tế Payoff</span>
+        <span style="color: #ef4444; font-size: 0.9rem;">-11.5% ROI</span>
+      </div>
+      <p class="feature-desc">
+        Tỷ lệ thắng 81.7% trên sàn OKX là chiêu bài thu hút người copy-trade. Tuy nhiên, kỳ vọng mỗi lệnh (expectancy) là <strong>-21 USDT</strong>. Đóng 502 lệnh, bot để lại một vệt sụt vốn tối đa 16.6% và chuỗi thua dài nhất 5 lệnh.
+      </p>
+
+      <div class="metric-duo-grid">
+        <div class="metric-tile">
+          <div class="tile-label">Win Rate Đã Chốt</div>
+          <div class="tile-value" style="color: #10b981;">81.7%</div>
+        </div>
+        <div class="metric-tile">
+          <div class="tile-label">Payoff Ratio</div>
+          <div class="tile-value" style="color: #ef4444;">0.18 R</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHUYÊN ĐỀ 2: BÓC TÁCH LỖ HOÃN NHẬN (Col span 6) -->
+    <div class="bento-card feature-bento-2">
+      <div class="card-eyebrow">
+        <span>CHUYÊN ĐỀ 02 · LỖ HOÃN NHẬN (DEFERRED LOSS)</span>
+      </div>
+      <div class="feature-title">
+        <span>Sổ Vị Thế Mở Đang Gồng Âm Gì?</span>
+        <span style="color: #f59e0b; font-size: 0.85rem;">2 VỊ THẾ MỞ</span>
+      </div>
+      <p class="feature-desc">
+        Đánh giá theo giá thị trường (Mark-to-market), bot đang gồng lỗ <strong>-2,091 USDT (2.3% vốn)</strong>. Khi hạch toán chốt toàn bộ số lệnh này, Profit Factor tụt từ <code>0.78</code> xuống <code>0.75</code>.
+      </p>
+
+      <div class="metric-duo-grid">
+        <div class="metric-tile">
+          <div class="tile-label">PF Sổ Đã Chốt</div>
+          <div class="tile-value">0.78</div>
+        </div>
+        <div class="metric-tile">
+          <div class="tile-label">PF Sau Khi Chốt Sổ Mở</div>
+          <div class="tile-value" style="color: #ef4444;">0.75</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHUYÊN ĐỀ 3: DỰ PHÓNG MONTE CARLO (Col span 6) -->
+    <div class="bento-card feature-bento-3">
+      <div class="card-eyebrow">
+        <span>CHUYÊN ĐỀ 03 · GIẢ LẬP MONTE CARLO</span>
+      </div>
+      <div class="feature-title">
+        <span>10,000 Kịch Bản Chân Trời 500 Lệnh</span>
+        <span style="color: #ef4444; font-size: 0.85rem;">P(Lỗ) 77.2%</span>
+      </div>
+      <p class="feature-desc">
+        Mô phỏng 10,000 hành trình ngẫu nhiên. Trung vị kết quả đạt -10.2% vốn. Đuôi 5% tệ nhất gánh mức lỗ tới <strong>46.8% vốn</strong> và sụt vốn tối đa <strong>43.2%</strong>.
+      </p>
+
+      <div class="mc-viz">
+        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; font-family: var(--mono);">
+          <span>Phân Phối Xác Suất Kết Quả Tương Lai</span>
+          <span style="color: #ef4444;">Vùng Rủi Ro Đuôi Trái Dày</span>
+        </div>
+        <div class="mc-bar-track">
+          <div class="mc-bar-col danger" style="height: 40%;"></div>
+          <div class="mc-bar-col danger" style="height: 75%;"></div>
+          <div class="mc-bar-col danger" style="height: 95%;"></div>
+          <div class="mc-bar-col" style="height: 60%;"></div>
+          <div class="mc-bar-col" style="height: 35%;"></div>
+          <div class="mc-bar-col" style="height: 15%;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHUYÊN ĐỀ 4: 10 CHIỀU ĐỊNH LƯỢNG (Col span 6) -->
+    <div class="bento-card feature-bento-4">
+      <div class="card-eyebrow">
+        <span>CHUYÊN ĐỀ 04 · BÓC TÁCH 10 CHIỀU RỦI RO</span>
+      </div>
+      <div class="feature-title">
+        <span>Yếu Tố Nào Đẩy Điểm Lên Cao Nhất?</span>
+      </div>
+      <p class="feature-desc">
+        Hệ thống phân rã 10 chiều rủi ro: Đuôi rủi ro chạm trần tuyệt đối (100/100), Đồng thuận thị trường kém (80/100), Đòn bẩy cao (75/100). Ngược lại, tính kỷ luật hành vi chỉ đạt 30 điểm.
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-family: var(--mono);">
+          <span>Rủi ro đuôi mô phỏng cực đoan:</span>
+          <strong style="color: #ef4444;">100 / 100</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-family: var(--mono);">
+          <span>Lệch pha đồng thuận thị trường:</span>
+          <strong style="color: #f59e0b;">80 / 100</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-family: var(--mono);">
+          <span>Chất lượng lợi nhuận trên rủi ro (R):</span>
+          <strong style="color: #f59e0b;">75 / 100</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- BẢNG ĐIỂM TOÀN CẢNH TUẦN SAN (Col span 12) -->
+    <div class="bento-card leaderboard-bento">
+      <div class="card-eyebrow">
+        <span>BẢN TIN COHORT TOÀN CẢNH · SO SÁNH 5 LEAD TRADER TIÊU BIỂU</span>
+      </div>
+      <div class="feature-title">
+        <span>Bảng Đối Chiếu Lỗ Hoãn Nhận & Phán Quyết Rủi Ro Tuần Này</span>
+      </div>
+
+      <table class="cohort-table">
+        <thead>
+          <tr>
+            <th>Tên Bot / Lead Trader</th>
+            <th>Tài Sản</th>
+            <th>PF Đóng</th>
+            <th>PF Sau Lỗ Mở</th>
+            <th>Lỗ Hoãn Nhận</th>
+            <th>Điểm Rủi Ro</th>
+            <th>Kết Luận Báo Chí</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="active-row">
+            <td><strong>Pure-Symbol-Yarrow</strong></td>
+            <td>ETH · CEX</td>
+            <td>0.78</td>
+            <td style="color: #ef4444;">0.75</td>
+            <td style="color: #94a3b8;">-$2,091 (2.3%)</td>
+            <td style="color: #ef4444; font-weight: 700;">85 (Veto)</td>
+            <td><span style="color: #ef4444;">SỤT VỐN CAO · CHẤT LƯỢNG YẾU</span></td>
+          </tr>
+          <tr>
+            <td><strong>HaveARestin</strong></td>
+            <td>BTC · CEX</td>
+            <td>11.09</td>
+            <td style="color: #ef4444; font-weight: 700;">0.16 ⚠️</td>
+            <td style="color: #ef4444; font-weight: 700;">-$14,230 (43.1%) !</td>
+            <td style="color: #a855f7; font-weight: 700;">92 (Veto)</td>
+            <td><span style="color: #a855f7;">RỦI RO BỊ CHE (TỤT HẠNG NẶNG)</span></td>
+          </tr>
+          <tr>
+            <td><strong>RuiJie</strong></td>
+            <td>SOL · CEX</td>
+            <td>41.52</td>
+            <td style="color: #10b981;">9.99</td>
+            <td style="color: #10b981;">0% (An toàn)</td>
+            <td style="color: #10b981; font-weight: 700;">32</td>
+            <td><span style="color: #10b981;">BỀN VỮNG: TỐT TOÀN DIỆN</span></td>
+          </tr>
+          <tr>
+            <td><strong>Bare-Payee-Fox</strong></td>
+            <td>BTC · CEX</td>
+            <td>—</td>
+            <td style="color: #f59e0b;">1.03</td>
+            <td style="color: #f59e0b;">-$4,100 (12.5%)</td>
+            <td style="color: #f59e0b; font-weight: 700;">68</td>
+            <td><span style="color: #f59e0b;">CHUYỂN HẠNG: FRAGILE</span></td>
+          </tr>
+          <tr>
+            <td><strong>BestMax</strong></td>
+            <td>ETH · CEX</td>
+            <td>4.73</td>
+            <td style="color: #10b981;">2.08</td>
+            <td style="color: #10b981;">-0.8% (Nhẹ)</td>
+            <td style="color: #10b981; font-weight: 700;">38</td>
+            <td><span style="color: #10b981;">BỀN VỮNG: SỤT VỐN THẤP</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+
+</body>
+</html>

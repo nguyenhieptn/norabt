@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from Agent.backend.infra.config import config
 from Agent.backend.infra.quality import (
@@ -27,6 +28,7 @@ from Agent.backend.market.schemas.market_result import (
 )
 from Agent.backend.sources.market_source import (
     FileMarketDataSource,
+    LiveMarketDataSource,
     MarketDataSource,
     MarketDataUnavailableError,
 )
@@ -37,6 +39,85 @@ from Agent.backend.sources.market_source import (
 # it is defined in sources/market_source.py to avoid a circular import (that
 # module needs no import back from this one).
 __all__ = ["MarketDataUnavailableError", "MarketService"]
+
+
+# --------------------------------------------------------------------------- #
+# Việc 2 (đệm theo symbol, TTL ngắn) -- `get_market_result` cho MỘT symbol đo
+# thật mất ~6.3s (9 lời gọi OKX tuần tự qua AdaptiveThrottle, xem
+# sources/market_source.py::LiveMarketDataSource._public_get). Dữ liệu thị
+# trường của một symbol là DÙNG CHUNG giữa MỌI bot đang giao dịch symbol đó
+# (không phụ thuộc bot nào cả), và một lượt `cohort.py::scan()` gọi liên
+# tiếp hàng chục bot, nhiều bot trong số đó chạm lại đúng vài mã phổ biến
+# (BTC, ETH, ...). Bộ nhớ đệm module-level này (KHÔNG phải thuộc tính của
+# một `MarketService` instance -- `WebDataService._analyze_full` dựng một
+# `MarketService` MỚI cho mỗi lượt `/api/analyze`, nên một cache theo
+# instance sẽ không bao giờ được tái sử dụng giữa hai request) là thứ làm
+# cho việc gọi lại `resolve_market` cho CÙNG một symbol ở Việc 1
+# (pipeline.py chạy chính+phụ song song) hay ở một `scan()` nhiều bot có
+# tác dụng thật.
+#
+# CHỈ áp dụng khi `as_of_ms is None` -- tức "thị trường NGAY BÂY GIỜ", đúng
+# cách `/api/analyze` (pipeline.py's `resolve_market`) luôn gọi. Một
+# backtest lịch sử (run_report.py chế độ replay, cohort.py chấm lại một
+# ngày quá khứ) truyền `as_of_ms` cụ thể để neo vào ĐÚNG một thời điểm quá
+# khứ -- trộn kết quả đó vào cache "hiện tại" này sẽ âm thầm trả dữ liệu
+# SAI thời điểm cho một lần replay khác ngay sau đó, nên nhánh này luôn đi
+# thẳng ra network/đĩa như trước, không đệm gì cả (xem `get_market_result`
+# bên dưới).
+#
+# TTL = 45s, chọn có cân nhắc chứ không phải một con số mặc định:
+#   * đủ NGẮN so với những gì thật sự đổi theo phút (sổ lệnh, dòng lệnh
+#     taker, open interest) -- một điểm chấm dựa trên ảnh chụp cũ tới 45s
+#     không lệch đáng kể so với gọi lại NGAY lúc đó, và ngắn hơn nhiều so
+#     với khung 1H nến dùng để xác định pha thị trường (trend/volatility
+#     state), thứ vốn đã ổn định hàng giờ chứ không phải hàng giây.
+#   * đủ DÀI để có tác dụng thật: một lượt `/api/analyze` cho một bot (kể
+#     cả bản đã song song hoá ở Việc 1/4) mất cỡ vài giây tới vài chục
+#     giây, và một lượt `cohort.py::scan()` xử lý hàng chục bot liên tiếp
+#     trong một lần chạy -- 45s đủ để MỌI bot chạm một symbol phổ biến
+#     trong CÙNG một lượt chạy chỉ phải trả đúng ~6.3s đó MỘT LẦN, những
+#     lần sau trong cửa sổ đó gần như miễn phí.
+#
+# Khoá bằng `threading.Lock` (không phải asyncio) vì đây là trạng thái cấp
+# TIẾN TRÌNH, được gọi từ cả mã đồng bộ (run_report.py, agent_server.py,
+# cohort.py) lẫn threadpool của Starlette VÀ (từ Việc 1) hai luồng
+# pipeline.py tự tạo để giải thị trường chính/phụ song song -- cùng lý do
+# `narrative.py`'s `_SEMAPHORE` phải là threading chứ không phải asyncio,
+# xem module đó.
+# --------------------------------------------------------------------------- #
+
+MARKET_RESULT_CACHE_TTL_SECONDS = 45.0
+_market_result_cache_lock = threading.Lock()
+_market_result_cache: Dict[Tuple[str, str], Tuple[float, MarketResult]] = {}
+
+
+def _market_result_cache_get(key: Tuple[str, str]) -> Optional[MarketResult]:
+    with _market_result_cache_lock:
+        entry = _market_result_cache.get(key)
+        if entry is None:
+            return None
+        expires_at, cached = entry
+        if time.monotonic() >= expires_at:
+            del _market_result_cache[key]
+            return None
+        return cached
+
+
+def _market_result_cache_set(key: Tuple[str, str], value: MarketResult) -> None:
+    with _market_result_cache_lock:
+        _market_result_cache[key] = (
+            time.monotonic() + MARKET_RESULT_CACHE_TTL_SECONDS,
+            value,
+        )
+
+
+def clear_market_result_cache() -> None:
+    """Test-only escape hatch -- a module-level cache shared by every
+    `MarketService` instance would otherwise leak a stale `MarketResult`
+    from one test into the next whenever two tests use the same symbol
+    within the same TTL window."""
+    with _market_result_cache_lock:
+        _market_result_cache.clear()
 
 
 class MarketService:
@@ -133,6 +214,26 @@ class MarketService:
     ) -> MarketResult:
         clean = self._clean_symbol(symbol)
         resolved_venue_type = self.market_source.resolve_venue(clean, venue_type)
+        # Việc 2: chỉ đệm nhánh "thị trường NGAY BÂY GIỜ" (as_of_ms is None)
+        # -- xem comment đầu module cho lý do đầy đủ -- VÀ chỉ khi nguồn dữ
+        # liệu thật sự tốn tiền mạng (`LiveMarketDataSource`). Cache key chỉ
+        # có (symbol, venue_type), KHÔNG có data_dir -- đúng và an toàn ở
+        # production (một tiến trình luôn chỉ có một DATA_DIR thật), nhưng
+        # sẽ SAI nếu áp dụng cho `FileMarketDataSource`: hàng chục test
+        # trong bộ này tự tạo `MarketService(tmp_path)` với dữ liệu "BTC"
+        # khác nhau cho từng `tmp_path`, và một cache module-level không
+        # phân biệt tmp_path sẽ khiến test sau ăn nhầm dữ liệu cache của
+        # test trước. Loại trừ `FileMarketDataSource` khỏi cache né hẳn rủi
+        # ro đó mà không mất gì: đọc file cục bộ vốn đã nhanh, không phải
+        # thứ Việc 2 nhắm tới tối ưu.
+        cache_key = (clean, resolved_venue_type)
+        use_cache = as_of_ms is None and isinstance(
+            self.market_source, LiveMarketDataSource
+        )
+        if use_cache:
+            cached = _market_result_cache_get(cache_key)
+            if cached is not None:
+                return cached
         wall_clock = as_of_ms if as_of_ms is not None else int(time.time() * 1000)
         is_dex = resolved_venue_type == "DEX"
 
@@ -305,7 +406,7 @@ class MarketService:
             float(pool.get("fee_tier_pct") or 0.003) if (is_dex and pool) else None
         )
 
-        return MarketResult(
+        result = MarketResult(
             asset_id=f"{resolved_venue_type}_{clean}_{re.sub(r'[^A-Z0-9]+', '_', venue).strip('_')}",
             symbol=clean,
             venue=venue,
@@ -341,3 +442,6 @@ class MarketService:
             macro_state=self._macro_state(macro),
             defi_state=DefiState() if is_dex else None,
         )
+        if use_cache:
+            _market_result_cache_set(cache_key, result)
+        return result

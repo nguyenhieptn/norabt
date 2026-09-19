@@ -90,44 +90,45 @@ _REQUEST_DELAY_SECONDS = 0.5
 # Codes not in this table are reported with their raw code/msg rather than an
 # invented explanation; see explain_error_vi().
 OKX_ERROR_MESSAGES_VI: Dict[str, str] = {
-    "0": "Thành công.",
+    "0": "Success.",
     "50035": (
-        "Endpoint này bắt buộc API key phải được gán (bind) một IP cụ thể "
-        "trước khi dùng -- vào OKX gán IP cho key."
+        "This endpoint requires the API key to have a specific IP bound "
+        "before it can be used -- go to OKX and bind an IP to the key."
     ),
-    "50038": "Tính năng này không khả dụng ở môi trường demo trading.",
-    "50100": "API key đã bị đóng băng -- cần liên hệ bộ phận hỗ trợ của OKX.",
+    "50038": "This feature is not available in the demo trading environment.",
+    "50100": "API key has been frozen -- contact OKX support.",
     "50101": (
-        "API key không khớp với môi trường hiện tại (ví dụ: key tạo cho demo "
-        "nhưng gọi vào live, hoặc ngược lại) -- đối chiếu lại OKX_SIMULATED "
-        "với loại key đã tạo trên OKX."
+        "API key does not match the current environment (e.g. a key created "
+        "for demo is being used against live, or vice versa) -- check "
+        "OKX_SIMULATED against the type of key created on OKX."
     ),
     "50102": (
-        "Timestamp bị từ chối vì lệch quá 30 giây so với đồng hồ server OKX "
-        "-- đồng bộ lại giờ hệ thống (NTP); check_public_access() báo "
-        "clock_skew_ms để phát hiện việc này trước khi ký request."
+        "Timestamp rejected because it is off by more than 30 seconds from "
+        "the OKX server clock -- resync the system clock (NTP); "
+        "check_public_access() reports clock_skew_ms to catch this before "
+        "signing a request."
     ),
-    "50103": 'Header "OK-ACCESS-KEY" bị trống.',
-    "50104": 'Header "OK-ACCESS-PASSPHRASE" bị trống.',
+    "50103": 'Header "OK-ACCESS-KEY" is empty.',
+    "50104": 'Header "OK-ACCESS-PASSPHRASE" is empty.',
     "50105": (
-        'Header "OK-ACCESS-PASSPHRASE" sai -- kiểm tra lại biến môi trường '
-        "OKX_API_PASSPHRASE."
+        'Header "OK-ACCESS-PASSPHRASE" is wrong -- check the '
+        "OKX_API_PASSPHRASE environment variable."
     ),
-    "50106": 'Header "OK-ACCESS-SIGN" bị trống.',
-    "50107": 'Header "OK-ACCESS-TIMESTAMP" bị trống hoặc sai định dạng.',
+    "50106": 'Header "OK-ACCESS-SIGN" is empty.',
+    "50107": 'Header "OK-ACCESS-TIMESTAMP" is empty or has the wrong format.',
     "50110": (
-        "Địa chỉ IP hiện tại không nằm trong whitelist IP của API key -- vào "
-        "OKX gán IP cho key hoặc gỡ giới hạn IP."
+        "The current IP address is not on the API key's IP whitelist -- go "
+        "to OKX and bind an IP to the key, or remove the IP restriction."
     ),
     "50111": (
-        "OK-ACCESS-KEY không hợp lệ -- kiểm tra lại biến môi trường OKX_API_KEY."
+        "OK-ACCESS-KEY is invalid -- check the OKX_API_KEY environment variable."
     ),
-    "50112": 'Header "OK-ACCESS-TIMESTAMP" không hợp lệ.',
+    "50112": 'Header "OK-ACCESS-TIMESTAMP" is invalid.',
     "50113": (
-        "Chữ ký (signature) không hợp lệ -- kiểm tra lại biến môi trường "
-        "OKX_API_SECRET (hoặc lệch đồng hồ, xem 50102)."
+        "Signature is invalid -- check the OKX_API_SECRET environment "
+        "variable (or a clock skew, see 50102)."
     ),
-    "50114": "Uỷ quyền (authorization) không hợp lệ.",
+    "50114": "Authorization is invalid.",
 }
 
 
@@ -172,11 +173,11 @@ def explain_error_vi(code: Optional[str]) -> str:
     honest "don't know, go look it up".
     """
     if code is None:
-        return "Không có mã lỗi cụ thể (không nhận được phản hồi hợp lệ từ OKX)."
+        return "No specific error code (no valid response received from OKX)."
     return OKX_ERROR_MESSAGES_VI.get(
         code,
-        "Mã lỗi OKX chưa có trong bảng tra cứu nội bộ của probe -- tra cứu tại "
-        f"https://www.okx.com/docs-v5/en/#error-code (code={code}).",
+        "This OKX error code is not in the probe's internal lookup table -- "
+        f"look it up at https://www.okx.com/docs-v5/en/#error-code (code={code}).",
     )
 
 
@@ -321,7 +322,7 @@ def _call(
             msg=None,
             data=None,
             latency_ms=latency_ms,
-            error=f"Phản hồi không phải JSON hợp lệ: {exc}",
+            error=f"Response is not valid JSON: {exc}",
         )
 
     code = payload.get("code")
@@ -338,10 +339,10 @@ def _call(
 
 def _check_entry(name: str, endpoint: str, result: _CallResult) -> Dict[str, Any]:
     if result.error is not None:
-        detail = f"Không gọi được: {result.error}"
+        detail = f"Call failed: {result.error}"
     elif not result.ok:
         detail = (
-            f"OKX trả lỗi code={result.code} (msg gốc: {result.msg!r}): "
+            f"OKX returned an error code={result.code} (raw msg: {result.msg!r}): "
             f"{explain_error_vi(result.code)}"
         )
     else:
@@ -373,7 +374,7 @@ def check_public_access() -> dict:
     time_result = _call(client, "GET", "/api/v5/public/time")
     t_after = time.time()
     checks.append(
-        _check_entry("Đồng hồ server OKX", "GET /api/v5/public/time", time_result)
+        _check_entry("OKX server clock", "GET /api/v5/public/time", time_result)
     )
 
     clock_skew_ms: Optional[float] = None
@@ -394,7 +395,7 @@ def check_public_access() -> dict:
     config_result = _call(client, "GET", "/api/v5/copytrading/public-config")
     checks.append(
         _check_entry(
-            "Cấu hình copy trading công khai",
+            "Public copy-trading config",
             "GET /api/v5/copytrading/public-config",
             config_result,
         )
@@ -405,12 +406,12 @@ def check_public_access() -> dict:
     if sample is None:
         checks.append(
             {
-                "name": "Vị thế công khai của một lead trader mẫu",
+                "name": "Public positions of a sample lead trader",
                 "endpoint": "GET /api/v5/copytrading/public-current-subpositions",
                 "ok": False,
                 "latency_ms": None,
                 "detail": (
-                    "Không tìm thấy uniqueCode mẫu nào trong "
+                    "No sample uniqueCode found in "
                     "Agent/data/universe/bot_selection.json."
                 ),
             }
@@ -424,7 +425,7 @@ def check_public_access() -> dict:
         )
         checks.append(
             _check_entry(
-                f"Vị thế công khai của lead trader mẫu ({sample['name'] or sample['code']})",
+                f"Public positions of the sample lead trader ({sample['name'] or sample['code']})",
                 "GET /api/v5/copytrading/public-current-subpositions",
                 sub_result,
             )
@@ -461,8 +462,8 @@ def check_private_access() -> dict:
             "status": "CHUA_CAU_HINH",
             "missing_fields": missing,
             "message_vi": (
-                "Chưa cấu hình đủ thông tin xác thực OKX, cần khai báo các biến "
-                "môi trường: " + ", ".join(missing) + ". Xem hướng dẫn tại "
+                "OKX credentials are not fully configured, the following environment "
+                "variables must be set: " + ", ".join(missing) + ". See the guide at "
                 "Agent/.env.example."
             ),
         }
@@ -475,14 +476,14 @@ def check_private_access() -> dict:
         return {
             "status": "LOI_KET_NOI",
             "environment": environment,
-            "message_vi": f"Không kết nối được tới OKX để kiểm tra key: {result.error}",
+            "message_vi": f"Could not connect to OKX to check the key: {result.error}",
         }
 
     if result.ok:
         balance_rows = len(result.data) if isinstance(result.data, list) else None
-        detail = f"Key hoạt động bình thường trên môi trường {environment}."
+        detail = f"Key works normally on the {environment} environment."
         if balance_rows is not None:
-            detail += f" Đọc được {balance_rows} dòng số dư."
+            detail += f" Read {balance_rows} balance rows."
         return {
             "status": "OK",
             "environment": environment,
@@ -498,7 +499,7 @@ def check_private_access() -> dict:
         "error_code": result.code,
         "error_message_raw": result.msg,
         "message_vi": (
-            f"OKX từ chối yêu cầu (code={result.code}, msg gốc: {result.msg!r}): "
+            f"OKX rejected the request (code={result.code}, raw msg: {result.msg!r}): "
             f"{explain_error_vi(result.code)}"
         ),
     }
@@ -522,7 +523,7 @@ def probe_copy_trading(dry_run: bool = True) -> dict:
     sample = _sample_lead_trader()
     body_template: Dict[str, Any] = {
         "instType": "SWAP",
-        "uniqueCode": sample["code"] if sample else "<không có uniqueCode mẫu>",
+        "uniqueCode": sample["code"] if sample else "<no sample uniqueCode>",
         # "copy" keeps the copied contracts identical to the lead trader's,
         # so this never needs an explicit instId list to stay in sync with.
         "copyInstIdType": "copy",
@@ -536,7 +537,7 @@ def probe_copy_trading(dry_run: bool = True) -> dict:
     if dry_run:
         preview_body = dict(body_template)
         preview_body["copyAmt"] = (
-            "<minCopyAmt, đọc từ GET /api/v5/copytrading/public-config khi chạy thật>"
+            "<minCopyAmt, read from GET /api/v5/copytrading/public-config on a real run>"
         )
         preview_body["copyTotalAmt"] = preview_body["copyAmt"]
         try:
@@ -558,19 +559,19 @@ def probe_copy_trading(dry_run: bool = True) -> dict:
                 "headers": headers_preview,
             },
             "message_vi": (
-                "Đây là bản xem trước (dry-run) -- CHƯA gọi mạng, chưa gửi gì tới "
-                "OKX. Truyền dry_run=False để thực sự gửi request này (chỉ chạy "
-                "được trên môi trường demo)."
+                "This is a dry-run preview -- NO network call was made, nothing was sent to "
+                "OKX. Pass dry_run=False to actually send this request (only runs "
+                "against the demo environment)."
             ),
         }
 
     # Everything below this line can place a real order on a real account.
     if not credentials.simulated:
         raise LiveTradingRefused(
-            "Từ chối chạy probe_copy_trading(dry_run=False) với key LIVE "
-            "(OKX_SIMULATED=false). Probe này tạo một copy-trading position "
-            "thật trên tài khoản đang cấu hình -- chỉ được phép chạy trên "
-            "demo. Đặt OKX_SIMULATED=true hoặc dùng bộ key demo để chạy."
+            "Refusing to run probe_copy_trading(dry_run=False) with a LIVE key "
+            "(OKX_SIMULATED=false). This probe creates a real copy-trading "
+            "position on the configured account -- only allowed to run against "
+            "demo. Set OKX_SIMULATED=true or use a demo key set to run this."
         )
 
     if not credentials.is_complete:
@@ -579,8 +580,8 @@ def probe_copy_trading(dry_run: bool = True) -> dict:
             "status": "CHUA_CAU_HINH",
             "missing_fields": missing,
             "message_vi": (
-                "Chưa cấu hình đủ thông tin xác thực OKX, cần khai báo các biến "
-                "môi trường: " + ", ".join(missing) + "."
+                "OKX credentials are not fully configured, the following environment "
+                "variables must be set: " + ", ".join(missing) + "."
             ),
         }
 
@@ -588,8 +589,8 @@ def probe_copy_trading(dry_run: bool = True) -> dict:
         return {
             "status": "LOI",
             "message_vi": (
-                "Không tìm thấy uniqueCode mẫu nào trong "
-                "Agent/data/universe/bot_selection.json để thử copy."
+                "Could not find a sample uniqueCode in "
+                "Agent/data/universe/bot_selection.json to test a copy with."
             ),
         }
 
@@ -599,14 +600,14 @@ def probe_copy_trading(dry_run: bool = True) -> dict:
         detail = config_result.error or explain_error_vi(config_result.code)
         return {
             "status": "LOI",
-            "message_vi": f"Không đọc được minCopyAmt từ public-config: {detail}",
+            "message_vi": f"Could not read minCopyAmt from public-config: {detail}",
         }
     try:
         min_copy_amt = config_result.data[0]["minCopyAmt"]
     except (KeyError, IndexError, TypeError):
         return {
             "status": "LOI",
-            "message_vi": "public-config không trả về trường minCopyAmt như mong đợi.",
+            "message_vi": "public-config did not return the expected minCopyAmt field.",
         }
 
     time.sleep(_REQUEST_DELAY_SECONDS)
@@ -631,7 +632,7 @@ def probe_copy_trading(dry_run: bool = True) -> dict:
     if result.error is not None:
         return {
             "status": "LOI_KET_NOI",
-            "message_vi": f"Không gọi được first-copy-settings: {result.error}",
+            "message_vi": f"Could not call first-copy-settings: {result.error}",
             "request_sent": request_sent,
         }
 
@@ -641,9 +642,9 @@ def probe_copy_trading(dry_run: bool = True) -> dict:
             "code": result.code,
             "raw_msg": result.msg,
             "message_vi": (
-                "Demo KHÔNG hỗ trợ copy trading (OKX trả mã lỗi 50038: tính năng "
-                "không khả dụng ở demo trading). Đây là câu trả lời có giá trị, "
-                "không phải một lần chạy thất bại."
+                "Demo does NOT support copy trading (OKX returned error code 50038: this "
+                "feature is unavailable in demo trading). This is a valid answer, "
+                "not a failed run."
             ),
             "request_sent": request_sent,
         }
@@ -653,11 +654,11 @@ def probe_copy_trading(dry_run: bool = True) -> dict:
         return {
             "status": "DEMO_CO_HO_TRO",
             "code": result.code,
-            "message_vi": "Demo CÓ hỗ trợ copy trading -- OKX đã chấp nhận yêu cầu.",
+            "message_vi": "Demo DOES support copy trading -- OKX accepted the request.",
             "canh_bao": (
-                f"ĐÃ THỰC SỰ TẠO COPY SETTING trên demo với lead trader "
-                f"{unique_code}. Phải gỡ ngay bằng POST "
-                "/api/v5/copytrading/stop-copy-trading với body "
+                f"A REAL COPY SETTING WAS CREATED on demo with lead trader "
+                f"{unique_code}. Must be torn down immediately with POST "
+                "/api/v5/copytrading/stop-copy-trading and body "
                 f'{{"instType": "SWAP", "uniqueCode": "{unique_code}", '
                 '"subPosCloseType": "manual_close"}.'
             ),
@@ -669,8 +670,8 @@ def probe_copy_trading(dry_run: bool = True) -> dict:
         "code": result.code,
         "raw_msg": result.msg,
         "message_vi": (
-            f"OKX trả về mã lỗi khác (code={result.code}, msg gốc: {result.msg!r}) "
-            "-- không đoán ý nghĩa, tra cứu tại "
+            f"OKX returned a different error code (code={result.code}, raw msg: {result.msg!r}) "
+            "-- not guessing its meaning, look it up at "
             "https://www.okx.com/docs-v5/en/#error-code-rest-api-copy-trading."
         ),
         "request_sent": request_sent,

@@ -122,13 +122,28 @@ Cách 2 — khai báo tay trong `.mcp.json` ở gốc repo:
 | `list_assets` | *(không)* | Nhanh (đọc thư mục) | Liệt kê asset có dữ liệu crawl, kèm venue CEX/DEX |
 | `list_bots` | `asset`, `venue_type` | Nhanh (đọc `overview.json`) | Liệt kê bot của một asset: folder name, nick name, unique code |
 | `list_assessed_bots` | `verdict` (tùy chọn) | Nhanh (đọc `data/assessment/index.json`) | Liệt kê bot đã QC chấm điểm, lọc theo xếp loại nếu cần |
-| `get_assessment` | `unique_code` | Nhanh (đọc `assessment.json`) | Đọc điểm số + **bản khuyến nghị tiếng Việt đầy đủ** của một bot đã chấm |
+| `get_assessment` | `unique_code` | Nhanh (đọc `assessment.json`) | Đọc điểm số + **bản khuyến nghị đầy đủ (tiếng Anh)** của một bot đã chấm |
 | `assess_bot` | `asset`, `bot_folder_name`, `venue_type` (mặc định `CEX`) | **Chậm** — chạy pipeline thật (~1.5-5 giây, xem đo lường bên dưới) | Chạy Logic 1→2→3 sống cho một bot, không ghi lịch sử ra đĩa |
 | `get_market` | `symbol`, `venue_type` (mặc định `CEX`) | Nhanh (~0.1 giây) | Chạy Logic 1 sống: chuẩn hoá dữ liệu market đã crawl thành `MarketResult` đầy đủ |
 
 `venue_type` chỉ nhận `CEX` hoặc `DEX` (không phân biệt hoa/thường ở input,
-nhưng lỗi và log luôn dùng chữ hoa). `verdict` chỉ nhận một trong bốn giá trị
-hệ thống thật sự sinh ra: `AN TOÀN`, `TIỀM NĂNG`, `TIỀM ẨN`, `NGUY HIỂM`.
+nhưng lỗi và log luôn dùng chữ hoa). `verdict` chỉ nhận một trong SÁU giá trị
+hệ thống thật sự sinh ra (xem `VALID_VERDICTS` trong
+`Agent/backend/agent_server.py` — nguồn duy nhất):
+
+| Nhãn | Nghĩa |
+|---|---|
+| `DRAWDOWN: LOW · QUALITY: GOOD` | sụt vốn thấp, chất lượng tốt |
+| `DRAWDOWN: LOW · QUALITY: WEAK` | sụt vốn thấp nhưng chất lượng yếu |
+| `DRAWDOWN: HIGH · QUALITY: GOOD` | chất lượng tốt nhưng sụt vốn cao |
+| `DRAWDOWN: HIGH · QUALITY: WEAK` | sụt vốn cao và chất lượng yếu |
+| `HIDDEN RISK` | số liệu bề mặt che rủi ro — cờ ưu tiên, đè lên hai trục |
+| `INSUFFICIENT EVIDENCE` | bằng chứng quá mỏng để kết luận |
+
+Nhãn là HAI TRỤC (sụt vốn × chất lượng), không phải một thang bốn bậc: một
+bot có thể chất lượng tốt mà vẫn sụt vốn cao, và thang một chiều cũ
+(`AN TOÀN`/`TIỀM NĂNG`/`TIỀM ẨN`/`NGUY HIỂM`) đã bị bỏ — không còn sinh ra ở
+đâu trong hệ thống.
 
 ### Đo tốc độ thật (yêu cầu nghiệm thu)
 
@@ -152,7 +167,7 @@ chuẩn hoá file JSON đã crawl sẵn, không mô phỏng.
 
 ## Nguyên tắc an toàn
 
-- **Fail-closed**: bot/asset/symbol chưa có dữ liệu → lỗi tiếng Việt nói rõ
+- **Fail-closed**: bot/asset/symbol chưa có dữ liệu → lỗi nói rõ
   đang thiếu gì (ví dụ: "Asset X chưa có dữ liệu bot trên CEX ... cần crawl
   trước"), không bao giờ trả danh sách rỗng giả vờ là "không có rủi ro".
 - **Không tool nào tự crawl.** Thiếu dữ liệu là lỗi, không phải lý do để tự
@@ -169,26 +184,39 @@ chuẩn hoá file JSON đã crawl sẵn, không mô phỏng.
 
 **Câu hỏi:** "Trong các bot đã chấm điểm, bot nào đang nguy hiểm?"
 
-AI agent gọi `list_assessed_bots(verdict="NGUY HIỂM")`, nhận về danh sách kèm
-`unique_code`. Sau đó gọi `get_assessment(unique_code=...)` cho từng bot để
-lấy bản khuyến nghị đầy đủ, ví dụ với bot `King_GG` (`811997770117827919`,
-slot `DEX/WBTC`):
+AI agent gọi `list_assessed_bots(verdict="HIDDEN RISK")`, nhận về danh sách
+kèm `unique_code`. Sau đó gọi `get_assessment(unique_code=...)` cho từng bot
+để lấy bản khuyến nghị đầy đủ. Ví dụ THẬT, chép từ
+`data/assessment/dex/WBTC/bot/King_GG__811997770117827919/assessment.json`
+(schema `bot_assessment.v3`):
 
 ```json
 {
-  "bot": {"nick_name": "King_GG", "unique_code": "811997770117827919", "slot": "DEX/WBTC"},
-  "khuyen_nghi": {
-    "ket_luan": "NGUY HIỂM",
-    "hanh_dong": "EMERGENCY_STOP",
-    "diem_chat_luong": 59.6,
-    "diem_rui_ro": 100.0,
-    "text_full": "... (đoạn văn tiếng Việt giải thích đầy đủ lý do) ..."
-  }
+  "schema_version": "bot_assessment.v3",
+  "bot": {
+    "nick_name": "King_GG",
+    "unique_code": "811997770117827919",
+    "slot": "DEX/WBTC",
+    "rank_in_cohort": 1
+  },
+  "recommendation": {
+    "verdict": "HIDDEN RISK",
+    "action": "EMERGENCY_STOP",
+    "quality_score": 59.6,
+    "risk_score": 100.0,
+    "confidence": 60.3,
+    "reasons": "The surface numbers hide risk: unrealised loss equals 43% of capital",
+    "text": ["... (các đoạn giải thích đầy đủ) ..."]
+  },
+  "expert_assessment": "... (đoạn nhận định do mô hình ngôn ngữ viết) ..."
 }
 ```
 
-AI agent đọc thẳng `khuyen_nghi.text_full` để trả lời người dùng bằng tiếng
-Việt, không cần tự diễn giải các con số thô.
+AI agent đọc thẳng `recommendation.text` (danh sách đoạn văn) hoặc
+`expert_assessment` để trả lời người dùng, không cần tự diễn giải các con số
+thô. **Toàn bộ chuỗi trả về là TIẾNG ANH** — sản phẩm phục vụ marketplace
+toàn cầu; các khoá tiếng Việt của schema v1/v2 (`khuyen_nghi`, `ket_luan`,
+`diem_rui_ro`, `text_full`...) đã bị đổi tên và không còn tồn tại.
 
 **Câu hỏi mang tính giả định:** "Nếu bot Y chạy đến hôm nay thì rủi ro thế
 nào?" — khi bot chưa có trong `data/assessment/index.json` (chưa qua batch

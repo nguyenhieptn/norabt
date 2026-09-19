@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── Light Mode (Trong sáng, thanh lịch, chuẩn mực WCAG AA) ────────── */
+    --background:        210 22% 98%;
+    --foreground:        222 40% 14%;
+    --card:              0 0% 100%;
+    --card-foreground:   222 40% 14%;
+    --border:            215 18% 88%;
+    --input:             215 18% 88%;
+    --ring:              217 85% 50%;
+
+    --muted:             210 20% 95%;
+    --muted-foreground:  215 16% 42%;
+
+    /* Brand Colors */
+    --primary:           217 85% 50%;
+    --primary-foreground:0 0% 100%;
+    --secondary:         210 20% 95%;
+    --secondary-foreground: 222 40% 14%;
+    --accent:            217 85% 50%;
+    --accent-foreground: 0 0% 100%;
+    --popover:           0 0% 100%;
+    --popover-foreground:222 40% 14%;
+    --destructive:       0 65% 46%;
+    --destructive-foreground: 0 0% 100%;
+
+    --brand-blue:        217 91% 60%;
+    --brand-cyan:        199 89% 50%;
+
+    /* Semantic Status */
+    --success:           174 60% 28%;
+    --warning:           38 78% 42%;
+    --danger:            0 65% 46%;
+
+    /* Categories Tags */
+    --cat-doc:           217 85% 50%;
+    --cat-code:          199 89% 45%;
+    --cat-cert:          38 78% 42%;
+    --cat-data:          190 65% 32%;
+    --cat-event:         340 60% 46%;
+    --cat-reward:        160 55% 30%;
+
+    /* 5-tier Border Radius Hierarchy */
+    --radius-xs: 0.25rem;  /* 4px */
+    --radius-sm: 0.5rem;   /* 8px */
+    --radius-md: 0.75rem;  /* 12px */
+    --radius-lg: 1.0rem;   /* 16px */
+    --radius-xl: 1.25rem;  /* 20px */
+
+    /* Gradients & Glows */
+    --gradient-cta:  linear-gradient(135deg, hsl(217 85% 50%) 0%, hsl(199 89% 48%) 100%);
+    --glow-primary:  0 1px 2px hsl(222 40% 14% / 0.05), 0 2px 10px hsl(217 85% 50% / 0.10);
+  }
+
+  .dark {
+    /* ── Dark Mode (Huyền bí, sâu thẳm, dịu mắt phong cách Web3) ──────── */
+    --background:        222 47% 7%;
+    --foreground:        210 40% 98%;
+    --card:              222 47% 10%;
+    --card-foreground:   210 40% 98%;
+    --border:            217 32% 17%;
+    --input:             217 32% 17%;
+    --ring:              217 91% 60%;
+
+    --muted:             217 32% 14%;
+    --muted-foreground:  215 20% 65%;
+
+    --primary:           217 91% 60%;
+    --primary-foreground:222 47% 7%;
+    --secondary:         217 32% 14%;
+    --secondary-foreground: 210 40% 98%;
+    --accent:            217 91% 60%;
+    --accent-foreground: 222 47% 7%;
+    --popover:           222 47% 10%;
+    --popover-foreground:210 40% 98%;
+    --destructive:       0 75% 66%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success:           172 55% 55%;
+    --warning:           38 85% 62%;
+    --danger:            0 75% 66%;
+
+    --glow-primary:  0 1px 3px hsl(0 0% 0% / 0.3), 0 4px 16px hsl(217 91% 60% / 0.18);
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    background: hsl(var(--card) / 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid hsl(var(--border) / 0.6);
+  }
+  .gradient-cta {
+    background-image: var(--gradient-cta);
+  }
+}

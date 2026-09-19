@@ -221,10 +221,6 @@ class TradeLedgerManager:
         )
         return LedgerParseResult(trades, rejected, warnings)
 
-    @classmethod
-    def parse_trade_list(cls, raw_data: Dict[str, Any]) -> List[TradeLedgerItem]:
-        return cls.parse_trade_list_with_diagnostics(raw_data).trades
-
     @staticmethod
     def determine_measurement_mode(
         trades: List[TradeLedgerItem],

@@ -40,6 +40,30 @@ services:
     user: "1000:1000"
     restart: unless-stopped
 
+    # Snapshot Redis (GET /bot/<code> cache) giờ là service `agent-redis`
+    # riêng của project này (định nghĩa cuối file), nằm trên CÙNG mạng bridge
+    # mặc định mà Compose tự tạo cho project này -- nên agent-web gọi thẳng
+    # tới nó bằng tên service (`redis://agent-redis:6379`, xem
+    # Agent/.env.example's NORABT_SNAPSHOT_REDIS_URL), không cần
+    # extra_hosts/host.docker.internal nữa. Lịch sử: từng thử trỏ tới
+    # `norabt-redis` (Redis dùng chung với dự án "nora", chạy
+    # `network: host`) qua host.docker.internal:host-gateway, nhưng đo được
+    # trên hạ tầng thật là KHÔNG BAO GIỜ tới được -- `norabt-redis` chỉ bind
+    # 127.0.0.1 của HOST nên bridge network luôn bị từ chối kết nối ngay
+    # ("connection refused"). Cấp hẳn agent-redis riêng giải quyết dứt điểm,
+    # xem README phần Redis để biết đầy đủ lý do đổi hướng.
+    depends_on:
+      agent-redis:
+        # Chỉ ảnh hưởng THỨ TỰ khởi động (đợi agent-redis healthy trước khi
+        # tạo agent-web) -- KHÔNG biến Redis thành phụ thuộc cứng. Nếu
+        # agent-redis chết SAU KHI cả hai đã lên, agent-web không bị
+        # Compose/Docker khởi động lại hay đánh unhealthy vì việc đó -- đúng
+        # tinh thần "đây là bộ đệm, không phải kho dữ liệu chính thức" của
+        # snapshot.py (xem module docstring): mọi request khi đó chỉ đơn
+        # giản rơi về chấm điểm trực tiếp, /healthz báo "unreachable", trang
+        # vẫn phục vụ HTTP 200 bình thường.
+        condition: service_healthy
+
     # CHỈ bind vào loopback của HOST. Tuyệt đối không đổi thành "8770:8770"
     # hay "0.0.0.0:8770:8770" -- làm vậy là mở thẳng cổng 8770 ra internet,
     # bỏ qua toàn bộ rate limit/TLS/kiểm soát truy cập nginx đang lo (server
@@ -62,6 +86,9 @@ services:
       # NGOÀI container (chạy trực tiếp trên host), agent-web chỉ cần đọc lại
       # (list_bots/list_markets trong web/data.py là plain JSON read).
       - ../data:/app/Agent/data:ro
+
+      # Backend code mounted read-only for live updates without full rebuilds.
+      - ../backend:/app/Agent/backend:ro
 
       # The dashboard HTML is authored outside backend/ and is deliberately NOT
       # baked into the image: it changes far more often than the code, and a
@@ -103,6 +130,109 @@ services:
       # mục do root tạo, tái diễn ĐÚNG lỗi mount chỉ-đọc mà nhánh mount này
       # định sửa. Xem README bước tạo thư mục kèm .gitkeep.
       - ../data/users:/app/Agent/data/users:rw
+
+      # Nhánh con ghi-được thứ ba, CÙNG KHUÔN với users/ ở trên: kho mã
+      # lượt-dùng ẩn danh (Agent/backend/web/usage_ref.py, Việc 2) --
+      # POST/GET /api/analyze tự đúc một file mới ở đây (data/usage_refs/
+      # <ref>.json) cho MỖI lượt phân tích thành công của một caller KHÔNG
+      # đăng nhập (chính là luồng OKX), để link chi tiết trả về không mang
+      # theo mã bot đoán-được (`/bot/<code>`) và cũng không trộn vào hồ sơ
+      # người dùng thật ở data/users/ -- xem usage_ref.py's own module
+      # docstring cho đầy đủ lý do tách kho. Cùng lý do BẮT BUỘC tạo trước
+      # + chown uid 1000 như data/users/ ở trên (xem README bước tạo thư
+      # mục): nếu chưa có, Docker tự tạo nó thuộc quyền root lúc mount và
+      # container (chạy user 1000:1000) không ghi được vào đó.
+      - ../data/usage_refs:/app/Agent/data/usage_refs:rw
+
+      # --- Nhận định chuyên môn (narrative) do Claude viết -- xem README
+      # bước 12 và Agent/backend/qc/reporting/narrative.py's module
+      # docstring cho đầy đủ thiết kế. Image KHÔNG cài Node/Claude Code --
+      # binary `claude` (đo được: ELF 64-bit tự chứa 224MB, không cần Node
+      # hay runtime nào khác) chỉ tồn tại TRÊN HOST, nên phải mount vào chứ
+      # không cài vào image.
+      #
+      # Mount CẢ THƯ MỤC versions/ (không phải một file phiên bản cụ thể):
+      # Claude Code tự cập nhật (thêm bản mới, trỏ lại symlink
+      # ~/.local/bin/claude, giữ lại bản cũ) -- một đường dẫn có số phiên
+      # bản gán cứng ("versions/2.1.270") sẽ CHẮC CHẮN biến mất sau một lần
+      # cập nhật, làm mount rỗng và narrative âm thầm rơi về văn bản mẫu
+      # mãi mãi mà không ai biết. narrative.py's resolve_claude_binary() tự
+      # quét thư mục này, chọn bản SEMVER CAO NHẤT (so sánh từng phần dưới
+      # dạng số nguyên, không so chuỗi -- tránh bẫy "2.1.9" > "2.1.10" khi
+      # so bằng string), cache kết quả 45s nên một bản cập nhật trên HOST
+      # được container nhận trong vòng chưa tới một phút, KHÔNG CẦN restart
+      # container. Chỉ-đọc: container không bao giờ cần ghi vào đây.
+      #
+      # NORABT_CLAUDE_VERSIONS_DIR ở đây là biến MÔI TRƯỜNG CỦA SHELL đang
+      # chạy lệnh `docker compose` (KHÔNG PHẢI biến trong Agent/.env -- đó
+      # là hai cơ chế khác nhau: `${...}` được Compose thay thế NGAY LÚC
+      # đọc file này, còn `env_file: ../.env` chỉ nạp biến vào bên TRONG
+      # container). Để trống (mặc định) dùng đúng đường dẫn đã đo trên máy
+      # chủ dự án này -- xem README bước 12 để biết cách lấy lại đường dẫn
+      # này trên một máy khác (`dirname $(readlink -f $(which claude))`) và
+      # cách ghi đè khi nó đổi.
+      - ${NORABT_CLAUDE_VERSIONS_DIR:-/home/ubuntu/.local/share/claude/versions}:/opt/claude/versions:ro
+
+      # Chỉ mount ĐÚNG MỘT FILE `.credentials.json` (509 byte, đo được) --
+      # TUYỆT ĐỐI không mount cả `~/.claude/` (cây đó chứa lịch sử hội
+      # thoại, file-history, cấu hình dự án của chính CHỦ máy chủ -- không
+      # có lý do gì để container này đọc được) và không mount `~/.claude.json`
+      # (74KB, cấu hình toàn cục khác, cũng không cần cho việc gọi
+      # `claude -p`). Chỉ-đọc: container không bao giờ tự làm mới được
+      # phiên đăng nhập này -- xem ghi chú giới hạn ở README bước 12.
+      # `${HOME}` ở đây là HOME của user đang chạy `docker compose up`
+      # (mặc định fallback về /home/ubuntu cho đúng user chạy compose trên
+      # máy chủ dự án này, ghi đè được qua biến shell HOME như bình
+      # thường).
+      - ${HOME:-/home/ubuntu}/.claude/.credentials.json:/opt/agent-home/.claude/.credentials.json:ro
+
+      # --- Backend `agy` (Gemini 3.8 Flash) -- backend ĐANG DÙNG ---------
+      # Cùng lý do như `claude` ở trên: binary chỉ có trên host (ELF tự
+      # chứa 209MB), image không cài. Khác một điểm QUAN TRỌNG: `agy` là
+      # một file DUY NHẤT, không phải cây versions/ tự cập nhật, nên mount
+      # thẳng file. Ghi đè đường dẫn host qua biến shell NORABT_AGY_BIN_HOST
+      # nếu máy khác cài chỗ khác (`readlink -f $(which agy)`).
+      - ${NORABT_AGY_BIN_HOST:-/home/ubuntu/.local/bin/agy}:/opt/agy/agy:ro
+
+      # HOME GHI ĐƯỢC cho tiến trình con. Đây là khác biệt cốt lõi so với
+      # `claude`: claude chỉ ĐỌC credential, còn agy GHI vào $HOME mỗi lượt
+      # chạy (installation_id, conversations/, cache/, và cả
+      # $HOME/.cache/ms-playwright-go). Thử trong container nháp với HOME
+      # chỉ-đọc cho đúng lỗi này:
+      #     Failed to start: open /opt/agent-home/.gemini/antigravity-cli/
+      #     installation_id: permission denied
+      # Thư mục host PHẢI tồn tại và thuộc uid 1000 TRƯỚC khi mount -- nếu
+      # chưa có, Docker tạo nó thuộc root và tái diễn đúng lỗi trên (cùng
+      # khuôn với data/users và data/usage_refs ở trên).
+      #
+      # CỐ Ý KHÔNG mount cả ~/.gemini của chủ máy: cây đó chứa history/,
+      # antigravity-ide/ và hội thoại riêng. Chỉ một file token được sao
+      # vào thư mục riêng này -- đúng nguyên tắc đã áp dụng cho
+      # .credentials.json của claude. Đã đo: đây là file DUY NHẤT agy cần
+      # để xác thực.
+      - ${NORABT_AGENT_HOME:-/home/ubuntu/.norabt-agent-home}:/opt/agent-home:rw
+
+    environment:
+      # HOME riêng cho tiến trình agent-web bên trong container (KHÔNG phải
+      # HOME dùng để tìm mount phía trên -- đó là HOME của SHELL chạy
+      # compose trên host, một khái niệm hoàn toàn khác). `claude` CLI đọc
+      # thông tin đăng nhập tại `$HOME/.claude/.credentials.json` -- đặt
+      # HOME=/opt/claude-home để nó khớp đúng target của mount
+      # `.credentials.json` ở trên. narrative.py's
+      # `minimal_subprocess_environment` đã có sẵn "HOME" trong allow-list
+      # truyền cho tiến trình con `claude`, nên chỉ cần đặt đúng biến này ở
+      # cấp container là đủ, không cần sửa gì thêm trong code.
+      # Đổi từ /opt/claude-home (chỉ-đọc, thuộc root) sang một HOME GHI
+      # ĐƯỢC do host cấp: `agy` cần ghi, `claude` thì không quan tâm vì nó
+      # chỉ đọc $HOME/.claude/.credentials.json -- mount ở trên đã trỏ
+      # đúng vào đường dẫn mới nên cả hai backend vẫn tìm thấy thông tin
+      # đăng nhập của mình.
+      - HOME=/opt/agent-home
+
+      # Đường dẫn binary `agy` BÊN TRONG container (khớp target mount ở
+      # trên). Không đặt thì narrative.py tìm "agy" trong PATH và không
+      # thấy -- image không cài nó.
+      - NORABT_AGY_BIN=/opt/agy/agy
 
     # --- Giới hạn tài nguyên -----------------------------------------------
     # Ràng buộc cứng của dự án: TOÀN BỘ phần việc (không chỉ service này)
@@ -180,3 +310,70 @@ services:
       # dựng WebDataService) trước khi một lần healthcheck thất bại bắt đầu
       # được tính vào "retries".
       start_period: 20s
+
+  # Redis RIÊNG của agent, KHÔNG PHẢI norabt-redis (dự án "nora" dùng chung
+  # với 6 container khác trên host). Lý do tách hẳn thay vì cố với tới
+  # norabt-redis: norabt-redis chạy `network_mode: host` và Redis bên trong
+  # nó CHỈ bind 127.0.0.1 -- tức loopback CỦA HOST, không phải của bất kỳ
+  # container bridge nào. agent-web nằm trên mạng bridge riêng của project
+  # này (deploy_default) nên một kết nối tới norabt-redis luôn bị kernel từ
+  # chối ngay ("connection refused"), bất kể extra_hosts/host.docker.internal
+  # có khai báo đúng cách mấy -- đã đo trực tiếp trên hạ tầng thật, xem
+  # README phần Redis. Mở thêm bind cho norabt-redis để nhận kết nối từ
+  # bridge network là thay đổi vận hành của DỰ ÁN KHÁC (nới bind của một
+  # Redis không mật khẩu ra khỏi loopback thuần), nên KHÔNG làm; cấp hẳn một
+  # Redis mới, nhỏ, riêng cho agent là lựa chọn không đụng gì tới nora.
+  agent-redis:
+    image: redis:7-alpine
+    container_name: norabt-agent-redis
+    restart: unless-stopped
+
+    # KHÔNG publish cổng nào ra host (không có mục `ports:` ở đây) -- chỉ
+    # agent-web, đứng cùng mạng bridge mặc định mà Compose tự tạo cho
+    # project này, gọi được tới nó qua tên service "agent-redis:6379". Một
+    # Redis không đặt mật khẩu (`requirepass`) mà lỡ mở cổng ra host/internet
+    # là mời bất kỳ ai biết địa chỉ vào đọc/ghi/xoá dữ liệu -- ở đây dữ liệu
+    # chỉ là cache nên rủi ro thấp, nhưng "không publish" vẫn là lựa chọn
+    # đúng mặc định: không có lý do gì để bất kỳ tiến trình nào ngoài
+    # agent-web trên máy này chạm được vào nó.
+    command: redis-server --save "" --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru
+
+    # --save "" và --appendonly no: tắt hoàn toàn RDB snapshot lẫn AOF. Dữ
+    # liệu trong Redis này (xem Agent/backend/web/snapshot.py) là BỘ ĐỆM tái
+    # tạo được -- mất là chấm điểm lại từ đầu, không phải mất dữ liệu gốc
+    # (WebDataService.analyze() + Agent/data mới là nguồn sự thật). Tắt lưu
+    # bền nghĩa là không có file .rdb/.aof nào đọng lại trên đĩa host qua
+    # các lần restart, và mỗi lần khởi động lại container này luôn là một
+    # cache trống-sạch, không có "hồi sinh" dữ liệu cũ ngoài ý muốn.
+
+    # --maxmemory 128mb --maxmemory-policy allkeys-lru: chặn trần bộ nhớ
+    # RIÊNG của Redis này (cộng với mem_limit ở cấp container ngay dưới) --
+    # nằm gọn trong ràng buộc cứng của dự án là TOÀN BỘ phần việc (không chỉ
+    # service này) phải ≤12 core/≤14GB RAM trên máy 24 core/30GB đã dùng
+    # ~8GB. Chính sách allkeys-lru (không phải noeviction) nghĩa là khi đầy,
+    # Redis tự loại khoá cũ nhất thay vì trả lỗi ghi -- đúng tinh thần "bộ
+    # đệm, mất thì thôi" của snapshot.py (SNAPSHOT_MAX_BYTES + TTL 24h đã tự
+    # giới hạn từng khoá/tuổi thọ, 128MB chỉ là lớp chặn tổng cuối cùng).
+
+    # 192m > 128mb maxmemory ở trên: chừa khoảng đệm cho overhead của chính
+    # tiến trình redis-server (kết nối, cấu trúc dữ liệu nội bộ...) nằm
+    # ngoài phần dữ liệu đếm vào maxmemory, để container không bị cgroup
+    # OOM-kill ngay sát ngưỡng dữ liệu.
+    mem_limit: 192m
+    memswap_limit: 192m
+
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

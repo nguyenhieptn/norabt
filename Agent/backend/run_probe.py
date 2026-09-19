@@ -48,7 +48,7 @@ def _mark(ok: Any) -> str:
 
 
 def _print_public(result: Dict[str, Any]) -> None:
-    _section("[1] CONNECT ĐƯỢC SÀN CHƯA? (public, không cần API key)")
+    _section("[1] IS THE EXCHANGE REACHABLE? (public, no API key needed)")
     for check in result["checks"]:
         latency = (
             f"{check['latency_ms']:.0f} ms" if check["latency_ms"] is not None else "-"
@@ -57,88 +57,88 @@ def _print_public(result: Dict[str, Any]) -> None:
             f"{_mark(check['ok'])} {check['name']} -- {check['endpoint']} ({latency})"
         )
         if not check["ok"]:
-            print(f"    CẦN LÀM: {check['detail']}")
+            print(f"    ACTION NEEDED: {check['detail']}")
 
     skew = result["clock_skew_ms"]
     if skew is None:
-        print(f"{_mark(None)} Lệch đồng hồ so với server OKX: không đo được.")
+        print(f"{_mark(None)} Clock skew vs the OKX server: could not measure.")
     else:
         ok = result["clock_skew_ok"]
-        print(f"{_mark(ok)} Lệch đồng hồ so với server OKX: {skew:+.1f} ms")
+        print(f"{_mark(ok)} Clock skew vs the OKX server: {skew:+.1f} ms")
         if not ok:
             print(
-                "    CẦN LÀM: lệch >= 30 giây (30000 ms), OKX sẽ từ chối mọi "
-                "request đã ký (code 50102). Đồng bộ lại giờ hệ thống (NTP) "
-                "trước khi debug bất cứ lỗi chữ ký nào."
+                "    ACTION NEEDED: skew is >= 30 seconds (30000 ms), OKX will "
+                "reject every signed request (code 50102). Resync the system "
+                "clock (NTP) before debugging any signature error."
             )
 
     status = result["status"]
     if status == "OK":
-        print("KẾT LUẬN: connect được sàn OKX ở mức public.")
+        print("CONCLUSION: the OKX exchange is reachable at the public level.")
     elif status == "LOI_MOT_PHAN":
         print(
-            "KẾT LUẬN: connect được một phần -- một số endpoint public đang lỗi (xem trên)."
+            "CONCLUSION: partially reachable -- some public endpoints are failing (see above)."
         )
     else:
-        print("KẾT LUẬN: CHƯA connect được sàn OKX (toàn bộ endpoint public đều lỗi).")
+        print("CONCLUSION: OKX is NOT reachable (every public endpoint failed).")
 
 
 def _print_private(result: Dict[str, Any]) -> None:
-    _section("[2] TƯƠNG TÁC ĐƯỢC KHÔNG? -- KEY OKX (private, chỉ đọc, không đặt lệnh)")
+    _section("[2] CAN WE INTERACT? -- OKX KEY (private, read-only, no orders placed)")
     status = result["status"]
     if status == "CHUA_CAU_HINH":
-        print(f"{_mark(False)} Chưa cấu hình key OKX.")
-        print(f"    Thiếu biến môi trường: {', '.join(result['missing_fields'])}")
+        print(f"{_mark(False)} OKX key not configured.")
+        print(f"    Missing environment variables: {', '.join(result['missing_fields'])}")
         print(
-            "    CẦN LÀM: điền các biến trên vào Agent/.env (xem Agent/.env.example)."
+            "    ACTION NEEDED: fill in the variables above in Agent/.env (see Agent/.env.example)."
         )
         return
 
     env = result.get("environment", "?")
     if status == "OK":
-        print(f"{_mark(True)} Key hoạt động trên môi trường {env}.")
+        print(f"{_mark(True)} Key works on the {env} environment.")
         print(f"    {result['message_vi']}")
     elif status == "LOI_KET_NOI":
-        print(f"{_mark(False)} Không kết nối được tới OKX (môi trường {env}).")
-        print(f"    CẦN LÀM: {result['message_vi']}")
+        print(f"{_mark(False)} Could not connect to OKX (environment {env}).")
+        print(f"    ACTION NEEDED: {result['message_vi']}")
     else:  # LOI -- OKX answered and rejected the key
-        print(f"{_mark(False)} OKX từ chối key (môi trường {env}).")
-        print(f"    Mã lỗi: {result['error_code']} -- {result['message_vi']}")
+        print(f"{_mark(False)} OKX rejected the key (environment {env}).")
+        print(f"    Error code: {result['error_code']} -- {result['message_vi']}")
 
 
 def _print_copy_trading(result: Dict[str, Any], *, executed: bool) -> None:
-    mode = "GỌI THẬT" if executed else "DRY-RUN (chỉ xem trước, chưa gọi mạng)"
-    _section(f"[3] TƯƠNG TÁC COPY TRADING -- {mode}")
+    mode = "REAL CALL" if executed else "DRY-RUN (preview only, no network call)"
+    _section(f"[3] COPY TRADING INTERACTION -- {mode}")
     status = result["status"]
 
     if status == "DRY_RUN":
         call = result["would_call"]
-        print(f"Sẽ gọi: {call['method']} {call['endpoint']}")
+        print(f"Would call: {call['method']} {call['endpoint']}")
         print(f"Body: {call['body']}")
-        print(f"Header (đã che secret): {call['headers']}")
+        print(f"Headers (secrets masked): {call['headers']}")
         print(f"{result['message_vi']}")
         return
 
     if status == "CHUA_CAU_HINH":
-        print(f"{_mark(False)} Chưa cấu hình key OKX.")
-        print(f"    Thiếu biến môi trường: {', '.join(result['missing_fields'])}")
+        print(f"{_mark(False)} OKX key not configured.")
+        print(f"    Missing environment variables: {', '.join(result['missing_fields'])}")
         print(
-            "    CẦN LÀM: điền các biến trên vào Agent/.env rồi chạy lại với --execute."
+            "    ACTION NEEDED: fill in the variables above in Agent/.env, then re-run with --execute."
         )
         return
 
     if status == "LOI_KET_NOI":
-        print(f"{_mark(False)} Không gọi được OKX.")
-        print(f"    CẦN LÀM: {result['message_vi']}")
+        print(f"{_mark(False)} Could not call OKX.")
+        print(f"    ACTION NEEDED: {result['message_vi']}")
         return
 
     if status == "DEMO_KHONG_HO_TRO":
-        print(f"{_mark(True)} Có câu trả lời: {result['message_vi']}")
-        print(f"    Mã lỗi OKX: {result['code']} (msg gốc: {result['raw_msg']!r})")
+        print(f"{_mark(True)} Got an answer: {result['message_vi']}")
+        print(f"    OKX error code: {result['code']} (raw msg: {result['raw_msg']!r})")
         return
 
     if status == "DEMO_CO_HO_TRO":
-        print(f"{_mark(True)} Có câu trả lời: {result['message_vi']}")
+        print(f"{_mark(True)} Got an answer: {result['message_vi']}")
         print(f"    !!! {result['canh_bao']}")
         return
 
@@ -146,46 +146,46 @@ def _print_copy_trading(result: Dict[str, Any], *, executed: bool) -> None:
         print(f"{_mark(False)} {result['message_vi']}")
         return
 
-    print(f"{_mark(False)} Trạng thái không xác định: {result}")
+    print(f"{_mark(False)} Unknown status: {result}")
 
 
 def main(argv: Any = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python3 -m Agent.backend.run_probe",
-        description="Chẩn đoán kết nối và khả năng tương tác với OKX.",
+        description="Diagnose OKX connectivity and interaction capability.",
     )
     parser.add_argument(
         "--copy-trading",
         action="store_true",
-        help="Thêm probe_copy_trading (mặc định dry-run, không gọi mạng).",
+        help="Also run probe_copy_trading (dry-run by default, no network call).",
     )
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="Gọi copy trading thật thay vì dry-run (chỉ chạy được trên demo).",
+        help="Call copy trading for real instead of dry-run (demo only).",
     )
     args = parser.parse_args(argv)
     if args.execute and not args.copy_trading:
-        parser.error("--execute chỉ có ý nghĩa khi đi cùng --copy-trading")
+        parser.error("--execute only makes sense together with --copy-trading")
 
     now = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M:%S UTC")
     print(_rule())
-    print("CHẨN ĐOÁN KẾT NỐI & TƯƠNG TÁC OKX")
+    print("OKX CONNECTIVITY & INTERACTION DIAGNOSTIC")
     print(now)
-    # Hiển thị đường dẫn tương đối cho gọn (vd. "Agent/.env") khi chạy từ gốc
-    # repo; rơi về đường dẫn tuyệt đối nếu không tính được đường tương đối.
+    # Show a relative path for brevity (e.g. "Agent/.env") when run from the
+    # repo root; fall back to the absolute path if a relative one can't be computed.
     try:
         env_file_display = os.path.relpath(config.ENV_FILE_PATH)
     except ValueError:
         env_file_display = config.ENV_FILE_PATH
     if config.ENV_FILE_LOADED:
         print(
-            f"Nguồn cấu hình: {env_file_display} "
-            f"(đã nạp {config.ENV_FILE_VARS_LOADED} biến)"
+            f"Config source: {env_file_display} "
+            f"(loaded {config.ENV_FILE_VARS_LOADED} variables)"
         )
     else:
         print(
-            f"Nguồn cấu hình: không thấy {env_file_display}, chỉ dùng biến môi trường"
+            f"Config source: {env_file_display} not found, using environment variables only"
         )
     print(_rule())
 
@@ -205,8 +205,8 @@ def main(argv: Any = None) -> int:
         try:
             copy_result = probe_copy_trading(dry_run=not args.execute)
         except LiveTradingRefused as exc:
-            _section("[3] TƯƠNG TÁC COPY TRADING")
-            print(f"{_mark(False)} TỪ CHỐI CHẠY: {exc}")
+            _section("[3] COPY TRADING INTERACTION")
+            print(f"{_mark(False)} REFUSED TO RUN: {exc}")
             return 2
         _print_copy_trading(copy_result, executed=args.execute)
 

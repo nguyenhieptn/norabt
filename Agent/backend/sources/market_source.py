@@ -32,6 +32,7 @@ import json
 import math
 import os
 import statistics
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -499,7 +500,7 @@ _MACRO_TREND_PCT = 3.0
 _MACRO_HIGH_VOL_ANNUALISED_PCT = 80.0
 
 _DEX_UNSUPPORTED_REASON = (
-    "không áp dụng: LiveMarketDataSource chỉ đọc CEX qua OKX, DEX cần nguồn riêng"
+    "not applicable: LiveMarketDataSource only reads CEX via OKX; DEX needs a separate source"
 )
 
 # Raised (well, returned as the tuple's error string -- these three getters
@@ -513,8 +514,8 @@ _DEX_UNSUPPORTED_REASON = (
 # these two cases either) so a caller cannot come to depend on wording that
 # would need to change the day a 6th DEX asset is added to the registry.
 _DEX_ASSET_NOT_IN_REGISTRY_REASON = (
-    "không áp dụng: LiveMarketDataSource chưa được cấu hình dex_registry cho "
-    "tài sản này (không có địa chỉ token để tra DexScreener/GoPlus)"
+    "not applicable: LiveMarketDataSource has no dex_registry configured for "
+    "this asset (no token address to look up on DexScreener/GoPlus)"
 )
 
 # get_orderbook/get_open_interest/get_taker_volume/get_sentiment are CEX-only
@@ -531,8 +532,8 @@ _DEX_ASSET_NOT_IN_REGISTRY_REASON = (
 # returning early costs nothing and, as a bonus, avoids 4 pointless OKX calls
 # per DEX asset once DEX support is enabled.
 _CEX_ONLY_INPUT_NOT_APPLICABLE_TO_DEX_REASON = (
-    "không áp dụng: bản crawl gốc không thu orderbook/OI/taker-flow/sentiment "
-    "kiểu CEX cho tài sản DEX -- xem dex_ticks cho luồng lệnh DEX"
+    "not applicable: the original crawl never collected CEX-style orderbook/OI/"
+    "taker-flow/sentiment for a DEX asset -- see dex_ticks for DEX order flow"
 )
 
 # Mirror of the reason above for the opposite direction: get_ticks/
@@ -543,8 +544,8 @@ _CEX_ONLY_INPUT_NOT_APPLICABLE_TO_DEX_REASON = (
 # give (file not found) rather than this class attempting a DEX-shaped fetch
 # for a CEX asset.
 _DEX_ONLY_INPUT_NOT_APPLICABLE_TO_CEX_REASON = (
-    "không áp dụng: dex_ticks/pool_liquidity/token_security chỉ tồn tại cho "
-    "venue DEX trong bản crawl gốc"
+    "not applicable: dex_ticks/pool_liquidity/token_security only exist for "
+    "the DEX venue in the original crawl"
 )
 
 # -- DexScreener + GoPlus: the two non-OKX providers the original crawl uses
@@ -601,13 +602,13 @@ def _dex_http_get_json(url: str, *, timeout: int = _DEX_HTTP_TIMEOUT_SECONDS) ->
             raw = response.read()
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise MarketDataUnavailableError(
-            f"Không kết nối được tới {url}: {exc}"
+            f"Could not connect to {url}: {exc}"
         ) from exc
     try:
         payload = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise MarketDataUnavailableError(
-            f"Phản hồi không phải JSON hợp lệ từ {url}: {exc}"
+            f"Response from {url} is not valid JSON: {exc}"
         ) from exc
     return payload
 
@@ -760,18 +761,18 @@ def _flow_label(ratio: Optional[float]) -> str:
     if ratio is None:
         return "UNKNOWN"
     if ratio >= 1.2:
-        return "BULLISH_AGGRESSIVE (Lực Mua chủ động áp đảo)"
+        return "BULLISH_AGGRESSIVE (aggressive buy pressure dominates)"
     if ratio <= 0.8:
-        return "BEARISH_AGGRESSIVE (Lực Bán xả thị trường áp đảo)"
-    return "BALANCED (Hai chiều cân bằng)"
+        return "BEARISH_AGGRESSIVE (aggressive sell-off dominates)"
+    return "BALANCED (buy and sell pressure balanced)"
 
 
 def _sentiment_label(ls_ratio: float) -> str:
     if ls_ratio >= 1.2:
-        return "BULLISH (Phe Long áp đảo)"
+        return "BULLISH (longs dominate)"
     if ls_ratio <= 0.83:
-        return "BEARISH (Phe Short áp đảo)"
-    return "NEUTRAL (Hai phe cân bằng)"
+        return "BEARISH (shorts dominate)"
+    return "NEUTRAL (longs and shorts balanced)"
 
 
 # -- macro correlation math, ported verbatim from Agent/scripts/build_macro_context.py --
@@ -872,49 +873,80 @@ class AdaptiveThrottle:
         self._last_request_at: Optional[float] = None
         self._clock = clock
         self._sleep = sleep
+        # Việc 1 (song song hoá theo số nguồn dữ liệu): trước bản sửa này,
+        # một `LiveMarketDataSource`/`AdaptiveThrottle` DUY NHẤT được
+        # `WebDataService` tạo một lần rồi dùng lại cho mọi lời gọi -- kể cả
+        # khi `pipeline.py`/`cohort.py` giờ giải thị trường CHÍNH và PHỤ trên
+        # hai luồng cùng lúc, hay `mcp/service.py` giải nhiều mã song song.
+        # Không có khoá, hai luồng cùng đọc `_last_request_at`/`delay_seconds`
+        # rồi cùng kết luận "chưa tới hạn, đi luôn" -- phá nhịp thực tế đạt
+        # được (có thể vượt xa ~1.8 req/s và khiến OKX chặn IP), đúng thứ
+        # `_last_request_at`/`delay_seconds` tồn tại để ngăn. Khoá này CHỈ
+        # bảo vệ đúng đoạn "đọc trạng thái + đặt chỗ lượt kế tiếp" (xem
+        # `wait()`) -- việc `_sleep()` thật sự luôn nằm NGOÀI khoá, để một
+        # luồng đang ngủ chờ tới lượt không chặn luồng khác đặt chỗ hay chặn
+        # luồng khác đang chờ HTTP response của chính nó.
+        self._lock = threading.Lock()
 
     def wait(self) -> None:
         """Block (via the injected `sleep`) until the current pace allows the
-        next request to go out."""
-        if self._last_request_at is not None:
-            elapsed = self._clock() - self._last_request_at
-            remaining = self.delay_seconds - elapsed
-            if remaining > 0:
-                self._sleep(remaining)
-        self._last_request_at = self._clock()
+        next request to go out. An toàn khi gọi đồng thời từ nhiều luồng --
+        xem `_lock` ở `__init__` cho lý do và cách khoá được dùng."""
+        with self._lock:
+            if self._last_request_at is not None:
+                elapsed = self._clock() - self._last_request_at
+                remaining = self.delay_seconds - elapsed
+            else:
+                remaining = 0.0
+            remaining = max(remaining, 0.0)
+            # Đặt chỗ lượt kế tiếp NGAY trong khoá, dùng thời điểm DỰ KIẾN
+            # gửi request (bây giờ + remaining) chứ không phải thời điểm sau
+            # khi ngủ xong -- để một luồng khác gọi wait() ngay sau đó thấy
+            # đúng lượt đã bị chiếm và tự xếp hàng sau nó, thay vì cả hai
+            # cùng thấy "còn trống" và cùng gửi request gần như đồng thời.
+            self._last_request_at = self._clock() + remaining
+        if remaining > 0:
+            self._sleep(remaining)
 
     def record_success(self) -> None:
         """One more request went through clean. Only nudges the pace after a
         streak of `speedup_after_clean` in a row -- one lucky request right
         after a backoff must not immediately start climbing again -- and only
         ever moves DOWN toward `min_delay_seconds`, by `speedup_factor` at a
-        time. See the class docstring for why this step must stay gentle."""
-        self._clean_streak += 1
-        if self._clean_streak < self.speedup_after_clean:
-            return
-        self._clean_streak = 0
-        new_delay = max(
-            self.min_delay_seconds, self.delay_seconds * self.speedup_factor
-        )
-        if new_delay < self.delay_seconds:
-            self.delay_seconds = new_delay
+        time. See the class docstring for why this step must stay gentle.
+        An toàn đa luồng: xem `_lock` ở `__init__`."""
+        with self._lock:
+            self._clean_streak += 1
+            if self._clean_streak < self.speedup_after_clean:
+                return
+            self._clean_streak = 0
+            new_delay = max(
+                self.min_delay_seconds, self.delay_seconds * self.speedup_factor
+            )
+            if new_delay < self.delay_seconds:
+                self.delay_seconds = new_delay
+                changed = True
+            else:
+                changed = False
+        if changed:
             print(
-                f"  [OKX throttle] {self.speedup_after_clean} request sạch liên "
-                f"tiếp -- tăng nhịp lên {self.rate_description()}."
+                f"  [OKX throttle] {self.speedup_after_clean} consecutive clean "
+                f"requests -- speeding up to {self.rate_description()}."
             )
 
     def record_blocked(self) -> None:
         """OKX (or something in front of it) signalled it's unhappy. Backs
         off immediately by `backoff_factor`, capped at `max_delay_seconds` --
         never waits for a streak the way record_success() does, see the class
-        docstring for why."""
-        self._clean_streak = 0
-        self.delay_seconds = min(
-            self.max_delay_seconds, self.delay_seconds * self.backoff_factor
-        )
+        docstring for why. An toàn đa luồng: xem `_lock` ở `__init__`."""
+        with self._lock:
+            self._clean_streak = 0
+            self.delay_seconds = min(
+                self.max_delay_seconds, self.delay_seconds * self.backoff_factor
+            )
         print(
-            f"  [OKX throttle] Gặp dấu hiệu bị giới hạn tốc độ -- giảm ngay "
-            f"xuống {self.rate_description()}."
+            f"  [OKX throttle] Rate-limit signal detected -- backing off "
+            f"immediately to {self.rate_description()}."
         )
 
     def rate_description(self) -> str:
@@ -1177,7 +1209,7 @@ class LiveMarketDataSource(MarketDataSource):
             # empty" to MarketService -- that is exactly what makes Logic 2
             # grade an asset UNKNOWN instead of reporting the real failure.
             raise MarketDataUnavailableError(
-                f"OKX lỗi khi gọi {path} (params={params}): {exc}"
+                f"OKX error calling {path} (params={params}): {exc}"
             ) from exc
         if self._adaptive_throttle is not None:
             self._adaptive_throttle.record_success()
@@ -1194,7 +1226,7 @@ class LiveMarketDataSource(MarketDataSource):
             ct_val = float(data[0]["ctVal"])
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise MarketDataUnavailableError(
-                f"Không lấy được ctVal cho {inst_id}, không quy đổi được hợp đồng sang coin"
+                f"Could not get ctVal for {inst_id}; cannot convert contracts to coins"
             ) from exc
         self._ct_val_cache[inst_id] = ct_val
         return ct_val
@@ -1205,7 +1237,7 @@ class LiveMarketDataSource(MarketDataSource):
             return float(data[0]["last"])
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise MarketDataUnavailableError(
-                f"Không lấy được giá mới nhất cho {inst_id}"
+                f"Could not get the latest price for {inst_id}"
             ) from exc
 
     # -- venue --------------------------------------------------------------- #
@@ -1221,10 +1253,10 @@ class LiveMarketDataSource(MarketDataSource):
             # support genuinely cannot be served, not for every DEX request.
             if self._dex_asset(symbol) is None:
                 raise MarketDataUnavailableError(
-                    "LiveMarketDataSource chỉ đọc CEX qua OKX; DEX (pool liquidity, "
-                    "bảo mật token) cần DexScreener/nhà cung cấp bảo mật riêng cộng "
-                    "ánh xạ địa chỉ pool tĩnh, không có nguồn OKX tương đương -- "
-                    "ngoài phạm vi của nguồn dữ liệu này."
+                    "LiveMarketDataSource only reads CEX via OKX; DEX (pool liquidity, "
+                    "token security) needs DexScreener/a separate security provider "
+                    "plus a static pool-address mapping -- there is no equivalent OKX "
+                    "source, and it is out of scope for this data source."
                 )
             return "DEX"
         # requested is None or "CEX": unchanged from before DEX support
@@ -1306,7 +1338,7 @@ class LiveMarketDataSource(MarketDataSource):
             if page == 1 or page % _PROGRESS_EVERY == 0:
                 print(
                     f"  [OKX candles] {inst_id} {progress_label}: "
-                    f"{len(collected)} nến, trang {page}..."
+                    f"{len(collected)} candles, page {page}..."
                 )
             if target_count is not None and len(collected) >= target_count:
                 stop_reason = "target_count"
@@ -1319,8 +1351,8 @@ class LiveMarketDataSource(MarketDataSource):
                 break
         if page:
             print(
-                f"  [OKX candles] {inst_id} {progress_label}: xong "
-                f"-- {len(collected)} nến, {page} trang.{self._pace_suffix()}"
+                f"  [OKX candles] {inst_id} {progress_label}: done "
+                f"-- {len(collected)} candles, {page} pages.{self._pace_suffix()}"
             )
         return list(collected.values()), stop_reason
 
@@ -1329,7 +1361,7 @@ class LiveMarketDataSource(MarketDataSource):
         adaptive pacing is off (Việc 2's "in ra nhịp thực tế đạt được")."""
         if self._adaptive_throttle is None:
             return ""
-        return f" Nhịp hiện tại: {self._adaptive_throttle.rate_description()}."
+        return f" Current pace: {self._adaptive_throttle.rate_description()}."
 
     def _paginate_candles_backward(
         self, inst_id: str, bar: str, *, before_ts: int, target_count: int
@@ -1375,16 +1407,16 @@ class LiveMarketDataSource(MarketDataSource):
             page += 1
             if page == 1 or page % _PROGRESS_EVERY == 0:
                 print(
-                    f"  [OKX candles] {inst_id} nạp thêm nến cũ: "
-                    f"{len(collected)}/{target_count}, trang {page}..."
+                    f"  [OKX candles] {inst_id} backfilling older candles: "
+                    f"{len(collected)}/{target_count}, page {page}..."
                 )
             if len(batch) < self._page_size:
                 exhausted = True
                 break  # OKX has no older data left for this instrument
         if page:
             print(
-                f"  [OKX candles] {inst_id} nạp thêm nến cũ: xong -- "
-                f"{len(collected)} nến, {page} trang.{self._pace_suffix()}"
+                f"  [OKX candles] {inst_id} backfilling older candles: done -- "
+                f"{len(collected)} candles, {page} pages.{self._pace_suffix()}"
             )
         return collected, exhausted
 
@@ -1392,14 +1424,14 @@ class LiveMarketDataSource(MarketDataSource):
         self, inst_id: str, bar: str, required_count: Optional[int]
     ) -> List[Dict[str, Any]]:
         depth_msg = (
-            f"tải {required_count} nến gần nhất từ OKX (đã giới hạn theo nhu "
-            "cầu phân tích thay vì toàn bộ lịch sử -- xem CANDLE_WARMUP_BUFFER_HOURS "
-            "/ DEFAULT_COVERAGE_WINDOW_HOURS trong module này)..."
+            f"fetching the {required_count} most recent candles from OKX (bounded by "
+            "analysis needs instead of full history -- see CANDLE_WARMUP_BUFFER_HOURS "
+            "/ DEFAULT_COVERAGE_WINDOW_HOURS in this module)..."
             if required_count is not None
-            else "tải lại toàn bộ lịch sử từ OKX (asset lâu năm có thể mất nhiều phút)..."
+            else "re-fetching the full history from OKX (a long-lived asset can take several minutes)..."
         )
         print(
-            f"  [OKX candles] {inst_id}: chế độ zero-cache -- không dùng cache, "
+            f"  [OKX candles] {inst_id}: zero-cache mode -- cache disabled, "
             f"{depth_msg}"
         )
         raw, _stop_reason = self._paginate_candles_raw(
@@ -1419,13 +1451,13 @@ class LiveMarketDataSource(MarketDataSource):
 
         if newest_cached_ts is None:
             depth_msg = (
-                f"{required_count} nến gần nhất (đã giới hạn theo nhu cầu phân tích)"
+                f"{required_count} most recent candles (bounded by analysis needs)"
                 if required_count is not None
-                else "toàn bộ lịch sử"
+                else "the full history"
             )
             print(
-                f"  [OKX candles] {inst_id}: chưa có cache -- nạp lần đầu {depth_msg} "
-                "rồi lưu cache (chỉ tốn thời gian này một lần)..."
+                f"  [OKX candles] {inst_id}: no cache yet -- fetching {depth_msg} for "
+                "the first time, then caching it (a one-time cost)..."
             )
         # 1) Always fetch the fresh tail: everything closed since the cache
         #    was last written, plus whatever candle is still open right now.
@@ -1438,7 +1470,7 @@ class LiveMarketDataSource(MarketDataSource):
             bar,
             target_count=required_count if cold_backfill else None,
             stop_at_ts=newest_cached_ts,
-            progress_label="nạp cache" if cold_backfill else "tải phần đuôi",
+            progress_label="filling cache" if cold_backfill else "fetching tail",
         )
         rows = sorted(raw, key=lambda r: int(r[0]))
         # OKX's own `confirm` column (index 8): "1" once the hour has closed,
@@ -1493,9 +1525,9 @@ class LiveMarketDataSource(MarketDataSource):
             deficit = required_count - have
             oldest_cached_ts = int(cached[0]["timestamp"])
             print(
-                f"  [OKX candles] {inst_id}: cache có {len(cached)} nến nhưng "
-                f"nhu cầu phân tích hiện tại cần {required_count} -- nạp thêm "
-                f"{deficit} nến cũ hơn (không tải lại phần đã có trong cache)..."
+                f"  [OKX candles] {inst_id}: cache has {len(cached)} candles but "
+                f"current analysis needs {required_count} -- fetching {deficit} "
+                f"more, older candles (not re-fetching what is already cached)..."
             )
             older_rows, backward_exhausted = self._paginate_candles_backward(
                 inst_id, bar, before_ts=oldest_cached_ts, target_count=deficit
@@ -1540,7 +1572,7 @@ class LiveMarketDataSource(MarketDataSource):
         else:
             candles = self._fetch_full_history(inst_id, _BAR, required_count)
         if not candles:
-            raise MarketDataUnavailableError(f"OKX không trả về nến nào cho {inst_id}")
+            raise MarketDataUnavailableError(f"OKX returned no candles for {inst_id}")
         payload = {
             "source": "OKX_PUBLIC_REST_API_LIVE",
             "endpoint": "/api/v5/market/candles + /api/v5/market/history-candles",
@@ -1565,11 +1597,11 @@ class LiveMarketDataSource(MarketDataSource):
         inst_id = f"{symbol}-USDT-SWAP"
         data = self._public_get("/api/v5/market/books", {"instId": inst_id, "sz": 50})
         if not data:
-            raise MarketDataUnavailableError(f"OKX trả sổ lệnh rỗng cho {inst_id}")
+            raise MarketDataUnavailableError(f"OKX returned an empty order book for {inst_id}")
         book = data[0]
         bids_raw, asks_raw = book.get("bids") or [], book.get("asks") or []
         if not bids_raw or not asks_raw:
-            raise MarketDataUnavailableError(f"OKX thiếu bid/ask cho {inst_id}")
+            raise MarketDataUnavailableError(f"OKX is missing bid/ask for {inst_id}")
         ct_val = self._contract_size(inst_id)
 
         # OKX rows are [price, size, deprecated, order_count] with size in
@@ -1609,13 +1641,13 @@ class LiveMarketDataSource(MarketDataSource):
         )
         if len(series) < 3:
             raise MarketDataUnavailableError(
-                f"Chuỗi OI của {inst_id} quá ngắn để tính sigma/zscore"
+                f"{inst_id}'s OI series is too short to compute sigma/zscore"
             )
         try:
             oi = [float(row[3]) for row in series]
         except (IndexError, TypeError, ValueError) as exc:
             raise MarketDataUnavailableError(
-                f"Chuỗi OI của {inst_id} thiếu cột USD"
+                f"{inst_id}'s OI series is missing the USD column"
             ) from exc
         ts = int(series[0][0])
         current, previous = oi[0], oi[1]
@@ -1661,13 +1693,13 @@ class LiveMarketDataSource(MarketDataSource):
         )
         if not data:
             raise MarketDataUnavailableError(
-                f"OKX trả taker-volume-contract rỗng cho {inst_id}"
+                f"OKX returned an empty taker-volume-contract series for {inst_id}"
             )
         now = _now_ms()
         complete = [row for row in data if int(row[0]) + _BAR_MS <= now]
         if not complete:
             raise MarketDataUnavailableError(
-                f"Chưa có khung giờ taker-volume nào đóng cho {inst_id}"
+                f"No closed taker-volume bucket yet for {inst_id}"
             )
         bucket = complete[0]
         ct_val = self._contract_size(inst_id)
@@ -1721,7 +1753,7 @@ class LiveMarketDataSource(MarketDataSource):
         funding = self._public_get("/api/v5/public/funding-rate", {"instId": inst_id})
         if not ls_rows or not funding:
             raise MarketDataUnavailableError(
-                f"OKX thiếu long/short hoặc funding cho {inst_id}"
+                f"OKX is missing long/short or funding data for {inst_id}"
             )
         try:
             # Open interest here is a convenience field on the sentiment
@@ -1889,7 +1921,7 @@ class LiveMarketDataSource(MarketDataSource):
         payload, error = self.get_candles(symbol, venue_type)
         if error:
             raise MarketDataUnavailableError(
-                f"Không lấy được nến {symbol} để tính macro: {error}"
+                f"Could not get candles for {symbol} to compute macro: {error}"
             )
         return {
             int(c["timestamp"]): float(c["close"])
@@ -1909,8 +1941,8 @@ class LiveMarketDataSource(MarketDataSource):
         shared = sorted(set(closes) & set(ref_closes))[-self.macro_window_hours :]
         if len(shared) < _MACRO_MIN_OVERLAP:
             raise MarketDataUnavailableError(
-                f"Không đủ nến chồng lấp giữa {symbol} và "
-                f"{_MACRO_REFERENCE_SYMBOL} để tính macro "
+                f"Not enough overlapping candles between {symbol} and "
+                f"{_MACRO_REFERENCE_SYMBOL} to compute macro "
                 f"({len(shared)} < {_MACRO_MIN_OVERLAP})"
             )
         asset_ret = _log_returns(closes, shared)
@@ -1986,7 +2018,7 @@ class LiveMarketDataSource(MarketDataSource):
         )
         if not trades:
             raise MarketDataUnavailableError(
-                f"OKX trả trades rỗng cho {pair} (tick DEX của {symbol})"
+                f"OKX returned no trades for {pair} ({symbol}'s DEX tick source)"
             )
         ticks = sorted(trades, key=lambda t: int(t["ts"]))
         payload = {
@@ -2028,13 +2060,13 @@ class LiveMarketDataSource(MarketDataSource):
         pairs = payload.get("pairs") or []
         if not pairs:
             raise MarketDataUnavailableError(
-                f"DexScreener không trả pool nào cho {symbol} ({info.token_address})"
+                f"DexScreener returned no pool for {symbol} ({info.token_address})"
             )
         chosen, rejected = _select_pool(pairs, info.chain, reference)
         if chosen is None:
             raise MarketDataUnavailableError(
-                f"Không có pool nào của {symbol} đạt giá tham chiếu "
-                f"{reference:.6g} (đã loại {rejected} pool lệch giá quá "
+                f"No pool for {symbol} matches the reference price "
+                f"{reference:.6g} (rejected {rejected} pool(s) with a price gap over "
                 f"{_POOL_PRICE_TOLERANCE:.0%})"
             )
         liquidity, price, pair = chosen
@@ -2095,19 +2127,19 @@ class LiveMarketDataSource(MarketDataSource):
             parse, key = _parse_evm_security, address.lower()
         else:
             raise MarketDataUnavailableError(
-                f"Chuỗi {info.chain} của {symbol} chưa được GoPlus hỗ trợ "
-                "trong bảng tra này"
+                f"{symbol}'s chain {info.chain} is not supported by GoPlus "
+                "in this lookup table"
             )
 
         if payload.get("code") != 1:
             raise MarketDataUnavailableError(
-                f"GoPlus trả code={payload.get('code')} {payload.get('message')} "
-                f"cho {symbol}"
+                f"GoPlus returned code={payload.get('code')} {payload.get('message')} "
+                f"for {symbol}"
             )
         record = (payload.get("result") or {}).get(key)
         if not record:
             raise MarketDataUnavailableError(
-                f"GoPlus không có dữ liệu bảo mật cho địa chỉ {address} ({symbol})"
+                f"GoPlus has no security data for address {address} ({symbol})"
             )
 
         observed = _now_ms()

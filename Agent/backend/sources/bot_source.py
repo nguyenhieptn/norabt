@@ -283,11 +283,11 @@ class FileBotDataSource(BotDataSource):
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise BotSourceError(
-                f"File dữ liệu bot không hợp lệ {path.name}: {exc}"
+                f"Invalid bot data file {path.name}: {exc}"
             ) from exc
         if not isinstance(payload, dict):
             raise BotSourceError(
-                f"File dữ liệu bot không hợp lệ {path.name}: kỳ vọng object"
+                f"Invalid bot data file {path.name}: expected an object"
             )
         return payload
 
@@ -435,9 +435,10 @@ class LiveBotDataSource(BotDataSource):
             # indistinguishable from an all-empty response alone, so both are
             # refused rather than one being silently assumed.
             raise BotSourceError(
-                f"OKX trả về sổ lệnh trống hoàn toàn cho mã {code} (0 lệnh đã "
-                "chốt, 0 vị thế mở); từ chối xử lý vì nhiều khả năng đây là mã "
-                "sai hoặc OKX gặp sự cố, không phải bot chưa từng giao dịch"
+                f"OKX returned a completely empty ledger for code {code} (0 closed "
+                "trades, 0 open positions); refusing to process this, since it is "
+                "more likely a wrong code or an OKX outage than a bot that has "
+                "never traded"
             )
 
         unattributed = sum(1 for p in positions if not p.get("instId"))
@@ -626,15 +627,15 @@ class LiveBotDataSource(BotDataSource):
             data = self._client.public_get(LEAD_TRADERS_PATH, params)
         except OkxError as exc:
             raise BotSourceError(
-                f"OKX lỗi khi lấy trang {page} bảng xếp hạng lead traders: {exc}"
+                f"OKX error fetching page {page} of the lead-trader ranking: {exc}"
             ) from exc
         if not isinstance(data, list) or not data:
             return []
         block = data[0]
         if not isinstance(block, dict) or not isinstance(block.get("ranks"), list):
             raise BotSourceError(
-                f"OKX trả dữ liệu không đúng định dạng cho bảng xếp hạng lead "
-                f"traders (trang {page}): kỳ vọng object có khoá 'ranks'"
+                f"OKX returned malformed data for the lead-trader ranking "
+                f"(page {page}): expected an object with a 'ranks' key"
             )
         return block["ranks"]
 
@@ -711,10 +712,10 @@ class LiveBotDataSource(BotDataSource):
                 status=STATUS_LIMITED,
                 code=code,
                 reason=(
-                    f"Bot không công khai sổ lệnh (OKX trả lỗi "
-                    f"{TRADER_NOT_EXIST_CODE} ở endpoint sổ lệnh cho mã {code}), "
-                    "nhưng hồ sơ/đường vốn tuần/thống kê vẫn lấy được nên vẫn có "
-                    "thể đánh giá hạn chế"
+                    f"This bot does not expose its order book (OKX returned error "
+                    f"{TRADER_NOT_EXIST_CODE} on the ledger endpoint for code {code}), "
+                    "but its profile/weekly equity/stats are still available, so a "
+                    "limited assessment is still possible"
                 ),
                 profile=board_row,
                 stats=stats_row,
@@ -724,10 +725,10 @@ class LiveBotDataSource(BotDataSource):
             status=STATUS_NOT_FOUND,
             code=code,
             reason=(
-                f"Không tìm thấy mã {code} ở bất kỳ endpoint nào của OKX (sổ "
-                f"lệnh trả {TRADER_NOT_EXIST_CODE}, không có trong bảng xếp "
-                "hạng lead traders, không có weekly-pnl, không có public-stats) "
-                "-- nhiều khả năng đây là uniqueCode sai hoặc không tồn tại"
+                f"Code {code} was not found on any OKX endpoint (ledger returned "
+                f"{TRADER_NOT_EXIST_CODE}, not in the lead-trader ranking, no "
+                "weekly-pnl, no public-stats) -- most likely a wrong or nonexistent "
+                "uniqueCode"
             ),
         )
 
@@ -753,16 +754,16 @@ class LiveBotDataSource(BotDataSource):
                 # BotSourceError that would erase the distinction.
                 raise _TraderLedgerBlockedSignal(code) from exc
             raise BotSourceError(
-                f"OKX lỗi khi lấy {label} cho mã {code}: {exc}"
+                f"OKX error fetching {label} for code {code}: {exc}"
             ) from exc
         except OkxError as exc:
             raise BotSourceError(
-                f"OKX lỗi khi lấy {label} cho mã {code}: {exc}"
+                f"OKX error fetching {label} for code {code}: {exc}"
             ) from exc
         if not isinstance(data, list):
             raise BotSourceError(
-                f"OKX trả dữ liệu không đúng định dạng cho {label} (mã {code}): "
-                "kỳ vọng danh sách"
+                f"OKX returned malformed data for {label} (code {code}): "
+                "expected a list"
             )
         return data
 
@@ -777,5 +778,5 @@ class LiveBotDataSource(BotDataSource):
     def _require_code(unique_code: str) -> str:
         code = str(unique_code or "").strip()
         if not code:
-            raise BotSourceError("Thiếu uniqueCode để gọi OKX")
+            raise BotSourceError("Missing uniqueCode to call OKX")
         return code

@@ -155,7 +155,7 @@ def test_missing_bot_file_still_produces_one_failed_row_not_a_crash(tmp_path):
     assert report.distinct_bots == len(codes) - 1
     failed = next(row for row in report.rows if row.status == "FAILED")
     assert "Missing bot data file: trade_list.json" in failed.error
-    assert failed.conclusion == "Không đánh giá được vì dữ liệu đầu vào không hợp lệ."
+    assert failed.conclusion == "Could not be assessed because the input data was invalid."
 
 
 # --------------------------------------------------------------------------

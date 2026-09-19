@@ -499,8 +499,8 @@ Sản phẩm đang thăm dò ở đây -- bán quyền truy cập vào một d�
 rủi ro bot copy-trading dựa trên dữ liệu OKX* -- nằm rất gần, nếu không muốn
 nói là trùng, với định nghĩa "signal service" trong điều khoản đó: nó đọc dữ
 liệu từ OKX (qua `Agent/backend/okx/client.py` và crawler), phân tích, rồi
-bán bản khuyến nghị hành động ("EMERGENCY_STOP", xếp loại AN TOÀN/NGUY HIỂM,
-...) cho người trả tiền.
+bán bản khuyến nghị hành động ("EMERGENCY_STOP", nhãn hai trục
+"DRAWDOWN: HIGH · QUALITY: WEAK", cờ "HIDDEN RISK", ...) cho người trả tiền.
 
 **Điểm quan trọng nhất, nói thẳng để không ai đọc nhầm:** đăng ký làm ASP và
 được duyệt list lên okx.ai (mục "Marketplace mở cho developer" trong tài

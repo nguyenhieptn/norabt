@@ -226,7 +226,9 @@ def test_ledger_owned_by_another_bot_is_rejected(tmp_path):
     assert bot.reconciliation.status == "IDENTITY_MISMATCH"
     assert bot.reconciliation.foreign_owner_codes == ["SOMEONE_ELSE"]
     assert bot.performance.trade_count == 0
-    assert any("owned by" in warning for warning in bot.reconciliation.warnings)
+    # Translated to Vietnamese as part of the task's Việc 4 (see
+    # Agent/backend/mcp/service.py's reconciliation warnings) -- was "owned by".
+    assert any("belongs to" in warning for warning in bot.reconciliation.warnings)
 
 
 def test_behavior_comes_from_ledger_not_folder_name(bot_top, bot_poor):
@@ -514,15 +516,17 @@ def test_bot_market_is_taken_from_the_ledger_not_the_folder(tmp_path):
     )
     assert bot.identity.asset_context == "DOGE"
     assert bot.identity.primary_traded_symbol == "SOL"
-    assert any(
-        "filed under DOGE" in warning for warning in bot.identity.identity_warnings
-    )
+    # Translated to Vietnamese as part of the task's Việc 4 (see
+    # Agent/backend/mcp/service.py's `_resolve_identity_market`) -- was
+    # "filed under DOGE".
+    assert any("filed under DOGE" in warning for warning in bot.identity.identity_warnings)
 
 
 def test_market_falls_back_to_open_positions_when_there_is_no_ledger(bot_empty):
     """A bot with no closed trades still trades something right now."""
     assert bot_empty.performance.trade_count == 0
     assert bot_empty.identity.primary_traded_symbol == "BTC"
+    # Translated to Vietnamese as part of the task's Việc 4 -- was "open positions".
     assert any(
         "open positions" in warning for warning in bot_empty.identity.identity_warnings
     )
@@ -725,9 +729,10 @@ def test_margin_consistency_uses_the_resolved_capital(bot_oversized):
     )
     assert thin.capital.basis == "CURRENT_AUM"
     assert thin.current_state.capital_consistency == "MARGIN_EXCEEDS_CAPITAL"
-    assert any(
-        "exceeds reported capital" in warning for warning in thin.data_quality.warnings
-    )
+    # Text translated to Vietnamese as part of the task's Việc 4 (see
+    # Agent/backend/mcp/service.py's `_current_state`) -- was "exceeds
+    # reported capital".
+    assert any("exceeds reported capital" in warning for warning in thin.data_quality.warnings)
 
 
 def test_attributed_exposure_drives_market_alignment(market_eth, bot_oversized):
@@ -735,10 +740,12 @@ def test_attributed_exposure_drives_market_alignment(market_eth, bot_oversized):
     alignment = assessment.dimensions.market_alignment
     assert alignment.status == EvidenceStatus.AVAILABLE
     assert alignment.confidence == 1.0
+    # Both translated to Vietnamese as part of the task's Việc 4 -- were
+    # "attributed to ETH" and "book depth".
     assert any("attributed to ETH" in finding for finding in alignment.key_findings)
     liquidity = assessment.dimensions.liquidity_execution
     assert liquidity.status == EvidenceStatus.AVAILABLE
-    assert any("book depth" in finding for finding in liquidity.key_findings)
+    assert any("order book depth" in finding for finding in liquidity.key_findings)
 
 
 def test_dex_orderflow_is_derived_from_tick_prints():
@@ -899,6 +906,379 @@ def test_dedupe_prefers_the_snapshot_with_richer_provenance(tmp_path):
     assert row.capital_basis == "WEEKLY_EQUITY_CURVE"
 
 
+def test_secondary_market_is_surfaced_without_changing_any_score(tmp_path_factory):
+    """Việc 3: `cohort.py` giải thêm thị trường đứng thứ hai theo
+    `bot.identity.symbol_exposure_share` -- CHỈ để trình bày
+    (assessment_store.py/report_page.py), không bao giờ đi qua
+    `QCCoreService.assess_bot()`. Ràng buộc cứng của nhiệm vụ: không được
+    đổi bất kỳ công thức chấm điểm nào.
+
+    Chứng minh bằng cách chạy CÙNG một bot (10 lệnh AAA + 4 lệnh BBB, margin/
+    lever giống hệt nhau) hai lần: một lần có dữ liệu thị trường cho BBB
+    (thị trường thứ hai giải được), một lần không (chỉ bỏ market dataset của
+    BBB) -- nếu code Việc 3 lỡ đưa market thứ hai vào assess_bot(), hai lần
+    chạy sẽ cho điểm khác nhau; nếu đúng như yêu cầu (chỉ trình bày), mọi
+    điểm số phải giống hệt bit-for-bit.
+    """
+    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+    from Agent.test.conftest import (
+        FIXED_AS_OF_MS,
+        write_bot_dataset,
+        write_market_dataset,
+    )
+
+    def _trades(symbol: str, count: int, prefix: str):
+        return [
+            {
+                "subPosId": f"{prefix}{i}",
+                "instId": f"{symbol}-USDT-SWAP",
+                "posSide": "long",
+                "openTime": str(1000 + i),
+                "closeTime": str(5000 + i),
+                "pnl": "5",
+                "margin": "100",
+                "lever": "10",
+                "uniqueCode": "MIX",
+            }
+            for i in range(count)
+        ]
+
+    def _build(root: Path, *, with_secondary_market: bool) -> None:
+        write_market_dataset(root, asset="AAA", last_candle_ms=1_789_000_000_000)
+        if with_secondary_market:
+            write_market_dataset(root, asset="BBB", last_candle_ms=1_789_000_000_000)
+        write_bot_dataset(
+            root,
+            asset="AAA",
+            folder="bot_MIX",
+            overview={"uniqueCode": "MIX", "nickName": "Mix", "aum": 10_000.0},
+            closed_trades=_trades("AAA", 10, "A") + _trades("BBB", 4, "B"),
+        )
+
+    with_dir = tmp_path_factory.mktemp("with_secondary")
+    without_dir = tmp_path_factory.mktemp("without_secondary")
+    _build(with_dir, with_secondary_market=True)
+    _build(without_dir, with_secondary_market=False)
+
+    row_with = (
+        CohortAssessmentService(with_dir, persist_history=False)
+        .scan(as_of_ms=FIXED_AS_OF_MS, simulation_iterations=10, simulation_horizon=10)
+        .rows[0]
+    )
+    row_without = (
+        CohortAssessmentService(without_dir, persist_history=False)
+        .scan(as_of_ms=FIXED_AS_OF_MS, simulation_iterations=10, simulation_horizon=10)
+        .rows[0]
+    )
+
+    assert row_with.status == row_without.status == "EVALUATED"
+    # Thị trường CHÍNH (dùng để chấm) không đổi theo có/không thị trường thứ hai.
+    assert row_with.traded_symbol == row_without.traded_symbol == "AAA"
+
+    # Thị trường thứ hai chỉ xuất hiện khi có dữ liệu thị trường cho nó.
+    assert row_with.secondary_traded_symbol == "BBB"
+    assert row_with.secondary_market is not None
+    assert row_with.secondary_market.symbol == "BBB"
+    assert row_with.secondary_share_pct == pytest.approx(4_000 / 14_000 * 100.0)
+
+    assert row_without.secondary_traded_symbol is None
+    assert row_without.secondary_market is None
+    assert row_without.secondary_share_pct is None
+
+    # RÀNG BUỘC CỨNG: có/không có thị trường thứ hai không được đổi MỘT
+    # điểm số nào -- market thứ hai không hề đi qua QCCoreService.assess_bot().
+    assert row_with.risk_score == row_without.risk_score
+    assert row_with.quality_score == row_without.quality_score
+    assert row_with.weighted_average == row_without.weighted_average
+    assert row_with.dimension_scores == row_without.dimension_scores
+
+
+def test_pipeline_resolves_secondary_market_without_changing_the_score(
+    tmp_path_factory,
+):
+    """`Agent/backend/pipeline.py::RiskSupervisionPipeline.run` -- the LIVE
+    single-bot path `WebDataService.analyze()`/`agent_server.py`'s
+    `assess_bot` tool use -- carries the exact same Việc 3 addition as
+    `CohortAssessmentService.scan()` above, and the exact same hard
+    constraint: a resolved (or unresolved) secondary market must never
+    change `risk_assessment`.
+    """
+    from Agent.backend.pipeline import RiskSupervisionPipeline
+    from Agent.test.conftest import (
+        FIXED_AS_OF_MS,
+        write_bot_dataset,
+        write_market_dataset,
+    )
+
+    def _trades(symbol: str, count: int, prefix: str):
+        return [
+            {
+                "subPosId": f"{prefix}{i}",
+                "instId": f"{symbol}-USDT-SWAP",
+                "posSide": "long",
+                "openTime": str(1000 + i),
+                "closeTime": str(5000 + i),
+                "pnl": "5",
+                "margin": "100",
+                "lever": "10",
+                "uniqueCode": "MIX",
+            }
+            for i in range(count)
+        ]
+
+    def _build(root: Path, *, with_secondary_market: bool) -> None:
+        write_market_dataset(root, asset="AAA", last_candle_ms=1_789_000_000_000)
+        if with_secondary_market:
+            write_market_dataset(root, asset="BBB", last_candle_ms=1_789_000_000_000)
+        write_bot_dataset(
+            root,
+            asset="AAA",
+            folder="bot_MIX",
+            overview={"uniqueCode": "MIX", "nickName": "Mix", "aum": 10_000.0},
+            closed_trades=_trades("AAA", 10, "A") + _trades("BBB", 4, "B"),
+        )
+
+    with_dir = tmp_path_factory.mktemp("pipeline_with_secondary")
+    without_dir = tmp_path_factory.mktemp("pipeline_without_secondary")
+    _build(with_dir, with_secondary_market=True)
+    _build(without_dir, with_secondary_market=False)
+
+    result_with = RiskSupervisionPipeline(data_dir=with_dir, persist_history=False).run(
+        "AAA",
+        "bot_MIX",
+        venue_type="CEX",
+        as_of_ms=FIXED_AS_OF_MS,
+        simulation_iterations=10,
+        simulation_horizon=10,
+    )
+    result_without = RiskSupervisionPipeline(
+        data_dir=without_dir, persist_history=False
+    ).run(
+        "AAA",
+        "bot_MIX",
+        venue_type="CEX",
+        as_of_ms=FIXED_AS_OF_MS,
+        simulation_iterations=10,
+        simulation_horizon=10,
+    )
+
+    assert result_with.traded_symbol == result_without.traded_symbol == "AAA"
+    assert result_with.secondary_traded_symbol == "BBB"
+    assert result_with.secondary_market_result is not None
+    assert result_with.secondary_market_result.symbol == "BBB"
+
+    assert result_without.secondary_traded_symbol is None
+    assert result_without.secondary_market_result is None
+
+    # RÀNG BUỘC CỨNG: giống hệt yêu cầu ở test cohort.py phía trên.
+    assert (
+        result_with.risk_assessment.risk_score
+        == result_without.risk_assessment.risk_score
+    )
+    assert (
+        result_with.risk_assessment.quality_score
+        == result_without.risk_assessment.quality_score
+    )
+
+
+def test_pipeline_n_market_coverage_does_not_change_the_score(tmp_path_factory):
+    """`RiskSupervisionPipeline.run` -- cùng phép thử N-thị-trường (không
+    chỉ 1 mã phụ) ở `test_n_market_coverage_surfaces_more_than_two_markets_
+    without_changing_any_score` (cohort.py) bên dưới, cho đúng đường LIVE
+    single-bot (`WebDataService.analyze()`/`agent_server.py`'s `assess_bot`
+    tool dùng pipeline.py, không phải cohort.py).
+    """
+    from Agent.backend.pipeline import RiskSupervisionPipeline
+    from Agent.test.conftest import (
+        FIXED_AS_OF_MS,
+        write_bot_dataset,
+        write_market_dataset,
+    )
+
+    def _trades(symbol: str, count: int, prefix: str):
+        return [
+            {
+                "subPosId": f"{prefix}{i}",
+                "instId": f"{symbol}-USDT-SWAP",
+                "posSide": "long",
+                "openTime": str(1000 + i),
+                "closeTime": str(5000 + i),
+                "pnl": "5",
+                "margin": "100",
+                "lever": "10",
+                "uniqueCode": "QUADP",
+            }
+            for i in range(count)
+        ]
+
+    def _build(root: Path, *, markets_available: tuple) -> None:
+        for symbol in markets_available:
+            write_market_dataset(root, asset=symbol, last_candle_ms=1_789_000_000_000)
+        write_bot_dataset(
+            root,
+            asset="AAA",
+            folder="bot_QUADP",
+            overview={"uniqueCode": "QUADP", "nickName": "QuadP", "aum": 10_000.0},
+            closed_trades=(
+                _trades("AAA", 10, "A")
+                + _trades("BBB", 4, "B")
+                + _trades("CCC", 3, "C")
+                + _trades("DDD", 2, "D")
+            ),
+        )
+
+    with_dir = tmp_path_factory.mktemp("pipeline_n_market_with")
+    without_dir = tmp_path_factory.mktemp("pipeline_n_market_without")
+    _build(with_dir, markets_available=("AAA", "BBB", "CCC"))
+    _build(without_dir, markets_available=("AAA",))
+
+    result_with = RiskSupervisionPipeline(data_dir=with_dir, persist_history=False).run(
+        "AAA",
+        "bot_QUADP",
+        venue_type="CEX",
+        as_of_ms=FIXED_AS_OF_MS,
+        simulation_iterations=10,
+        simulation_horizon=10,
+    )
+    result_without = RiskSupervisionPipeline(
+        data_dir=without_dir, persist_history=False
+    ).run(
+        "AAA",
+        "bot_QUADP",
+        venue_type="CEX",
+        as_of_ms=FIXED_AS_OF_MS,
+        simulation_iterations=10,
+        simulation_horizon=10,
+    )
+
+    assert [m.symbol for m in result_with.resolved_markets] == ["AAA", "BBB", "CCC"]
+    assert result_with.unresolved_markets == []
+    assert result_with.coverage_achieved_pct == pytest.approx(
+        (10 + 4 + 3) / 19 * 100.0, abs=0.01
+    )
+
+    assert [m.symbol for m in result_without.resolved_markets] == ["AAA"]
+    assert sorted(m.symbol for m in result_without.unresolved_markets) == [
+        "BBB",
+        "CCC",
+    ]
+
+    # RÀNG BUỘC CỨNG: giống hệt yêu cầu ở mọi test khác trong file này.
+    assert (
+        result_with.risk_assessment.risk_score
+        == result_without.risk_assessment.risk_score
+    )
+    assert (
+        result_with.risk_assessment.quality_score
+        == result_without.risk_assessment.quality_score
+    )
+    assert (
+        result_with.risk_assessment.dimensions.model_dump()
+        == result_without.risk_assessment.dimensions.model_dump()
+    )
+
+
+def test_n_market_coverage_surfaces_more_than_two_markets_without_changing_any_score(
+    tmp_path_factory,
+):
+    """Phủ sóng theo mục tiêu (Agent/backend/market/coverage.py) tổng quát
+    hoá "giải đúng 2 thị trường: chính + phụ" thành "giải tới khi đạt 80%
+    phủ sóng, tối đa 8 thị trường". Test này chứng minh đúng ràng buộc cứng
+    của nhiệm vụ CHO N > 2 thị trường (không chỉ 1 mã phụ như hai test bên
+    trên): CÙNG một bot, chạy một lần với 3 thị trường giải được và một lần
+    chỉ giải được đúng thị trường CHÍNH (2 mã còn lại không có dữ liệu thị
+    trường) -- mọi điểm số phải giống hệt bit-for-bit, vì
+    `QCCoreService.assess_bot()` chỉ bao giờ nhận đúng MỘT market.
+
+    Bot giao dịch 4 mã theo tỉ trọng notional AAA 10/19 (52.6%), BBB 4/19
+    (21.1%), CCC 3/19 (15.8%), DDD 2/19 (10.5%) -- với mục tiêu 80%,
+    `plan_market_coverage` chọn đúng AAA+BBB+CCC (52.6+21.1+15.8=89.5% >=
+    80%), DDD không bao giờ được thử giải (đã đạt mục tiêu trước đó).
+    """
+    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+    from Agent.test.conftest import (
+        FIXED_AS_OF_MS,
+        write_bot_dataset,
+        write_market_dataset,
+    )
+
+    def _trades(symbol: str, count: int, prefix: str):
+        return [
+            {
+                "subPosId": f"{prefix}{i}",
+                "instId": f"{symbol}-USDT-SWAP",
+                "posSide": "long",
+                "openTime": str(1000 + i),
+                "closeTime": str(5000 + i),
+                "pnl": "5",
+                "margin": "100",
+                "lever": "10",
+                "uniqueCode": "QUAD",
+            }
+            for i in range(count)
+        ]
+
+    def _build(root: Path, *, markets_available: tuple) -> None:
+        for symbol in markets_available:
+            write_market_dataset(root, asset=symbol, last_candle_ms=1_789_000_000_000)
+        write_bot_dataset(
+            root,
+            asset="AAA",
+            folder="bot_QUAD",
+            overview={"uniqueCode": "QUAD", "nickName": "Quad", "aum": 10_000.0},
+            closed_trades=(
+                _trades("AAA", 10, "A")
+                + _trades("BBB", 4, "B")
+                + _trades("CCC", 3, "C")
+                + _trades("DDD", 2, "D")
+            ),
+        )
+
+    with_dir = tmp_path_factory.mktemp("n_market_with")
+    without_dir = tmp_path_factory.mktemp("n_market_without")
+    _build(with_dir, markets_available=("AAA", "BBB", "CCC"))
+    _build(without_dir, markets_available=("AAA",))
+
+    row_with = (
+        CohortAssessmentService(with_dir, persist_history=False)
+        .scan(as_of_ms=FIXED_AS_OF_MS, simulation_iterations=10, simulation_horizon=10)
+        .rows[0]
+    )
+    row_without = (
+        CohortAssessmentService(without_dir, persist_history=False)
+        .scan(as_of_ms=FIXED_AS_OF_MS, simulation_iterations=10, simulation_horizon=10)
+        .rows[0]
+    )
+
+    assert row_with.status == row_without.status == "EVALUATED"
+    assert row_with.traded_symbol == row_without.traded_symbol == "AAA"
+
+    # `with_dir`: cả 3 thị trường trong kế hoạch phủ sóng đều giải được.
+    assert [m.symbol for m in row_with.resolved_markets] == ["AAA", "BBB", "CCC"]
+    assert row_with.unresolved_markets == []
+    assert row_with.coverage_achieved_pct == pytest.approx(
+        (10 + 4 + 3) / 19 * 100.0, abs=0.01
+    )
+    # DDD không nằm trong kế hoạch (đã đạt 80% trước khi tới lượt nó) -- nó
+    # không được thử giải, không xuất hiện ở đâu cả (không suy diễn).
+    assert all(m.symbol != "DDD" for m in row_with.resolved_markets)
+    assert all(m.symbol != "DDD" for m in row_with.unresolved_markets)
+
+    # `without_dir`: chỉ AAA (thị trường CHÍNH) có dữ liệu -- BBB/CCC nằm
+    # trong kế hoạch nhưng KHÔNG lấy được dữ liệu, ghi nhận CHƯA ĐO ĐƯỢC.
+    assert [m.symbol for m in row_without.resolved_markets] == ["AAA"]
+    assert sorted(m.symbol for m in row_without.unresolved_markets) == ["BBB", "CCC"]
+    assert row_without.coverage_achieved_pct == pytest.approx(10 / 19 * 100.0, abs=0.01)
+
+    # RÀNG BUỘC CỨNG: 1 thị trường giải được hay 3 thị trường giải được
+    # không được đổi MỘT điểm số nào -- market phụ không hề đi qua
+    # QCCoreService.assess_bot().
+    assert row_with.risk_score == row_without.risk_score
+    assert row_with.quality_score == row_without.quality_score
+    assert row_with.weighted_average == row_without.weighted_average
+    assert row_with.dimension_scores == row_without.dimension_scores
+
+
 def test_subposition_id_recovers_the_open_time():
     """OKX ids are snowflakes, so a blank openTime is still recoverable."""
     from Agent.backend.mcp.inference.public_signals import SubPositionClock
@@ -978,7 +1358,9 @@ def test_inferred_exposure_lowers_lens_confidence(market_hype, bot_poor):
     alignment = assessment.dimensions.market_alignment
     assert alignment.status == EvidenceStatus.AVAILABLE
     assert alignment.confidence < 1.0
-    assert any("implied price move" in f for f in alignment.key_findings)
+    # Translated to Vietnamese as part of the task's Việc 4 -- was "implied
+    # price move".
+    assert any("inferring from price movement" in f for f in alignment.key_findings)
 
 
 def test_cost_model_recovers_round_trip_fees():
@@ -1084,6 +1466,8 @@ def test_deferred_loss_marks_the_simulation_as_optimistic(bot_deferred):
     assert bot_deferred.deferred_loss.representativeness == "UNREPRESENTATIVE"
     simulation = bot_deferred.simulation_results
     assert simulation.deferred_loss_bias is True
+    # Translated to Vietnamese as part of the task's Việc 4 (see
+    # Agent/backend/mcp/service.py's `get_bot_result`) -- was "unrealised loss".
     assert any("unrealised loss" in w for w in simulation.warnings)
 
 
@@ -1093,8 +1477,12 @@ def test_performance_lens_discounts_unrepresentative_metrics(bot_deferred):
     # Profit factor is 11x, yet the dimension must not read as healthy.
     assert bot_deferred.performance.profit_factor > 5
     assert quality.score >= 70
+    # Translated to Vietnamese as part of the task's Việc 4 (see
+    # Agent/backend/qc/evaluator/lenses/performance_quality.py) -- were
+    # "realised a loss" and "not representative"; "Profit factor" itself is
+    # kept as an English term throughout this project's own Vietnamese text.
     assert any(
-        "Profit factor" in f or "realised a loss" in f for f in quality.key_findings
+        "Profit factor" in f or "ghi nhận lệnh lỗ" in f for f in quality.key_findings
     )
     assert any("not representative" in f for f in quality.key_findings)
 
@@ -1172,8 +1560,8 @@ def test_cause_text_names_the_deferred_loss_shift(bot_deferred, market_eth):
     )
     row = next(r for r in report.rows if r.nick_name == "HaveARestin")
     cause = explain_vi(row)
-    assert "lỗ chưa chốt" in cause
-    assert "PF tụt" in cause
+    assert "unrealised loss" in cause
+    assert "drop the profit factor" in cause
 
 
 def test_each_step_reports_under_its_own_heading():
@@ -1196,22 +1584,22 @@ def test_each_step_reports_under_its_own_heading():
         simulation_iterations=50, simulation_horizon=30
     )
     data = render_data_report(DataReportService().build())
-    assert "BƯỚC 1" in data and "DỮ LIỆU" in data
+    assert "STEP 1" in data and "DATA" in data
 
     market = render_market_report(MarketRegimeService().build(), detail=False)
-    assert "BƯỚC 2.1" in market
+    assert "STEP 2.1" in market
 
     step3 = render_qc_ranking(cohort)
-    assert "BƯỚC 3" in step3
+    assert "STEP 3" in step3
     # Step 3 closes with a per-bot card: the numbers, what the simulation says,
     # whether the edge survives the statistical tests, and why the verdict fell
     # where it did.
-    assert "PHIẾU ĐÁNH GIÁ TỪNG BOT" in step3
-    assert "ĐIỂM NGON" in step3 and "ĐIỂM RỦI RO" in step3
-    assert "CHẠY MÔ PHỎNG" in step3
-    assert "VÌ SAO XẾP LOẠI NÀY" in step3
+    assert "PER-BOT SCORECARD" in step3
+    assert "QUALITY SCORE" in step3 and "RISK SCORE" in step3
+    assert "SIMULATIONS" in step3
+    assert "WHY THIS VERDICT" in step3
     # Step 2 reports observation only; the verdict belongs to step 3.
-    assert "XẾP LOẠI" not in render_bot_report(cohort, detail=False)
+    assert "VERDICT" not in render_bot_report(cohort, detail=False)
 
 
 def test_table_cells_account_for_wide_glyphs():
@@ -1392,8 +1780,8 @@ def test_score_story_says_why_it_is_not_higher(market_eth, bot_deferred):
     )
     row = next(r for r in report.rows if r.nick_name == "HaveARestin")
     story = score_story_vi(row)
-    assert "sàn veto" in story
-    assert "bình quân" in story
+    assert "veto floor" in story
+    assert "average" in story
     assert row.held_the_score_down, "phải nêu được cái gì kéo điểm xuống"
     assert row.raised_the_score, "phải nêu được cái gì đẩy điểm lên"
 

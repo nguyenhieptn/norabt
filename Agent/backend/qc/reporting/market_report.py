@@ -21,6 +21,7 @@ from Agent.backend.qc.reporting.market_posture import (
     POSTURE_GROWTH,
     POSTURE_RISK,
     POSTURE_STABLE,
+    POSTURE_UNCLEAR,
     assess as assess_posture,
 )
 from Agent.backend.universe.registry import UniverseRegistry
@@ -45,7 +46,7 @@ class MarketRegimeRow(BaseModel):
     volume_24h_usd: Optional[float] = None
     data_quality: float = Field(..., ge=0.0, le=1.0)
     freshness_hours: float = Field(..., ge=0.0)
-    posture: str = "CHƯA ĐỦ CƠ SỞ"
+    posture: str = POSTURE_UNCLEAR
     posture_evidence: List[str] = Field(default_factory=list)
     risk_score: int = 0
     growth_score: int = 0
@@ -215,8 +216,8 @@ def cls_note(market, eligible: bool, reason: str) -> str:
     """Một câu tiếng Việt nói rõ thị trường này đang ở trạng thái nào."""
     structure = market.structure_state
     bits = [
-        f"Giá {market.price_state.last_price:,.4g}",
-        TREND_VI.get(structure.trend_state.value, "chưa rõ"),
+        f"Price {market.price_state.last_price:,.4g}",
+        TREND_VI.get(structure.trend_state.value, "unclear"),
         VOL_VI.get(structure.volatility_state.value, ""),
         LIQ_VI.get(market.liquidity_state.state_tier.value, ""),
         FLOW_VI.get(market.orderflow_state.flow_bias, ""),
@@ -224,14 +225,14 @@ def cls_note(market, eligible: bool, reason: str) -> str:
     text = ", ".join(b for b in bits if b)
     if not eligible:
         explain = {
-            "DEX_POOL_LIQUIDITY_NOT_COLLECTED": "chưa thu thập thanh khoản pool nên chưa đủ điều kiện giám sát",
-            "NOT_IN_UNIVERSE": "chưa nằm trong universe",
+            "DEX_POOL_LIQUIDITY_NOT_COLLECTED": "pool liquidity has not been collected yet, so it is not eligible for monitoring",
+            "NOT_IN_UNIVERSE": "not yet in the universe",
         }.get(reason)
         if explain is None and reason.startswith("UNKNOWN_EVIDENCE"):
-            explain = "thiếu độ sâu sổ lệnh hoặc spread"
+            explain = "missing order book depth or spread"
         elif explain is None and reason.startswith("DATA_STALE"):
-            explain = "dữ liệu lệch quá xa mốc snapshot"
+            explain = "data has drifted too far from the snapshot timestamp"
         elif explain is None and reason.startswith("DATA_QUALITY"):
-            explain = "chất lượng dữ liệu dưới ngưỡng"
-        text += f". Chưa đạt eligibility: {explain or reason}"
+            explain = "data quality is below threshold"
+        text += f". Not eligible: {explain or reason}"
     return text + "."

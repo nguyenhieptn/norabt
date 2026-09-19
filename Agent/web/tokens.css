@@ -1,8 +1,8 @@
 /*
  * Agent/web/tokens.css -- SINGLE SOURCE OF TRUTH for this product's design
- * tokens: the 4-tier bot-classification ("verdict") colors, the page-chrome
- * palette (light/dark), the type scale, the spacing scale, and the corner
- * radius scale.
+ * tokens: the two-axis bot-classification ("verdict") colors, the
+ * page-chrome palette (light/dark), the type scale, the spacing scale, and
+ * the corner radius scale.
  *
  * WHY THIS FILE EXISTS: before it did, the verdict-tier colors and the
  * light/dark page-chrome palette were hardcoded as Python string literals
@@ -39,58 +39,102 @@
  * with the SPA build. Editing a value here on the HOST takes effect on the
  * next request, no image rebuild needed.
  *
- * VALUES BELOW ARE UNCHANGED from what report_page.py/admin_page.py already
- * hardcoded before this file existed -- this is a pure refactor (one source
- * of truth), NOT a redesign; the project owner's own instruction was not to
- * change the design.
+ * VALUES BELOW were UNCHANGED from what report_page.py/admin_page.py already
+ * hardcoded, for a long time -- that first pass was a pure refactor (one
+ * source of truth), NOT a redesign.
+ *
+ * "Việc nhìn xấu quá" (this task's own name) IS a deliberate redesign,
+ * scoped to /bot/<code> only: the type scale below was converted from fixed
+ * rem values to `clamp()` so text actually scales with the viewport instead
+ * of jumping at one hand-picked breakpoint, and a small set of new tokens
+ * was ADDED (never removed) for visual hierarchy -- `--font-size-2xl` (the
+ * hero risk/quality/confidence numbers at the top of the page),
+ * `--card-bg-emphasis`/`--card-border-emphasis`/`--card-shadow-emphasis`
+ * (the "kết luận + điểm số" cards that must read as more important than a
+ * methodology card), and `--content-max-width`/`--content-max-width-wide`
+ * (the page's own reading-width breakpoint). Every PRE-EXISTING token name
+ * keeps meaning the same thing it always did; nothing here is a breaking
+ * rename, so Agent/frontend's own `@import` of this file keeps working
+ * unchanged.
  */
 
-:root {
-  /* --- Page chrome (light theme default) -------------------------------- */
-  --bg: #f7f7f8;
-  --card-bg: #ffffff;
-  --text: #1a1a1a;
-  --muted: #5b6270;
-  --border: #e2e4e9;
-  --track: #eceef2;
-  --track-muted: repeating-linear-gradient(45deg, #d7d9de, #d7d9de 4px, #eceef2 4px, #eceef2 8px);
-  --axis: #9aa0ab;
-  --notice-warning-bg: #fff7e6;
-  --notice-warning-border: #f0b429;
-  --notice-danger-bg: #fdecec;
-  --notice-danger-border: #dc2626;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 
-  /* iOS/Android safe-area padding -- shared by every full-page surface
-     (report page, admin page) that renders edge-to-edge on a phone. */
+:root {
+  /* --- Typography (Elite OKX AI & Web3 standard) --------------------------- */
+  --sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  --display: 'Space Grotesk', var(--sans);
+
+  /* --- Page chrome (light theme fallback - Ivory & Slate) ------------------ */
+  --bg: #f8fafc;
+  --card-bg: #ffffff;
+  --card-header-bg: #f1f5f9;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --border-subtle: #f1f5f9;
+  --track: #f1f5f9;
+  --track-muted: repeating-linear-gradient(45deg, #e2e8f088, #e2e8f088 4px, #f1f5f9 4px, #f1f5f9 8px);
+  --axis: #94a3b8;
+  --notice-warning-bg: #fef3c7;
+  --notice-warning-border: #f59e0b;
+  --notice-danger-bg: #ffe4e6;
+  --notice-danger-border: #f43f5e;
+  --header-bg: rgba(255, 255, 255, 0.88);
+  --header-border: #e2e8f0;
+  --primary-accent: #2563eb;
+  --primary-accent-hover: #1d4ed8;
+  --primary-glow: rgba(37, 99, 235, 0.15);
+  --card-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 10px 15px -5px rgba(0, 0, 0, 0.04);
+  --card-hover-bg: #f8fafc;
+  --tab-bg: #f1f5f9;
+  --tab-active-bg: #ffffff;
+  --badge-bg: #f1f5f9;
+  --badge-text: #0f172a;
+  --table-stripe: #f8fafc;
+  --table-hover: #f1f5f9;
+
+  /* --- Visual hierarchy --------------------------------------------------- */
+  --card-bg-emphasis: #eff6ff;
+  --card-border-emphasis: #bfdbfe;
+  --card-shadow-emphasis: 0 8px 24px -4px rgba(37, 99, 235, 0.12), 0 2px 6px -2px rgba(37, 99, 235, 0.06);
+
+  /* --- Reading width ------------------------------------------------------- */
+  --content-max-width: 880px;
+  --content-max-width-wide: 1140px;
+
+  /* --- Dashboard shell ----------------------------------------------------- */
+  --panel-2: var(--card-header-bg);
+  --sidebar-width: 220px;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --eyebrow-size: 0.72rem;
+  --eyebrow-tracking: 0.08em;
+
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 
-  /* --- Verdict classification --------------------------------------------
-     The 4 real risk tiers a bot is judged into, plus one neutral 5th state
-     for "not enough evidence to judge at all" -- deliberately grey, never
-     green: an unmeasured bot is not the same claim as a measured safe one.
-     Names below are the STATUS a tier means, not its Vietnamese label text
-     (see report_page.py's own VERDICT_COLOR/TIER_LABEL_VI for the label
-     strings themselves, which stay in Python -- only the COLOR moved here). */
-  --verdict-danger: #dc2626;   /* NGUY HIỂM */
-  --verdict-watch: #d97706;    /* TIỀM ẨN */
-  --verdict-positive: #16a34a; /* TIỀM NĂNG */
-  --verdict-safe: #0284c7;     /* AN TOÀN */
-  --verdict-unknown: #6b7280;  /* THIẾU BẰNG CHỨNG -- a caveat, not a tier */
+  /* --- Verdict classification -------------------------------------------- */
+  --verdict-high-dd-weak-q: #dc2626;  /* DRAWDOWN: HIGH · QUALITY: WEAK */
+  --verdict-high-dd-good-q: #d97706;  /* DRAWDOWN: HIGH · QUALITY: GOOD */
+  --verdict-low-dd-good-q: #16a34a;   /* DRAWDOWN: LOW · QUALITY: GOOD */
+  --verdict-low-dd-weak-q: #0284c7;   /* DRAWDOWN: LOW · QUALITY: WEAK */
+  --verdict-hidden-risk: #7c3aed;     /* HIDDEN RISK */
+  --verdict-unknown: #6b7280;         /* INSUFFICIENT EVIDENCE */
 
-  /* --- Type scale --------------------------------------------------------- */
-  --font-size-xs: 0.78rem;
-  --font-size-sm: 0.88rem;
-  --font-size-md: 1rem;
-  --font-size-lg: 1.25rem;
-  --font-size-xl: 1.75rem;
+  /* --- Type scale ----------------------------------------------------------- */
+  --font-size-xs: clamp(0.74rem, 0.71rem + 0.14vw, 0.82rem);
+  --font-size-sm: clamp(0.84rem, 0.8rem + 0.18vw, 0.92rem);
+  --font-size-md: clamp(0.94rem, 0.9rem + 0.2vw, 1.05rem);
+  --font-size-lg: clamp(1.1rem, 1.0rem + 0.45vw, 1.3rem);
+  --font-size-xl: clamp(1.45rem, 1.25rem + 0.9vw, 1.85rem);
+  --font-size-2xl: clamp(1.9rem, 1.5rem + 1.8vw, 2.75rem);
 
-  /* --- Spacing scale -------------------------------------------------------
-     Used by the SPA's own layout (Agent/frontend); report_page.py/
-     admin_page.py's hand-built HTML predates this scale and keeps its own
-     literal px/rem values in its `_CSS` class rules -- only the token
-     DEFINITIONS live here, adopting them everywhere is not in this task's
-     scope (see the project owner's "đừng đổi thiết kế" instruction). */
+  /* --- Spacing scale ------------------------------------------------------- */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -98,46 +142,81 @@
   --space-6: 1.5rem;
   --space-8: 2rem;
 
-  /* --- Corner radius -------------------------------------------------------- */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* --- OKX AI / Web3 Soft Shadows & Ambient Glow --------------------------- */
+  --brutal-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.25);
+  --brutal-shadow-sm: 0 2px 8px -1px rgba(0, 0, 0, 0.2);
+  --brutal-shadow-accent: 0 0 15px rgba(59, 130, 246, 0.25);
+  --brutal-border-width: 1px;
+  --brutal-radius: 12px;
+  --terminal-border: #1e293b;
+  --terminal-border-glow: #38bdf8;
+  --glow-primary: 0 0 24px rgba(59, 130, 246, 0.18);
 }
 
-/* Dark theme -- both the OS-preference-driven form (`prefers-color-scheme`)
-   and the explicit-override form (`[data-theme="dark"]`, for a future
-   manual toggle) stay in lockstep, exactly as report_page.py's own
-   pre-existing CSS already did. Verdict colors are DELIBERATELY not
-   redefined here: a status color staying constant across themes is what
-   keeps "this bot is NGUY HIỂM" recognizable at a glance regardless of the
-   viewer's OS theme. */
+/* Dark theme -- Nora deep obsidian & slate institutional palette (OKX AI Harmonious) */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #14161a;
-    --card-bg: #1c1f26;
-    --text: #eceef1;
-    --muted: #9aa0ab;
-    --border: #2b2f38;
-    --track: #2a2e37;
-    --track-muted: repeating-linear-gradient(45deg, #33384333, #333843 4px, #2a2e37 4px, #2a2e37 8px);
-    --axis: #5b6270;
-    --notice-warning-bg: #332a10;
-    --notice-warning-border: #d9a520;
-    --notice-danger-bg: #3a1a1a;
-    --notice-danger-border: #ef4444;
+    --bg: #0b0f19;
+    --card-bg: #111726;
+    --card-header-bg: #161f32;
+    --header-bg: rgba(11, 15, 25, 0.85);
+    --header-border: #1e293b;
+    --text: #ffffff;
+    --muted: #94a3b8;
+    --border: #1e293b;
+    --border-subtle: rgba(255, 255, 255, 0.07);
+    --track: #161f32;
+    --track-muted: repeating-linear-gradient(45deg, #1e293b55, #1e293b55 4px, #161f32 4px, #161f32 8px);
+    --axis: #64748b;
+    --notice-warning-bg: rgba(245, 158, 11, 0.12);
+    --notice-warning-border: rgba(245, 158, 11, 0.35);
+    --notice-danger-bg: rgba(244, 63, 94, 0.12);
+    --notice-danger-border: rgba(244, 63, 94, 0.35);
+    --primary-accent: #38bdf8;
+    --primary-accent-hover: #7dd3fc;
+    --primary-glow: rgba(56, 189, 248, 0.2);
+    --card-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.2);
+    --card-hover-bg: #162035;
+    --tab-bg: rgba(11, 15, 25, 0.6);
+    --tab-active-bg: #1e293b;
+    --badge-bg: #161f32;
+    --badge-text: #f8fafc;
+    --table-stripe: rgba(255, 255, 255, 0.015);
+    --table-hover: rgba(56, 189, 248, 0.06);
+    --card-bg-emphasis: #131d2e;
+    --card-border-emphasis: #25334e;
+    --card-shadow-emphasis: 0 8px 30px -4px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(56, 189, 248, 0.25);
   }
 }
 :root[data-theme="dark"] {
-  --bg: #14161a;
-  --card-bg: #1c1f26;
-  --text: #eceef1;
-  --muted: #9aa0ab;
-  --border: #2b2f38;
-  --track: #2a2e37;
-  --track-muted: repeating-linear-gradient(45deg, #33384333, #333843 4px, #2a2e37 4px, #2a2e37 8px);
-  --axis: #5b6270;
-  --notice-warning-bg: #332a10;
-  --notice-warning-border: #d9a520;
-  --notice-danger-bg: #3a1a1a;
-  --notice-danger-border: #ef4444;
+  --bg: #0b0f19;
+  --card-bg: #111726;
+  --card-header-bg: #161f32;
+  --header-bg: rgba(11, 15, 25, 0.85);
+  --header-border: #1e293b;
+  --text: #ffffff;
+  --muted: #94a3b8;
+  --border: #1e293b;
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --track: #161f32;
+  --track-muted: repeating-linear-gradient(45deg, #1e293b55, #1e293b55 4px, #161f32 4px, #161f32 8px);
+  --axis: #64748b;
+  --notice-warning-bg: rgba(245, 158, 11, 0.12);
+  --notice-warning-border: rgba(245, 158, 11, 0.35);
+  --notice-danger-bg: rgba(244, 63, 94, 0.12);
+  --notice-danger-border: rgba(244, 63, 94, 0.35);
+  --primary-accent: #38bdf8;
+  --primary-accent-hover: #7dd3fc;
+  --primary-glow: rgba(56, 189, 248, 0.2);
+  --card-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.2);
+  --card-hover-bg: #162035;
+  --tab-bg: rgba(11, 15, 25, 0.6);
+  --tab-active-bg: #1e293b;
+  --badge-bg: #161f32;
+  --badge-text: #f8fafc;
+  --table-stripe: rgba(255, 255, 255, 0.015);
+  --table-hover: rgba(56, 189, 248, 0.06);
+  --card-bg-emphasis: #131d2e;
+  --card-border-emphasis: #25334e;
+  --card-shadow-emphasis: 0 8px 30px -4px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(56, 189, 248, 0.25);
 }

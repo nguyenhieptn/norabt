@@ -55,22 +55,22 @@ def test_a_thin_crowded_market_is_called_risky():
     )
 
     assert posture.posture == POSTURE_RISK
-    assert any("thanh khoản mỏng" in flag for flag in posture.risk_flags)
-    assert any("dồn một phía" in flag for flag in posture.risk_flags)
+    assert any("thin liquidity" in flag for flag in posture.risk_flags)
+    assert any("crowded on one side" in flag for flag in posture.risk_flags)
 
 
 def test_a_rising_market_with_money_coming_in_is_called_growing():
     posture = assess(_market(trend="BULLISH", flow="BUY_PRESSURE", delta_oi=3.0))
 
     assert posture.posture == POSTURE_GROWTH
-    assert "xu hướng tăng" in posture.growth_flags
+    assert "uptrend" in posture.growth_flags
 
 
 def test_a_deep_quiet_market_is_called_stable():
     posture = assess(_market(vol_pct=10.0, depth=5_000_000.0))
 
     assert posture.posture == POSTURE_STABLE
-    assert any("sổ lệnh dày" in flag for flag in posture.stability_flags)
+    assert any("deep order book" in flag for flag in posture.stability_flags)
 
 
 def test_one_severe_flag_outranks_two_soft_ones():

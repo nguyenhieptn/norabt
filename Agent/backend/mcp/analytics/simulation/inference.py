@@ -106,6 +106,11 @@ class SharpeInference:
     kurtosis: Optional[float] = None
     sample_size: int = 0
     psr: Optional[float] = None
+    # Mốc so sánh SR* mà PSR/MinTRL được đo tương đối với nó. Phơi ra ngoài vì
+    # "PSR = 0,97" tự nó vô nghĩa nếu người đọc không biết nó đang vượt mốc
+    # nào: với SR* = 0 thì PSR chỉ nói "gần như chắc chắn Sharpe thật > 0",
+    # một mốc mà hầu hết bot có lãi đều vượt.
+    psr_benchmark_sharpe: float = 0.0
     min_track_record_trades: Optional[float] = None
     deflated_sharpe: Optional[float] = None
     reliable: bool = True
@@ -136,20 +141,21 @@ def analyse(
     benchmark_sharpe: float = 0.0,
     selection_trials: Optional[int] = None,
     confidence: float = 0.95,
+    trial_sharpe_variance: Optional[float] = None,
 ) -> SharpeInference:
     """PSR, MinTRL and (when the selection size is known) the deflated Sharpe."""
     values = np.asarray([float(r) for r in returns], dtype=np.float64)
     if len(values) < MIN_OBSERVATIONS:
         return SharpeInference(
             sample_size=len(values),
-            notes=(f"Cần ít nhất {MIN_OBSERVATIONS} lệnh để suy luận thống kê",),
+            notes=(f"At least {MIN_OBSERVATIONS} trades are needed for statistical inference",),
         )
 
     mean, std, skew, kurt = _moments(values)
     if skew is None or kurt is None or std <= 1e-15:
         return SharpeInference(
             sample_size=len(values),
-            notes=("Lợi nhuận không có phương sai, không tính được Sharpe",),
+            notes=("Returns have no variance, so the Sharpe ratio cannot be computed",),
         )
 
     n = len(values)
@@ -162,7 +168,7 @@ def analyse(
             skewness=skew,
             kurtosis=kurt,
             sample_size=n,
-            notes=("Phương sai Sharpe không xác định với skew/kurtosis này",),
+            notes=("The Sharpe variance term is undefined for this skew/kurtosis",),
         )
 
     psr = _normal_cdf(
@@ -173,14 +179,15 @@ def analyse(
     if kurt > n / KURTOSIS_PER_SAMPLE_LIMIT:
         reliable = False
         notes.append(
-            f"Kurtosis {kurt:.0f} quá lớn so với {n} lệnh: vài lệnh đơn lẻ đang chi "
-            "phối mô men bậc bốn, xấp xỉ tiệm cận không đáng tin"
+            f"Kurtosis {kurt:.0f} is too large relative to {n} trades: a handful of "
+            "individual trades are driving the fourth moment, the asymptotic "
+            "approximation is not reliable"
         )
     if variance_term < MIN_VARIANCE_TERM:
         reliable = False
         notes.append(
-            f"Hệ số phương sai Sharpe chỉ {variance_term:.3f}: độ tin cậy do "
-            "skew/kurtosis tạo ra chứ không phải do dữ liệu"
+            f"The Sharpe variance term is only {variance_term:.3f}: this confidence "
+            "comes from the skew/kurtosis, not from the data"
         )
 
     min_trl = None
@@ -190,16 +197,66 @@ def analyse(
         if sharpe <= benchmark_sharpe:
             # A negative edge never reaches significance above the benchmark.
             min_trl = None
-            notes.append("Sharpe dưới mốc so sánh nên không có độ dài đủ tin cậy")
+            notes.append("Sharpe is below the benchmark, so there is no track record length that reaches significance")
 
     deflated = expected_max = None
     if selection_trials and selection_trials > 1:
-        # Threshold the best of N candidates would clear by luck alone.
+        # Ngưỡng mà kẻ tốt nhất trong N ứng viên vượt được CHỈ nhờ may mắn.
+        #
+        # Công thức công bố (Bailey & López de Prado, 2014):
+        #     SR*₀ = √(V[{SR̂ₙ}]) · [(1−γ)·Z⁻¹(1 − 1/N) + γ·Z⁻¹(1 − 1/(N·e))]
+        # trong đó V[{SR̂ₙ}] là phương sai CHÉO của Sharpe giữa N ứng viên, ước
+        # lượng thực nghiệm từ chính N lần thử đó.
+        #
+        # Ở đây ta KHÔNG có V chéo đó: pool ứng viên (`selection_trials`) đến
+        # từ bước tuyển bot, mà ta chỉ chấm điểm những bot ĐƯỢC CHỌN — Sharpe
+        # của các ứng viên bị loại không tồn tại ở đâu cả. Muốn có V chéo thật
+        # thì phải chấm toàn bộ pool, đắt hơn nhiều bậc.
+        #
+        # Thay vào đó dùng V theo GIẢ THUYẾT KHÔNG: `variance_term/(n−1)` là
+        # phương sai ước lượng của một Sharpe trên n quan sát. Dưới đúng giả
+        # thuyết mà DSR đặt ra -- không ứng viên nào có lợi thế thật, cùng cỡ
+        # mẫu -- hai đại lượng này TRÙNG NHAU, nên đây là bản "null" của cùng
+        # công thức chứ không phải một xấp xỉ tuỳ tiện.
+        #
+        # CHIỀU SAI LỆCH, phải biết để đọc cho đúng: khi các ứng viên thật sự
+        # chênh nhau về kỹ năng hoặc về độ dài sổ lệnh, V chéo thật LỚN HƠN V
+        # theo giả thuyết không. Khi đó ngưỡng `expected_max` ở đây bị ước
+        # lượng THẤP, và DSR trả về CAO HƠN mức đáng có. Nói cách khác: DSR ở
+        # đây là cận TRÊN lạc quan, sai về phía dễ dãi với bot chứ không phải
+        # về phía khắt khe. Đọc nó như "kể cả tính rộng rãi thế này mà vẫn
+        # thấp thì đúng là yếu", chứ đừng đọc ngược lại.
         trials = float(selection_trials)
         max_z = (1.0 - EULER_MASCHERONI) * _normal_ppf(
             1.0 - 1.0 / trials
         ) + EULER_MASCHERONI * _normal_ppf(1.0 - 1.0 / (trials * math.e))
-        expected_max = math.sqrt(variance_term / (n - 1)) * max_z
+        # Ưu tiên phương sai CHÉO thật đo được trên quần thể bot đã chấm
+        # (`trial_sharpe_variance`) -- đó đúng là V[{SR̂ₙ}] mà công thức công
+        # bố đòi. Chỉ khi không có mới rơi về bản "null" nói ở trên.
+        #
+        # Khoảng cách giữa hai lựa chọn này KHÔNG nhỏ. Đo trên 30 bot thật của
+        # dự án: phương sai chéo = 0.0877 (độ lệch chuẩn Sharpe/lệnh 0.296),
+        # trong khi bản null cho một bot 300 lệnh chỉ ra ~0.0033 -- thấp hơn
+        # 26 lần. Ngưỡng `expected_max` vì thế nhảy từ ~0.13 lên ~0.67, tức
+        # bản null đang dễ hơn công thức thật khoảng 5 lần. Dùng bản null làm
+        # mặc định là tự nới chuẩn cho chính mình.
+        if trial_sharpe_variance is not None and trial_sharpe_variance > 0.0:
+            sharpe_variance = float(trial_sharpe_variance)
+            variance_source = "the population"
+        else:
+            sharpe_variance = variance_term / (n - 1)
+            variance_source = "the null hypothesis"
+            notes.append(
+                "The deflated Sharpe threshold is computed from the null-hypothesis "
+                "variance (no Sharpe distribution across the candidate population yet): "
+                "the threshold is underestimated, so the DSR here is an optimistic upper bound"
+            )
+        expected_max = math.sqrt(sharpe_variance) * max_z
+        notes.append(
+            f"Lucky-selection threshold for {selection_trials} candidates: "
+            f"Sharpe/trade {expected_max:.3f} (Sharpe variance taken from "
+            f"{variance_source})"
+        )
         deflated = _normal_cdf(
             (sharpe - expected_max) * math.sqrt(n - 1) / math.sqrt(variance_term)
         )
@@ -210,6 +267,7 @@ def analyse(
         kurtosis=kurt,
         sample_size=n,
         psr=psr,
+        psr_benchmark_sharpe=benchmark_sharpe,
         min_track_record_trades=min_trl,
         deflated_sharpe=deflated,
         selection_trials=selection_trials,

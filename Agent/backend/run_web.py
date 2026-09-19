@@ -34,33 +34,34 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python3 -m Agent.backend.run_web",
         description=(
-            "Web service giám sát rủi ro bot copy-trading OKX (dashboard HTML "
-            "+ API JSON, chạy trên Starlette/uvicorn)."
+            "Web service for monitoring OKX copy-trading bot risk (HTML "
+            "dashboard + JSON API, running on Starlette/uvicorn)."
         ),
     )
     parser.add_argument(
         "--host",
         default=DEFAULT_HOST,
         help=(
-            f"Mặc định {DEFAULT_HOST} (chỉ máy này gọi được). Dùng 0.0.0.0 để "
-            "mở ra mọi interface mạng -- chỉ làm vậy sau reverse proxy/tường "
-            "lửa đáng tin cậy, vì server chưa có xác thực."
+            f"Defaults to {DEFAULT_HOST} (reachable only from this machine). "
+            "Use 0.0.0.0 to open it on every network interface -- only do "
+            "this behind a trusted reverse proxy/firewall, since the server "
+            "has no authentication of its own yet."
         ),
     )
     parser.add_argument(
         "--port",
         type=int,
         default=DEFAULT_PORT,
-        help=f"Mặc định {DEFAULT_PORT}.",
+        help=f"Defaults to {DEFAULT_PORT}.",
     )
     parser.add_argument(
         "--dashboard",
         default=os.environ.get(ENV_DASHBOARD_PATH),
         help=(
-            "Đường dẫn tới file HTML dashboard. Mặc định lấy từ biến môi "
-            f"trường {ENV_DASHBOARD_PATH} nếu có, nếu không dùng "
-            f"{DEFAULT_DASHBOARD_PATH}. Nếu file không tồn tại, route GET / "
-            "vẫn chạy và trả một trang báo lỗi tối giản thay vì crash."
+            "Path to the dashboard HTML file. Defaults to the "
+            f"{ENV_DASHBOARD_PATH} environment variable if set, otherwise "
+            f"{DEFAULT_DASHBOARD_PATH}. If the file doesn't exist, the GET / "
+            "route still runs and returns a minimal error page instead of crashing."
         ),
     )
     return parser
@@ -77,35 +78,35 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         # pipeline (POST /api/analyze) that costs real CPU and a shared OKX
         # rate-limit budget per call, on top of having no auth of its own.
         print(
-            "CẢNH BÁO: server đang lắng nghe trên MỌI interface mạng (0.0.0.0) "
-            "và CHƯA có cơ chế xác thực -- bất kỳ máy nào truy cập được cổng "
-            f"{args.port} đều gọi được toàn bộ API, kể cả POST /api/analyze "
-            "(tốn CPU + hạn mức gọi OKX mỗi lần). Chỉ dùng khi đã có reverse "
-            "proxy/tường lửa/xác thực đáng tin cậy phía trước; nếu không, "
-            "hãy dùng --host 127.0.0.1 (mặc định) hoặc một địa chỉ nội bộ.",
+            "WARNING: the server is listening on EVERY network interface "
+            "(0.0.0.0) and has NO authentication mechanism -- any machine that "
+            f"can reach port {args.port} can call the entire API, including "
+            "POST /api/analyze (costs CPU + shared OKX call budget each time). "
+            "Only use this behind a trusted reverse proxy/firewall/auth layer; "
+            "otherwise use --host 127.0.0.1 (default) or an internal address.",
             file=sys.stderr,
         )
 
     print("=" * 70, file=sys.stderr)
     print(
-        "[web] Risk Supervisor -- dashboard giám sát bot copy-trading OKX",
+        "[web] Risk Supervisor -- OKX copy-trading bot monitoring dashboard",
         file=sys.stderr,
     )
     dashboard_note = (
         ""
         if dashboard_path.exists()
-        else " (KHÔNG TỒN TẠI -- GET / sẽ trả trang báo lỗi tối giản)"
+        else " (DOES NOT EXIST -- GET / will return a minimal error page)"
     )
     print(f"[web] Dashboard HTML : {dashboard_path}{dashboard_note}", file=sys.stderr)
-    print(f"[web] Địa chỉ        : http://{args.host}:{args.port}", file=sys.stderr)
+    print(f"[web] Address        : http://{args.host}:{args.port}", file=sys.stderr)
     print(
-        "[web] Route          : GET / , GET /api/bots , GET /api/markets , "
+        "[web] Routes         : GET / , GET /api/bots , GET /api/markets , "
         "GET /api/leaderboard , POST /api/analyze",
         file=sys.stderr,
     )
     print(
-        "[web] Giới hạn tần suất /api/analyze theo IP đã bật (bảo vệ CPU và "
-        "hạn mức gọi OKX dùng chung).",
+        "[web] Per-IP rate limiting on /api/analyze is enabled (protects CPU "
+        "and the shared OKX call budget).",
         file=sys.stderr,
     )
     print("=" * 70, file=sys.stderr)

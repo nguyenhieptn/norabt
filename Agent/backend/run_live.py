@@ -32,8 +32,8 @@ def _select_targets(bot_code: str | None):
     if not matched:
         codes = ", ".join(t.unique_code for t in targets)
         raise SystemExit(
-            f"Không tìm thấy bot '{bot_code}' trong 30 bot đang theo dõi. "
-            f"Các mã hợp lệ: {codes}"
+            f"Bot '{bot_code}' not found among the 30 bots being watched. "
+            f"Valid codes: {codes}"
         )
     return matched
 
@@ -46,12 +46,12 @@ def _summarize(changes) -> str:
     rescored = [c for c in moved if c.rescore is not None]
     tier_changed = [c for c in rescored if c.rescore.tier_changed]
     lines = [
-        f"Tổng {len(changes)} bot: {len(ok)} lấy được dữ liệu, {len(failed)} lỗi"
+        f"Total {len(changes)} bots: {len(ok)} fetched successfully, {len(failed)} failed"
         f" ({len(stale)} STALE).",
-        f"Đổi vị thế: {len(moved)} bot; chấm lại thành công: {len(rescored)} bot.",
+        f"Position changes: {len(moved)} bots; successfully rescored: {len(rescored)} bots.",
     ]
     if tier_changed:
-        lines.append(f"ĐỔI XẾP LOẠI: {len(tier_changed)} bot:")
+        lines.append(f"TIER CHANGED: {len(tier_changed)} bots:")
         for change in tier_changed:
             outcome = change.rescore
             lines.append(
@@ -63,23 +63,23 @@ def _summarize(changes) -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Cập nhật vị thế 30 bot copy-trading theo thời gian thực"
+        description="Update the positions of 30 copy-trading bots in real time"
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
-        "--once", action="store_true", help="quét đúng 1 vòng rồi thoát (mặc định)"
+        "--once", action="store_true", help="scan exactly one round then exit (default)"
     )
     mode.add_argument(
-        "--watch", action="store_true", help="chạy liên tục cho tới khi Ctrl+C"
+        "--watch", action="store_true", help="run continuously until Ctrl+C"
     )
     parser.add_argument(
         "--interval",
         type=float,
         default=60.0,
-        help="giây giữa hai vòng khi dùng --watch (mặc định 60s)",
+        help="seconds between rounds when using --watch (default 60s)",
     )
     parser.add_argument(
-        "--bot", default=None, help="chỉ theo dõi đúng 1 bot theo uniqueCode"
+        "--bot", default=None, help="watch only one bot by uniqueCode"
     )
     args = parser.parse_args(argv)
 
@@ -90,7 +90,7 @@ def main(argv=None) -> int:
         stop_event = threading.Event()
 
         def _handle_sigint(signum, frame):  # noqa: ARG001 - signal handler signature
-            print("\nĐã nhận tín hiệu dừng, kết thúc vòng hiện tại rồi thoát...")
+            print("\nStop signal received, finishing the current round then exiting...")
             stop_event.set()
 
         signal.signal(signal.SIGINT, _handle_sigint)
@@ -100,7 +100,7 @@ def main(argv=None) -> int:
     started = time.monotonic()
     changes = poller.poll_once()
     elapsed = time.monotonic() - started
-    print(f"\n================ HOÀN TẤT (mất {elapsed:.1f}s) ================")
+    print(f"\n================ DONE (took {elapsed:.1f}s) ================")
     print(_summarize(changes))
     return 0
 

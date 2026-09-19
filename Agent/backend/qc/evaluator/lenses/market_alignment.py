@@ -24,20 +24,20 @@ class MarketAlignmentLens:
         state = bot.current_state
         if state.open_positions_count == 0:
             return available(
-                "Market Alignment",
+                "Market alignment",
                 5.0,
                 1.2,
                 ["No open position; no directional conflict"],
             )
         if market is None:
             return unknown(
-                "Market Alignment",
+                "Market alignment",
                 1.2,
-                "No market observation exists for the instrument this bot trades",
+                "No market observation for the instrument this bot trades",
             )
         trend = market.structure_state.trend_state
         if trend == TrendState.UNKNOWN:
-            return unknown("Market Alignment", 1.2, "Market trend is unavailable")
+            return unknown("Market alignment", 1.2, "No market trend available")
 
         attributed = [
             position
@@ -51,8 +51,8 @@ class MarketAlignmentLens:
         if attributed and inferred:
             confidence = 0.75
             findings.append(
-                f"{len(inferred)}/{len(attributed)} position(s) on {market.symbol} were "
-                f"attributed by implied price move, not a published instId"
+                f"{len(inferred)}/{len(attributed)} positions on {market.symbol} were "
+                f"attributed by inferring from price movement, not from a published instId"
             )
 
         if attributed:
@@ -69,13 +69,13 @@ class MarketAlignmentLens:
             )
             exposure = max(long_notional, short_notional)
             findings.append(
-                f"{len(attributed)} position(s) attributed to {market.symbol}: "
+                f"{len(attributed)} positions attributed to {market.symbol}: "
                 f"net {net_side.value} {exposure:,.0f} USDT"
             )
             share = exposure / state.gross_exposure if state.gross_exposure else None
             if share is not None:
                 findings.append(
-                    f"{market.symbol} is {share:.0%} of the bot's gross exposure"
+                    f"{market.symbol} makes up {share:.0%} of the bot's gross exposure"
                 )
         elif state.unknown_positions_count and state.current_position_side in (
             PositionSide.LONG,
@@ -85,14 +85,14 @@ class MarketAlignmentLens:
             net_side = state.current_position_side
             confidence = 0.5
             findings.append(
-                f"Positions carry no instrument id; judged on portfolio direction "
-                f"({net_side.value}) against {market.symbol}"
+                f"Positions carry no instrument code; assessed by the portfolio's "
+                f"overall side ({net_side.value}) against {market.symbol}"
             )
         else:
             return unknown(
-                "Market Alignment",
+                "Market alignment",
                 1.2,
-                f"No open position can be attributed to {market.symbol}",
+                f"Could not attribute any open position to {market.symbol}",
             )
 
         score = 20.0
@@ -100,25 +100,25 @@ class MarketAlignmentLens:
         if net_side == PositionSide.NET:
             score += 10.0
             findings.append(
-                "Bot holds both directions; net directional risk partly offset"
+                "The bot holds both sides; directional risk is partly offset"
             )
         elif trend in CONFLICT.get(net_side, ()):
             score += 45.0
             findings.append(
-                f"Position {net_side.value} conflicts with a {trend.value} market"
+                f"The {net_side.value} position is against a market currently {trend.value}"
             )
             if market.structure_state.volatility_state in (
                 VolatilityState.EXPANDING,
                 VolatilityState.EXTREME,
             ):
                 score += 20.0
-                findings.append("Expanding volatility amplifies the conflict")
+                findings.append("Expanding volatility amplifies this conflict")
             if (state.current_leverage or 0.0) > 10.0:
                 score += 15.0
                 findings.append(
-                    f"Leverage {state.current_leverage:.0f}x amplifies the conflict"
+                    f"Leverage {state.current_leverage:.0f}x amplifies this conflict"
                 )
         else:
             score -= 10.0
-            findings.append("Position direction agrees with the market trend")
-        return available("Market Alignment", score, 1.2, findings, confidence)
+            findings.append("The position's side follows the market trend")
+        return available("Market alignment", score, 1.2, findings, confidence)

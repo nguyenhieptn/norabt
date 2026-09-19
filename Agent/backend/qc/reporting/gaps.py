@@ -6,18 +6,6 @@ from pydantic import BaseModel, Field
 
 from Agent.backend.market.schemas.market_result import MarketResult
 
-DIM_LABEL = {
-    "market_alignment": "Đồng thuận thị trường",
-    "performance_quality": "Chất lượng hiệu suất",
-    "return_r_quality": "Chất lượng lợi nhuận / R",
-    "drawdown_risk": "Rủi ro sụt vốn",
-    "tail_risk": "Rủi ro đuôi",
-    "leverage_exposure": "Đòn bẩy / Exposure",
-    "behavioral_risk": "Hành vi giao dịch",
-    "strategy_drift": "Độ bền chiến lược qua các pha",
-    "liquidity_execution": "Thanh khoản / Khớp lệnh",
-    "portfolio_risk": "Rủi ro danh mục",
-}
 
 
 class EvidenceGap(BaseModel):
@@ -69,20 +57,20 @@ def build_gaps(rows, markets: Dict[str, Optional[MarketResult]]) -> List[Evidenc
         if not row.market_available:
             add(
                 f"market:{row.traded_symbol}",
-                f"Thị trường {row.traded_symbol}",
-                "OHLCV + order book cho instrument bot đang trade",
-                f"Bot giao dịch {row.traded_symbol} nhưng chưa có dữ liệu thị trường nào cho symbol này.",
+                f"Market {row.traded_symbol}",
+                "OHLCV + order book for the instrument the bot is trading",
+                f"The bot trades {row.traded_symbol} but there is no market data yet for this symbol.",
                 ["market_alignment", "liquidity_execution"],
                 who,
             )
         if row.positions_outside_ledger_universe:
             add(
                 "positions:outside_ledger_universe",
-                "Vị thế ngoài sổ lệnh",
-                "Sổ lệnh sâu hơn, hoặc danh sách instrument đầy đủ",
-                f"{row.positions_outside_ledger_universe} vị thế không khớp bất kỳ "
-                "instrument nào bot từng đóng gần đây; cần lịch sử sâu hơn để mở rộng "
-                "tập ứng viên suy luận.",
+                "Positions outside the ledger",
+                "A deeper ledger, or a complete instrument list",
+                f"{row.positions_outside_ledger_universe} positions do not match any "
+                "instrument the bot has recently closed; a deeper history is needed to widen "
+                "the inference candidate set.",
                 ["market_alignment", "liquidity_execution"],
                 who,
             )
@@ -90,39 +78,39 @@ def build_gaps(rows, markets: Dict[str, Optional[MarketResult]]) -> List[Evidenc
             if row.instrument_withheld_upstream:
                 add(
                     "positions:instrument_id_upstream",
-                    "Vị thế mở (OKX không công bố)",
-                    "instId — không thu thập được",
-                    "OKX trả instId rỗng cho trader này. Hệ thống đã suy luận được "
-                    f"{row.inferred_positions_count} vị thế từ biến động giá ngụ ý; "
-                    f"{row.unknown_positions_count} vị thế còn lại chưa quy được.",
+                    "Open positions (not disclosed by OKX)",
+                    "instId — could not be collected",
+                    "OKX returns an empty instId for this trader. The system inferred "
+                    f"{row.inferred_positions_count} positions from implied price movement; "
+                    f"{row.unknown_positions_count} positions remain unattributed.",
                     ["market_alignment", "liquidity_execution"],
                     who,
                 )
             else:
                 add(
                     "positions:instrument_id",
-                    "Vị thế mở",
-                    "instId cho từng vị thế đang mở",
-                    "Vị thế có side/margin/leverage nhưng thiếu mã instrument, nên exposure không quy được về thị trường.",
+                    "Open positions",
+                    "instId for each open position",
+                    "Positions have side/margin/leverage but no instrument code, so exposure cannot be attributed to a market.",
                     ["market_alignment", "liquidity_execution", "leverage_exposure"],
                     who,
                 )
         if row.capital_basis == "UNAVAILABLE":
             add(
                 "capital:equity_history",
-                "Vốn tài khoản",
-                "Lịch sử equity hoặc nạp/rút",
-                "AUM nhỏ hơn PnL lũy kế nên không dựng được vốn khởi điểm; sụt vốn lịch sử chỉ báo được bằng USDT.",
+                "Account capital",
+                "Equity history or deposit/withdrawal history",
+                "AUM is smaller than cumulative PnL, so starting capital cannot be reconstructed; historical drawdown can only be reported in USDT.",
                 ["drawdown_risk"],
                 who,
             )
         if row.reconciliation_status == "IDENTITY_MISMATCH":
             add(
                 "ledger:wrong_owner",
-                "Sổ lệnh sai chủ sở hữu",
-                "Sổ lệnh đúng của bot này",
-                "File sổ lệnh thuộc về một uniqueCode khác và đã bị từ chối; bot đang được "
-                "đánh giá mà không có lịch sử lệnh.",
+                "Ledger belongs to the wrong owner",
+                "The correct ledger for this bot",
+                "The ledger file belongs to a different uniqueCode and was rejected; the bot "
+                "is being assessed with no trade history.",
                 [
                     "performance_quality",
                     "return_r_quality",
@@ -134,28 +122,28 @@ def build_gaps(rows, markets: Dict[str, Optional[MarketResult]]) -> List[Evidenc
         if row.reconciliation_status == "PARTIAL_LEDGER":
             add(
                 "ledger:full_history",
-                "Sổ lệnh",
-                "Lịch sử đầy đủ theo leadDays",
-                "Sổ lệnh mới phủ một phần thời gian hoạt động; cần phân trang sâu hơn để "
-                "phủ hết lịch sử.",
+                "Ledger",
+                "Full history covering leadDays",
+                "The ledger only covers part of the bot's active period; deeper pagination "
+                "is needed to cover the full history.",
                 ["performance_quality", "tail_risk"],
                 who,
             )
         if row.reconciliation_status == "MISMATCH":
             add(
                 "ledger:completeness",
-                "Sổ lệnh",
-                "Sổ lệnh đầy đủ khớp với PnL tổng",
-                "PnL sổ lệnh lệch so với báo cáo tổng, nghĩa là sổ lệnh chưa đầy đủ.",
+                "Ledger",
+                "A complete ledger matching total PnL",
+                "The ledger's PnL differs from the reported total, meaning the ledger is incomplete.",
                 ["performance_quality", "return_r_quality", "tail_risk"],
                 who,
             )
         if "strategy_drift" in (row.unknown_dimensions or []):
             add(
                 "bot:declared_strategy",
-                "Khai báo chiến lược",
-                "Chiến lược bot tự khai báo",
-                "Không có chiến lược khai báo nên không so được với hành vi quan sát.",
+                "Declared strategy",
+                "The bot's own declared strategy",
+                "There is no declared strategy to compare against observed behavior.",
                 ["strategy_drift"],
                 who,
             )
@@ -174,17 +162,17 @@ def build_gaps(rows, markets: Dict[str, Optional[MarketResult]]) -> List[Evidenc
             }.get(source, [])
             add(
                 f"market_source:{symbol}:{source}",
-                f"Thị trường {symbol}",
+                f"Market {symbol}",
                 source,
-                f"Nguồn {source} chưa được thu thập cho {symbol}.",
+                f"Source {source} has not been collected for {symbol}.",
                 unlocks,
             )
         for source in market.data_quality.stale_sources:
             add(
                 f"market_stale:{symbol}:{source}",
-                f"Thị trường {symbol}",
-                f"{source} (cũ)",
-                f"Nguồn {source} lệch quá xa mốc dữ liệu của {symbol}; cần crawl lại cùng nhịp.",
+                f"Market {symbol}",
+                f"{source} (stale)",
+                f"Source {source} has drifted too far from {symbol}'s data timestamp; it needs to be re-crawled on the same cadence.",
                 ["liquidity_execution"] if "orderbook" in source else [],
             )
 

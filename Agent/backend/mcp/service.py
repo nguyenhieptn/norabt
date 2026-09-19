@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import time
@@ -24,6 +25,9 @@ from Agent.backend.mcp.analytics.simulation.monte_carlo import (
     MonteCarloSimulationEngine,
 )
 from Agent.backend.mcp.analytics.simulation.inference import analyse as analyse_sharpe
+from Agent.backend.mcp.analytics.simulation.sharpe_reference import (
+    population_sharpe_variance,
+)
 from Agent.backend.mcp.analytics.simulation.stress import StressSimulator
 from Agent.backend.mcp.analytics.strategy.phases import PhaseTimeline, build_timeline
 from Agent.backend.mcp.analytics.strategy.profile import (
@@ -49,6 +53,51 @@ class BotDataUnavailableError(ValueError):
     pass
 
 
+# --------------------------------------------------------------------------- #
+# Translation boundary for warning text this service RECEIVES, rather than
+# writes itself, from sibling modules this task's file list does not cover
+# (Agent/backend/mcp/capital/equity_curve.py, .../positions/snapshot.py,
+# .../trades/ledger.py, .../analytics/performance/deferred_loss.py). Those
+# modules' English message templates are fixed and enumerable (each is one
+# `warnings.append(f"...")` call site read directly off that module's own
+# source), so every template is matched here by an exact regex and rebuilt in
+# Vietnamese with the same numbers -- never a loose substring/keyword
+# translation that could silently mistranslate an unrelated sentence.
+#
+# Why translate at the boundary instead of at the source: this task's file
+# list is `Agent/backend/qc/evaluator/lenses/*.py` and
+# `Agent/backend/mcp/service.py` only, "chỉ để dịch chuỗi hiển thị" -- the
+# four sibling modules above belong to other work in flight and are
+# explicitly off-limits ("Không đụng file khác"). This is the one place in
+# THIS file every one of their warning strings passes through before
+# reaching `data_quality.warnings` (see `get_bot_result` below), so it is
+# also the one place that can fix them without touching their source.
+#
+# Deliberately fails OPEN, not closed: a warning text that matches none of
+# the patterns below (a template renamed upstream, or a genuinely new one)
+# is returned UNCHANGED rather than dropped or replaced with a placeholder --
+# a leftover English sentence is a translation gap to fix next, but a
+# silently vanished data-quality warning would be a worse, quieter bug.
+# TẦNG DỊCH ANH -> VIỆT ĐÃ ĐƯỢC XOÁ (19/09).
+#
+# Trước đây khối này giữ ~10 cặp (regex, hàm dựng câu) để Việt hoá các cảnh
+# báo do những module anh em phát ra: `capital/equity_curve.py`,
+# `positions/snapshot.py`, `trades/ledger.py`,
+# `analytics/performance/deferred_loss.py`. Các module đó vốn đã phát ra
+# TIẾNG ANH ở nguồn; khối này tồn tại chỉ để dịch ngược lại.
+#
+# Sản phẩm chuyển sang tiếng Anh nên nó thành thừa: giữ lại là giữ một tầng
+# phải bảo trì mà không làm gì cả, và tệ hơn, là một chỗ để cảnh báo mới ở
+# nguồn lặng lẽ không khớp mẫu rồi đi qua mà không ai biết.
+#
+# `_vi_upstream_warning` giữ nguyên tên và chữ ký để mọi nơi gọi khỏi phải
+# sửa, nhưng giờ là hàm đồng nhất: văn bản của nguồn đi thẳng tới người đọc,
+# không qua trung gian nào.
+def _vi_upstream_warning(text: str) -> str:
+    """Trả về chính `text`. Xem khối chú thích ngay trên."""
+    return text
+
+
 class BotObservationService:
     """LOGIC 2: normalize a bot snapshot, analyze its ledger, and own simulation."""
 
@@ -57,8 +106,34 @@ class BotObservationService:
         data_dir: Optional[Path] = None,
         evaluation_mode: EvaluationMode = EvaluationMode.SNAPSHOT,
         bot_source: Optional[BotDataSource] = None,
+        reference_data_dir: Optional[Path] = None,
     ) -> None:
         self.data_dir = data_dir or Path(config.DATA_DIR)
+        # `data_dir` is where this service reads/writes the BOT's own files
+        # (overview.json/trade_list.json, or -- for a live lookup -- just the
+        # one empty leaf directory that satisfies `_find_bot_dir`'s
+        # existence check). A caller that isolates a live source's writes
+        # behind a scratch directory (see `Agent/backend/web/data.py`'s
+        # `_analyze_full`) passes THAT here.
+        #
+        # `_phase_timelines` below reads something entirely different: the
+        # read-only reference candle series (`<venue>/<symbol>/market/
+        # ohlcv_1h_*.json`, `phases/<symbol>.json`) used to label which
+        # market regime each of the bot's own trades happened in. That data
+        # is never written by this service and has nothing to do with bot
+        # isolation, so it must keep pointing at the real dataset even when
+        # `data_dir` itself is a scratch directory -- otherwise (the bug this
+        # parameter fixes) an empty scratch dir silently starves
+        # `_phase_timelines` of every candle, every trade resolves to
+        # `MarketPhase.UNKNOWN`, and phase coverage/breakdown silently comes
+        # back empty for every bot analyzed through that path.
+        #
+        # Defaults to `data_dir` (`None` here means "same as before"), so
+        # every existing caller -- which never had this scratch-vs-real split
+        # to begin with -- keeps behaving exactly as it did.
+        self._reference_data_dir = (
+            reference_data_dir if reference_data_dir is not None else self.data_dir
+        )
         self._timeline_cache: Dict[str, Optional[PhaseTimeline]] = {}
         self.evaluation_mode = evaluation_mode
         # Defaults to the on-disk crawl output -- every existing caller keeps
@@ -166,28 +241,29 @@ class BotObservationService:
         warnings: List[str] = []
         if primary is None:
             warnings.append(
-                "Neither the trade ledger nor the open positions name an instrument; "
-                "the traded market is unknown"
+                "Neither the closed book nor the open positions name any traded "
+                "instrument; the market this bot actually trades could not be determined"
             )
         elif source == "open positions":
             warnings.append(
-                f"No closed trades: traded market {primary} was taken from the currently "
+                f"No closed trades yet: the traded market {primary} is derived from "
                 f"open positions"
             )
         elif asset_context not in share:
             warnings.append(
-                f"Snapshot is filed under {asset_context} but the ledger never traded it; "
-                f"dominant traded market is {primary} ({share[primary]:.0%} of exposure)"
+                f"Snapshot is filed under {asset_context}, but the closed book has "
+                f"never traded this asset; the primary traded market is {primary} "
+                f"({share[primary]:.0%} exposure)"
             )
         elif share.get(asset_context, 0.0) < 0.5:
             warnings.append(
-                f"{asset_context} is only {share[asset_context]:.0%} of traded exposure; "
-                f"dominant traded market is {primary}"
+                f"{asset_context} accounts for only {share[asset_context]:.0%} of "
+                f"trading exposure; the primary traded market is {primary}"
             )
         if len(observed) > 1:
             warnings.append(
-                f"Bot trades {len(observed)} instruments; single-market assessment covers "
-                f"{primary} only"
+                f"Bot trades {len(observed)} instruments; this single-market "
+                f"assessment covers {primary} only"
             )
         return primary, share, observed, warnings
 
@@ -255,14 +331,57 @@ class BotObservationService:
             exposure_by_symbol=snapshot.exposure_by_symbol,
             open_positions=snapshot.positions,
         )
-        warnings = list(snapshot.warnings)
+        warnings = [_vi_upstream_warning(w) for w in snapshot.warnings]
         if consistency == "MARGIN_EXCEEDS_CAPITAL":
             warnings.append(
-                f"Committed margin ({snapshot.used_margin:,.0f}) exceeds reported capital "
-                f"({reference_capital:,.0f}); capital-relative ratios are not trustworthy "
+                f"Used margin ({snapshot.used_margin:,.0f}) exceeds reported capital "
+                f"({reference_capital:,.0f}); ratios based on capital are unreliable "
                 f"until the capital figure is confirmed"
             )
         return state, warnings
+
+    # Việc 4 (song song hoá theo số nguồn dữ liệu, có trần cứng): một bot
+    # lưới/đa mã có thể chạm hàng chục symbol khác nhau trong một sổ lệnh --
+    # mỗi symbol CHƯA có trong `self._timeline_cache` cần đọc (tới) 5 file
+    # JSON candle trên đĩa, độc lập hoàn toàn với mọi symbol khác. Đây là
+    # I/O (đọc file, không phải tính toán CPU thuần), nên luồng vẫn có lợi
+    # dù máy này chỉ cấp 2 CPU cho container (xem Agent/deploy/docker-
+    # compose.yml's `cpus: 2`): GIL được nhả ra trong lúc chờ hệ điều hành
+    # trả dữ liệu file, y hệt lý do luồng có lợi cho việc chờ mạng OKX.
+    # `_PHASE_TIMELINE_MAX_WORKERS = 6` là TRẦN CỨNG do chủ dự án đặt cho
+    # toàn bộ phần I/O song song của dự án (máy 12 core/14GB, đang chạy
+    # song song 15 site production + nhiều container khác) -- bậc song
+    # song THỰC TẾ vẫn tự co theo số symbol còn thiếu (`min(số symbol còn
+    # thiếu, 6)`), không bao giờ tạo nhiều luồng hơn số việc cần làm.
+    _PHASE_TIMELINE_MAX_WORKERS = 6
+
+    def _load_phase_timeline(self, symbol: str) -> Optional[PhaseTimeline]:
+        """Đọc/dựng timeline pha cho ĐÚNG MỘT symbol -- tách riêng khỏi
+        `_phase_timelines` để có thể chạy nó trên một luồng nền, xem
+        docstring của hàm đó."""
+        candles = None
+        # Universe assets first, then the reference series kept only for phase
+        # labelling (data/phases), which never widen Logic 1's universe.
+        # Read from `_reference_data_dir`, NOT `self.data_dir`: this is
+        # read-only reference data, not part of the bot's own
+        # (possibly-scratch) working directory -- see this class's
+        # `__init__` docstring for why the two must stay separate.
+        paths = [
+            self._reference_data_dir / venue / symbol / "market" / name
+            for venue in ("cex", "dex")
+            for name in ("ohlcv_1h_2023_present.json", "ohlcv_1h_2026.json")
+        ]
+        paths.append(self._reference_data_dir / "phases" / f"{symbol}.json")
+        for path in paths:
+            if not path.exists():
+                continue
+            try:
+                candles = json.loads(path.read_text(encoding="utf-8")).get("candles")
+            except (OSError, json.JSONDecodeError):
+                candles = None
+            if candles:
+                break
+        return build_timeline(symbol, candles) if candles else None
 
     def _phase_timelines(self, symbols: Iterable[str]) -> Dict[str, PhaseTimeline]:
         """Hourly phase labels for every symbol we hold candles for.
@@ -271,36 +390,38 @@ class BotObservationService:
         rebuilding a 30k-point timeline for each would dominate the run.
         """
         timelines: Dict[str, PhaseTimeline] = {}
-        for symbol in {str(s).upper() for s in symbols if s}:
+        unique_symbols = {str(s).upper() for s in symbols if s}
+        missing: List[str] = []
+        for symbol in unique_symbols:
             if symbol in self._timeline_cache:
                 cached = self._timeline_cache[symbol]
                 if cached is not None:
                     timelines[symbol] = cached
-                continue
-            candles = None
-            # Universe assets first, then the reference series kept only for phase
-            # labelling (data/phases), which never widen Logic 1's universe.
-            paths = [
-                self.data_dir / venue / symbol / "market" / name
-                for venue in ("cex", "dex")
-                for name in ("ohlcv_1h_2023_present.json", "ohlcv_1h_2026.json")
-            ]
-            paths.append(self.data_dir / "phases" / f"{symbol}.json")
-            for path in paths:
-                if not path.exists():
-                    continue
-                try:
-                    candles = json.loads(path.read_text(encoding="utf-8")).get(
-                        "candles"
-                    )
-                except (OSError, json.JSONDecodeError):
-                    candles = None
-                if candles:
-                    break
-            timeline = build_timeline(symbol, candles) if candles else None
-            self._timeline_cache[symbol] = timeline
-            if timeline is not None:
-                timelines[symbol] = timeline
+            else:
+                missing.append(symbol)
+
+        if not missing:
+            return timelines
+
+        # Mỗi symbol trong `missing` ghi vào một KHOÁ RIÊNG của
+        # `self._timeline_cache`/`timelines` (đã khử trùng lặp ở
+        # `unique_symbols` phía trên) -- không có hai luồng nào cùng ghi
+        # một khoá, nên không cần khoá (`threading.Lock`) ở đây: gán một
+        # khoá dict trong CPython vốn đã nguyên tử.
+        worker_count = min(len(missing), self._PHASE_TIMELINE_MAX_WORKERS)
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=worker_count, thread_name_prefix="norabt-phase-timeline"
+        ) as pool:
+            future_to_symbol = {
+                pool.submit(self._load_phase_timeline, symbol): symbol
+                for symbol in missing
+            }
+            for future in concurrent.futures.as_completed(future_to_symbol):
+                symbol = future_to_symbol[future]
+                timeline = future.result()
+                self._timeline_cache[symbol] = timeline
+                if timeline is not None:
+                    timelines[symbol] = timeline
         return timelines
 
     @staticmethod
@@ -332,6 +453,13 @@ class BotObservationService:
             or normalized_observed in normalized_declared
         )
         score = 0.1 if aligned else 0.75
+        # `observed` ("Grid/Martingale-like"/"Scalping"/"Swing"/"DayTrading")
+        # doubles as a normalization key matched against the bot's own raw
+        # `declared` strategy text right above -- kept in English rather than
+        # translated, since translating it would change which declared
+        # strings match and silently shift `strategy_drift_score` (a scoring
+        # input), which this task must not touch. `details` itself is not
+        # currently read by any renderer (see StrategyObservations.drift_details).
         details = [] if aligned else [f"Declared {declared}, observed {observed}"]
         return StrategyObservations(
             observed_profile=observed,
@@ -367,16 +495,40 @@ class BotObservationService:
             if bot_folder_name.startswith("bot_")
             else bot_folder_name
         )
-        overview = self._bot_source.get_overview(code_hint, bot_dir=bot_dir)
-        if overview is None:
-            raise BotDataUnavailableError(
-                f"Missing bot data file: overview.json ({bot_dir})"
+        # Việc 4 (song song hoá theo nguồn dữ liệu độc lập): `get_overview`
+        # (weekly_pnl + xếp hạng lead-trader + public-stats) và `get_ledger`
+        # (vị thế mở + phân trang lịch sử) là HAI NHÓM lời gọi OKX hoàn toàn
+        # độc lập -- ledger không cần bất kỳ trường nào overview trả về và
+        # ngược lại, chỉ vì trước bản sửa này chúng được viết NỐI TIẾP trong
+        # cùng một hàm. Đo thật (project owner, 2026-09-17):
+        # `BotObservationService.get_bot_result` tốn 12.4s trên một bot
+        # nguội, phần lớn nằm ở đúng chuỗi lời gọi OKX nối tiếp này. Cho
+        # chạy trên hai luồng cùng lúc, đi qua ĐÚNG `TokenBucket` tiết chế
+        # OKX hiện có (bot_source.py's `_DEFAULT_RATE_LIMITER`/
+        # `self._rate_limiter`, tự nhận "an toàn khi dùng chung giữa nhiều
+        # luồng" -- xem live/ratelimit.py) chứ không vòng qua nó. Với
+        # `FileBotDataSource` (đường file/backtest), cả hai chỉ là đọc đĩa
+        # cục bộ độc lập -- vẫn đúng và an toàn để song song, chỉ là không
+        # tốn kém sẵn nên lợi ích ở đó là không đáng kể.
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="norabt-bot-fetch"
+        ) as pool:
+            overview_future = pool.submit(
+                self._bot_source.get_overview, code_hint, bot_dir=bot_dir
             )
-        raw_ledger = self._bot_source.get_ledger(code_hint, bot_dir=bot_dir)
-        if raw_ledger is None:
-            raise BotDataUnavailableError(
-                f"Missing bot data file: trade_list.json ({bot_dir})"
+            ledger_future = pool.submit(
+                self._bot_source.get_ledger, code_hint, bot_dir=bot_dir
             )
+            overview = overview_future.result()
+            if overview is None:
+                raise BotDataUnavailableError(
+                    f"Missing bot data file: overview.json ({bot_dir})"
+                )
+            raw_ledger = ledger_future.result()
+            if raw_ledger is None:
+                raise BotDataUnavailableError(
+                    f"Missing bot data file: trade_list.json ({bot_dir})"
+                )
         overview_observed_at = self._observed_at(overview, bot_dir / "overview.json")
         ledger_observed_at = self._observed_at(raw_ledger, bot_dir / "trade_list.json")
         now = as_of_ms if as_of_ms is not None else int(time.time() * 1000)
@@ -403,10 +555,18 @@ class BotObservationService:
         reference_capital = capital.capital_at_risk
         reference_source = capital.basis
 
-        capital_warnings: List[str] = list(capital.warnings)
+        # Translated at the boundary: `capital.warnings` is built inside
+        # Agent/backend/mcp/capital/equity_curve.py (a sibling module this
+        # task's file list does not cover), so its English message templates
+        # are mapped to Vietnamese here, at the one place this service reads
+        # them, rather than at their source. See `_vi_upstream_warning`'s own
+        # docstring for the exact set of templates it recognizes.
+        capital_warnings: List[str] = [
+            _vi_upstream_warning(w) for w in capital.warnings
+        ]
         if reference_capital is not None and reference_capital <= 0:
             capital_warnings.append(
-                f"Reported AUM is {reference_capital:g}; reference capital treated as unavailable"
+                f"Reported AUM is {reference_capital:g}; reference capital is treated as absent"
             )
             reference_capital = None
         if current_equity is not None and current_equity <= 0:
@@ -448,39 +608,41 @@ class BotObservationService:
         if identity_rejected:
             status = "IDENTITY_MISMATCH"
             recon_warnings.append(
-                f"Trade ledger is owned by {', '.join(ownership.foreign_codes)} but the "
+                f"The ledger belongs to {', '.join(ownership.foreign_codes)} but the "
                 f"profile is {ownership.expected_code}; the ledger was rejected and this "
-                f"bot is assessed without trade history"
+                f"bot is assessed as having no trading history"
             )
         elif reported_pnl is None:
             status = "UNKNOWN"
-            recon_warnings.append("Reported PnL is unavailable for reconciliation")
+            recon_warnings.append("No reported PnL to reconcile against")
         elif reconciled:
             status = "RECONCILED"
         elif truncated or short_coverage:
             status = "PARTIAL_LEDGER"
             detail = (
-                "page limit reached"
+                "hit the page limit"
                 if truncated
-                else "covers only part of the lead period"
+                else "covers only part of its time as lead trader"
             )
             recon_warnings.append(
-                f"Ledger is a subset of lifetime history ({detail}): "
-                f"{len(trades)} trades over "
-                f"{coverage_days:.0f} days vs {lead_days} lead days"
+                f"The ledger is a partial slice of the full history ({detail}): "
+                f"{len(trades)} trades over {coverage_days:.0f} days versus {lead_days} "
+                f"days as lead trader"
                 if coverage_days is not None and lead_days
-                else f"Ledger is a subset of lifetime history ({detail})"
+                else f"The ledger is a partial slice of the full history ({detail})"
             )
         elif reported_provenance != "OKX_VERIFIED":
             status = "UNVERIFIED_REFERENCE"
             recon_warnings.append(
-                "Reported PnL comes from an unverified local snapshot (OKX publishes no "
-                "per-trader profile endpoint), so the difference is not evidence of a bad ledger"
+                "Reported PnL comes from an unverified internal snapshot (OKX does not "
+                "publish a per-trader profile endpoint), so this discrepancy is not "
+                "evidence the ledger is wrong"
             )
         else:
             status = "MISMATCH"
             recon_warnings.append(
-                "Ledger is complete and the reference is verified, yet the totals disagree"
+                "The ledger is complete and the reference figure is verified, but the "
+                "totals still disagree"
             )
 
         reconciliation = LedgerReconciliation(
@@ -516,8 +678,19 @@ class BotObservationService:
             capital.capital_at_risk,
         )
         trade_statistics = TradeStatisticsCalculator.calculate(trades, mode)
+        # `open_positions` (danh sách chi tiết), KHÔNG chỉ số đếm: bộ dò cần
+        # `symbol`/`side`/`unrealized_pnl`/`entry_price` của từng vị thế để kết
+        # luận được gia tăng-khi-lỗ THẬT (nhiều vị thế cùng mã, cùng hướng, đang
+        # lỗ). Trước đây chỗ này chỉ truyền số đếm, nên bộ dò buộc phải suy từ
+        # "có >= 3 vị thế mở" -- một suy diễn sai đã cộng oan 25 điểm rủi ro cho
+        # 24/31 bot trong dataset này, chủ yếu là bot đa mã/kiểu lưới. Bộ dò giờ
+        # suy biến an toàn khi thiếu danh sách (không kết tội từ số đếm), nhưng
+        # nếu không truyền danh sách vào đây thì nó cũng KHÔNG BAO GIỜ bắt được
+        # ca thật -- tức là gỡ báo động giả xong lại tắt luôn cảm biến.
         behavior = BehavioralPatternDetector.analyze(
-            trades, current.open_positions_count
+            trades,
+            current.open_positions_count,
+            open_positions=current.open_positions,
         )
         declared = overview.get("strategy")
         baseline = self._strategy_observations(
@@ -604,27 +777,32 @@ class BotObservationService:
             ).encode("utf-8")
         ).hexdigest()[:16]
 
+        # `parsed.warnings` (trades/ledger.py) and `deferred_loss.warnings`
+        # (analytics/performance/deferred_loss.py) are sibling modules this
+        # task's file list does not cover -- translated at this boundary via
+        # `_vi_upstream_warning`, same as `capital_warnings` above.
         warnings = [
-            *parsed.warnings,
+            *(_vi_upstream_warning(w) for w in parsed.warnings),
             *reconciliation.warnings,
             *identity_warnings,
             *capital_warnings,
             *position_warnings,
-            *deferred_loss.warnings,
+            *(_vi_upstream_warning(w) for w in deferred_loss.warnings),
         ]
         if capital.supports_historical_pct:
             warnings.append(
-                f"Capital basis {capital.basis}: {capital.equity_curve.usable_points} weekly "
-                f"equity observations anchor both historical drawdown and forward simulation"
+                f"Capital basis {capital.basis}: {capital.equity_curve.usable_points} "
+                f"weekly capital points anchor both the historical drawdown and the "
+                f"forward simulation"
             )
         if current_equity is None:
             warnings.append(
-                "Current account equity is unavailable; AUM is not reported as account equity"
+                "No current account equity available; AUM was not reported as account equity"
             )
         if parsed.rejected_count:
-            warnings.append(f"Rejected {parsed.rejected_count} invalid trades")
+            warnings.append(f"Rejected {parsed.rejected_count} invalid trade(s)")
         if any(source.status == SourceStatus.STALE for source in sources):
-            warnings.append("Bot snapshot is stale")
+            warnings.append("This bot's snapshot is stale")
         data_quality = DataQualityAssessment(
             completeness_score=completeness,
             freshness_score=freshness,
@@ -655,9 +833,19 @@ class BotObservationService:
         # this bot was picked as the best of its pool.
         equity_base = capital.capital_at_risk
         if equity_base and trades:
+            # `trial_sharpe_variance`: phương sai CHÉO của Sharpe trên quần
+            # thể bot đã chấm -- đúng đại lượng V[{SR̂ₙ}] mà công thức
+            # deflated Sharpe đòi. Không truyền vào thì hàm rơi về xấp xỉ
+            # theo giả thuyết không, vốn đặt ngưỡng thấp hơn khoảng 5 lần
+            # trên dữ liệu thật của dự án (xem sharpe_reference.py).
+            # Đọc từ `_reference_data_dir` chứ không phải `self.data_dir`, vì
+            # đây là kho tham chiếu dùng chung, cùng lý do như `_phase_timelines`.
             inference = analyse_sharpe(
                 [trade.realized_pnl / equity_base for trade in trades],
                 selection_trials=selection_trials,
+                trial_sharpe_variance=population_sharpe_variance(
+                    self._reference_data_dir
+                ),
             )
             simulation = simulation.model_copy(
                 update={
@@ -678,8 +866,9 @@ class BotObservationService:
                     "deferred_loss_bias": True,
                     "warnings": [
                         *simulation.warnings,
-                        f"Resampled from closed trades only; {deferred_loss.open_loss:,.0f} "
-                        f"USDT of unrealised loss is absent from this distribution",
+                        f"Resampling only draws from closed trades; "
+                        f"{deferred_loss.open_loss:,.0f} USDT of unrealised loss is not "
+                        f"part of this distribution",
                     ],
                 }
             )

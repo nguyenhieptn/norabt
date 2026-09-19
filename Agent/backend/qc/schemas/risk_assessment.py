@@ -101,7 +101,7 @@ class BotRiskAssessment(BaseModel):
     quality_components: Dict[str, float] = Field(default_factory=dict)
     quality_notes: List[str] = Field(default_factory=list)
     # Four buckets a reader can act on, combining risk, quality and concealment.
-    verdict: str = "THIẾU BẰNG CHỨNG"
+    verdict: str = "INSUFFICIENT EVIDENCE"
     verdict_reason: str = ""
     hidden_risk_flags: List[str] = Field(default_factory=list)
     confidence: float = Field(..., ge=0.0, le=100.0)

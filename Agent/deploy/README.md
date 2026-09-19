@@ -66,6 +66,94 @@ ra cấu hình đã resolve. Nếu báo lỗi thiếu `Agent/.env`, quay lại B
 
 **Kiểm tra:** lệnh thoát mã 0, phần `ports:` in ra đúng `127.0.0.1:8770`.
 
+### Bước 2.5 — Build frontend (SPA)
+
+`Agent/backend/web/app.py` phục vụ `/` bằng file build sẵn
+`Agent/web/dist/index.html` (+ `/assets/*` từ `Agent/web/dist/assets/`) --
+KHÔNG build từ source lúc container khởi động, và Docker image (Bước 3 dưới
+đây) hoàn toàn không chứa Node/npm hay `Agent/frontend/` (xem
+`Agent/deploy/Dockerfile`'s allow-list COPY). Frontend phải được build **trên
+host, trước** khi build/chạy container -- kết quả nằm dưới `Agent/web/`, thư
+mục docker-compose.yml **đã** bind-mount read-only vào container
+(`../web:/app/Agent/web:ro`, xem Bước 4 dưới đây) nên không cần sửa
+docker-compose.yml gì thêm cho việc này -- đã tự kiểm chứng lại claim này
+(không chỉ tin lời viết tay): `Agent/web/dist/` là một thư mục CON của
+`Agent/web/`, và mount hiện tại trỏ nguyên `Agent/web/` (không phải một thư
+mục con cụ thể như `Agent/web/dashboard.html` trước đây), nên `dist/` bên
+trong nghiễm nhiên đã nằm trong phạm vi mount đó.
+
+```bash
+cd Agent/frontend
+npm install          # một lần, hoặc mỗi khi package.json đổi -- không cần taskset
+bash build.sh         # BẮT BUỘC dùng script này, KHÔNG gõ tay "npm run build"
+```
+
+**Vì sao bắt buộc qua `build.sh` chứ không gõ tay `npm run build`:** máy này
+chạy 15 site production khác (xem mục "0. Trước khi bắt đầu" ở trên) dưới
+ràng buộc cứng ≤12 core/≤14GB RAM cho TOÀN BỘ phần việc, không riêng
+agent-web. `build.sh` bọc đúng lệnh:
+
+```bash
+taskset -c 0-3 env NODE_OPTIONS=--max-old-space-size=2560 npm run build
+```
+
+-- ép Vite/esbuild chỉ dùng tối đa 4 lõi (không phải cả 24) và trần heap
+2.5GB, cùng chính sách tài nguyên `nora/build_frontend.sh` đã áp dụng cho
+frontend `nora/`. Không sourcemap trong bundle production (xem
+`Agent/frontend/vite.config.js`'s `build.sourcemap: false`) -- giảm cả thời
+gian build lẫn dung lượng `Agent/web/dist/`.
+
+**Kiểm tra:**
+
+```bash
+ls Agent/web/dist/index.html Agent/web/dist/assets/
+# Kỳ vọng: index.html + ít nhất một file .js và một file .css trong assets/.
+grep -o -- '--verdict-danger:[^;]*;' Agent/web/dist/assets/*.css
+# Kỳ vọng: in ra đúng giá trị hiện có trong Agent/web/tokens.css -- xác nhận
+# @import cross-project (Agent/frontend/src/styles/global.css ->
+# Agent/web/tokens.css) đã được Vite bundle vào đúng, không âm thầm rỗng.
+```
+
+Frontend chưa build (checkout mới) không làm container lỗi khởi động --
+`/` trả trang fallback tối giản ("Chưa build frontend"), `/assets/*` trả 404
+per-file thay vì crash (xem `_dashboard_response`/`StaticFiles(check_dir=
+False)` trong `Agent/backend/web/app.py`).
+
+**Design token dùng chung (Việc 3):** `Agent/web/tokens.css` là NGUỒN DUY
+NHẤT của màu 6 nhãn kết luận hai trục (bốn tổ hợp
+`DRAWDOWN: LOW/HIGH × QUALITY: GOOD/WEAK`, cờ `HIDDEN RISK`, và trạng thái
+trung tính `INSUFFICIENT EVIDENCE`), thang chữ, khoảng cách và bán kính bo
+góc.
+Hai phía đọc file NÀY, không phía nào chép giá trị:
+
+- `Agent/backend/web/report_page.py` đọc file này TẠI RUNTIME (một file
+  read + regex nhỏ trên các dòng `--name: value;`, không thêm dependency
+  Python nào) để dựng `VERDICT_COLOR` và để nhúng nguyên văn nội dung CSS
+  của file vào `<style>` của mỗi trang báo cáo render ra -- xem module đó,
+  `_load_verdict_color`/`_design_tokens_css_text`.
+- SPA (`Agent/frontend/src/styles/global.css`) `@import` THẲNG file này qua
+  đường dẫn tương đối xuyên hai thư mục dự án
+  (`../../../web/tokens.css`) -- không sinh code, không copy file. An toàn
+  cho `vite build` (production) vì đây là một lần resolve file lúc BUILD,
+  không phải một request `fs.allow` của dev server -- hai dự án
+  `Agent/frontend/` và `Agent/web/` là thư mục anh em (sibling), không lồng
+  nhau, nhưng điều đó không ảnh hưởng gì tới việc resolve `@import` lúc
+  build.
+
+Sửa một màu ở `Agent/web/tokens.css` là đổi cả hai nơi cùng lúc -- không
+cần sửa thêm gì trong `report_page.py`/SPA.
+
+**Gộp hai trang admin (Việc 3 -- lượt sửa "một hàm, ba nơi gọi"):**
+`GET /admin` không còn tự render HTML danh sách bot nữa (module
+`Agent/backend/web/admin_page.py` đã bị xoá) -- giờ chỉ còn KIỂM TRA QUYỀN
+rồi chuyển hướng (302) sang màn hình admin của SPA (`/#/admin`), màn hình
+danh sách DUY NHẤT còn lại. Người không có quyền vẫn nhận đúng 404 chung
+như trước (không chuyển hướng người lạ). Toàn bộ biểu đồ tổng quan (tròn
+phân bố xếp loại, cột phân bố điểm rủi ro, cột lý do veto, các ô số lớn)
+trang cũ từng có đã được chuyển sang `Agent/frontend/src/components/
+AdminOverview.jsx`, tính lại hoàn toàn phía trình duyệt từ dữ liệu
+`GET /api/bots` (không gọi thêm endpoint nào khác).
+
 ### Bước 3 — Build image
 
 ```bash
@@ -115,6 +203,30 @@ stat -c "%u:%g %a %n" Agent/data/users
 # container, nếu docker-compose.yml's user: đã được đổi khỏi mặc định).
 ```
 
+### Bước 3.6 — Tạo thư mục ghi-được cho mã lượt-dùng ẩn danh **[NGƯỜI THẬT]**
+
+CÙNG LÝ DO, CÙNG KHUÔN với Bước 3.5 ở trên: `docker-compose.yml` mount
+`../data/usage_refs:/app/Agent/data/usage_refs:rw` để
+`Agent/backend/web/usage_ref.py` (Việc 2) ghi `data/usage_refs/<ref>.json`
+mỗi khi `POST`/`GET /api/analyze` phân tích thành công cho một caller
+KHÔNG đăng nhập (chính là luồng OKX -- xem module đó để biết vì sao link
+chi tiết trả về không được mang mã bot đoán-được). Thư mục này cũng phải
+tồn tại trên host VÀ thuộc đúng uid/gid trước khi `docker compose up` lần
+đầu, vì đúng lý do Bước 3.5 đã nêu.
+
+```bash
+mkdir -p Agent/data/usage_refs
+touch Agent/data/usage_refs/.gitkeep
+# sudo chown 1000:1000 Agent/data/usage_refs   # nếu uid chạy compose khác 1000
+```
+
+**Kiểm tra:**
+
+```bash
+stat -c "%u:%g %a %n" Agent/data/usage_refs
+# Kỳ vọng: giống hệt kết quả của Agent/data/users ở trên.
+```
+
 ### Bước 4 — Chạy container
 
 ```bash
@@ -128,13 +240,26 @@ docker compose -f Agent/deploy/docker-compose.yml ps
 # Cột STATUS: "starting" trong ~20s đầu (start_period), sau đó "healthy".
 
 curl -s http://127.0.0.1:8770/healthz | python3 -m json.tool
-# Kỳ vọng {"status": "ok", "uptime_seconds": ..., "bots_on_disk": 30,
-# "okx_public_reachable": true|false}. "bots_on_disk": 30 xác nhận mount
-# Agent/data:ro đã đúng (30 là số bot đã chấm điểm sẵn trong dataset hiện
-# tại, xem Agent/backend/web/data.py).
+# Kỳ vọng {"status": "ok", "uptime_seconds": ..., "snapshot": "disabled",
+# "bots_on_disk": <N>, "okx_public_reachable": true|false}. "bots_on_disk"
+# xác nhận mount Agent/data:ro đã đúng -- <N> phải bằng đúng số thư mục có
+# assessment.json trong Agent/data/assessment/ ở thời điểm chạy (đếm bằng
+#   find Agent/data/assessment -name assessment.json | wc -l
+# ). Đừng ghi cứng một con số vào đây: dataset lớn dần theo mỗi đợt chấm
+# điểm, và một con số cũ chỉ làm người đọc tưởng là hỏng. "snapshot": "disabled" là
+# đúng ở bước này (NORABT_SNAPSHOT_REDIS_URL chưa cấu hình) -- xem Bước 11
+# nếu muốn bật bộ đệm snapshot Redis cho GET /bot/<code>.
 
 curl -s http://127.0.0.1:8770/api/bots | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])"
 # Kỳ vọng: 30
+
+curl -sI http://127.0.0.1:8770/ | head -1
+# Kỳ vọng: HTTP 200 -- trang SPA thật nếu Bước 2.5 đã build, trang fallback
+# tối giản ("Chưa build frontend") nếu chưa -- KHÔNG BAO GIỜ 500 dù trường
+# hợp nào.
+ASSET_JS=$(ls Agent/web/dist/assets/*.js 2>/dev/null | head -1)
+[ -n "$ASSET_JS" ] && curl -sI "http://127.0.0.1:8770/assets/$(basename "$ASSET_JS")" | head -1
+# Kỳ vọng (khi đã build): HTTP 200, content-type javascript.
 
 curl -s -X POST http://127.0.0.1:8770/api/session \
   -H 'Content-Type: application/json' \
@@ -264,12 +389,16 @@ bộ route thật đều sống qua domain công khai:
 ```bash
 curl -I https://agent.expsolution.io/
 # Kỳ vọng: HTTP/2 200 (route "/" được proxy nguyên vẹn tới agent-web, luôn
-# trả 200 -- dashboard HTML thật nếu có, hoặc trang fallback tối giản nếu
-# chưa có file dashboard, xem docstring của _dashboard_response trong
-# Agent/backend/web/app.py). "/api/...", "/bot/<code>" và "/healthz" cũng
-# phải được proxy tới agent-web (route thật, xem cuối create_app trong
-# Agent/backend/web/app.py) -- bất kỳ đường dẫn nào KHÁC những route đó mới
-# phải ra 404 ngay tại nginx (thử: curl -I https://agent.expsolution.io/xyz).
+# trả 200 -- SPA build thật nếu Bước 2.5 đã chạy, hoặc trang fallback tối
+# giản "Chưa build frontend" nếu chưa, xem docstring của
+# _dashboard_response trong Agent/backend/web/app.py). "/api/...",
+# "/bot/<code>", "/assets/...", "/admin", "/{userref}_{code}" và "/healthz"
+# cũng phải được proxy tới agent-web (route thật, xem cuối create_app trong
+# Agent/backend/web/app.py, VÀ danh sách location tương ứng ở đầu
+# Agent/deploy/nginx-agent.conf.template -- hai danh sách này PHẢI khớp
+# nhau, xem lời nhắc ở đầu file template đó) -- bất kỳ đường dẫn nào KHÁC
+# những route đó mới phải ra 404 ngay tại nginx (thử:
+# curl -I https://agent.expsolution.io/xyz).
 curl -s https://agent.expsolution.io/healthz | python3 -m json.tool
 ```
 
@@ -462,6 +591,150 @@ Flexible và trang bắt đầu lặp redirect): `sudo cp` file Giai đoạn A
 lên `/etc/nginx/sites-available/agent.expsolution.io`, `nginx -t`, reload —
 đối xứng với 10.4.
 
+### Bước 11 — Bật bộ đệm snapshot Redis cho `GET /bot/<code>` (tuỳ chọn)
+
+Hoàn toàn TẮT theo mặc định (`NORABT_SNAPSHOT_REDIS_URL` để trống trong
+`Agent/.env`) — bỏ qua bước này thì `GET /bot/<code>`/`GET /<userref>_<code>`
+chạy y hệt như trước khi tính năng này tồn tại: mỗi lần mở link đều chấm
+điểm lại từ đầu. Xem `Agent/backend/web/snapshot.py`'s module docstring cho
+đầy đủ lý do thiết kế ("bộ đệm, không phải kho dữ liệu chính thức").
+
+**Redis dùng cho bộ đệm này là `agent-redis` -- RIÊNG của agent, KHÔNG PHẢI
+`norabt-redis`** của dự án "nora" đang chạy sẵn trên máy (6 container khác +
+MySQL/MongoDB/PHP-FPM). Từng thử trỏ thẳng vào `norabt-redis` qua
+`host.docker.internal:host-gateway` nhưng đo được trên chính hạ tầng này là
+KHÔNG BAO GIỜ tới được: `norabt-redis` chạy `network_mode: host` và Redis
+bên trong chỉ bind `127.0.0.1` (loopback CỦA HOST) — container agent-web ở
+mạng bridge riêng (`deploy_default`) luôn bị kernel từ chối kết nối ngay
+(`ConnectionRefusedError`, không phải treo/timeout), bất kể
+`extra_hosts:host-gateway` có khai báo đúng cách mấy. Mở thêm bind cho
+`norabt-redis` để nhận kết nối từ bridge network là đổi cấu hình vận hành
+của Redis dùng chung với dự án khác — không nên làm chỉ để phục vụ agent.
+Giải pháp chốt: `docker-compose.yml` khai báo sẵn service `agent-redis`
+(image `redis:7-alpine`, cùng mạng bridge mặc định với agent-web, không
+publish cổng ra host, tắt lưu bền, trần `maxmemory 128mb`) — xem mục 5 bên
+dưới cho đầy đủ số đo/quyết định thiết kế.
+
+```bash
+# 11.1. docker-compose.yml đã khai báo sẵn service `agent-redis` và
+#       `agent-web`'s `depends_on: agent-redis (condition: service_healthy)`
+#       -- không cần sửa gì thêm ở bước này. `depends_on` chỉ quyết định THỨ
+#       TỰ khởi động; nếu agent-redis chết sau khi cả hai đã lên, agent-web
+#       vẫn tiếp tục chạy bình thường (xem comment trong file).
+
+# 11.2. Agent/.env đã có sẵn (mặc định của checkout này):
+#   NORABT_SNAPSHOT_REDIS_URL=redis://agent-redis:6379
+cd Agent/deploy && docker compose up -d
+
+# 11.3. Xác nhận qua /healthz -- kỳ vọng "snapshot": "ok" (không phải
+#       "disabled"/"unreachable"):
+curl -s http://127.0.0.1:8770/healthz | python3 -m json.tool
+```
+
+**Redis chết thì trang vẫn sống** — đây là bài kiểm thử quan trọng nhất của
+thiết kế fail-open (`docker stop norabt-agent-redis` rồi thử
+`GET /bot/<code>`): trang vẫn trả HTTP 200 đầy đủ nội dung, `/healthz` báo
+trung thực `"unreachable"`, không request nào lỗi. `docker start
+norabt-agent-redis` lại là xong, không cần restart agent-web.
+
+### Bước 12 — Bật "nhận định chuyên môn" do LLM viết (tuỳ chọn)
+
+Hoàn toàn TẮT theo mặc định (`NORABT_NARRATIVE_BACKEND` để trống trong
+`Agent/.env`) — bỏ qua bước này thì trường `narrative` trong `/api/analyze`
+và trên `GET /bot/<code>` luôn là `null`, và
+`Agent/backend/qc/reporting/narrative.py` không bao giờ spawn một tiến
+trình con nào. Xem docstring đầu file đó cho đầy đủ thiết kế (nguyên tắc
+bất di bất dịch: engine giữ toàn bộ con số/phán quyết, LLM chỉ diễn đạt,
+mọi đầu ra đi qua 3 cổng kiểm trước khi được dùng).
+
+**Chi phí thật, đã đo trên chính máy chủ dự án** trước khi bật: mỗi lượt
+sinh nhận định gọi `claude` CLI, tốn 8–17 giây (trung vị ~14s) và ~0,05 USD
+hạn mức Claude thật của chủ dự án — không phải hạn mức OKX, không phải
+tiền của người dùng cuối. Bật tính năng này nghĩa là chấp nhận trả chi phí
+đó cho MỖI lượt phân tích FULL mới (không phải mỗi lượt xem lại — xem
+"sinh một lần" bên dưới).
+
+**`claude` CLI chỉ tồn tại TRÊN HOST, không cài vào image** — binary đo
+được là một file ELF 64-bit tự chứa ~224MB, không cần Node hay runtime nào
+khác, sống tại `~/.local/share/claude/versions/<phiên bản>` với
+`~/.local/bin/claude` là symlink trỏ tới bản đang dùng. `docker-compose.yml`
+mount CẢ THƯ MỤC `versions/` (không phải một file phiên bản cụ thể) cộng
+đúng một file `~/.claude/.credentials.json` vào container, cả hai chỉ-đọc
+— xem comment ngay trong file đó cho đầy đủ lý do. Không cần sửa gì trong
+`docker-compose.yml` để dùng đúng đường dẫn đo được trên máy chủ dự án
+này; chỉ cần khi đường dẫn đó khác trên một máy khác, ghi đè bằng biến môi
+trường của SHELL đang chạy `docker compose` (không phải trong `Agent/.env`
+— hai cơ chế khác nhau, xem comment trong `docker-compose.yml`):
+
+```bash
+export NORABT_CLAUDE_VERSIONS_DIR="$(dirname "$(readlink -f "$(which claude)")")"
+cd Agent/deploy && docker compose up -d
+```
+
+**Không cần làm gì khi Claude Code tự cập nhật** — đây chính là lý do mount
+cả thư mục thay vì một file phiên bản cụ thể: `narrative.py`'s
+`resolve_claude_binary()` tự quét `/opt/claude/versions` bên trong
+container, chọn bản SEMVER CAO NHẤT đang có (so sánh từng phần dưới dạng
+số nguyên, không so chuỗi — tránh đúng bẫy "2.1.9" bị coi lớn hơn "2.1.10"
+nếu so bằng ký tự), cache kết quả 45 giây. Một bản `claude` mới trên HOST
+(thêm file, trỏ lại symlink) được container nhận trong vòng chưa tới một
+phút, KHÔNG CẦN restart container, KHÔNG CẦN sửa cấu hình. `GET /healthz`
+cho biết ngay container đang chạy bản nào (xem Bước 12.2 dưới đây) — đây
+là cách xác nhận nhanh nhất sau một lần Claude Code tự cập nhật, thay vì
+phải đoán.
+
+```bash
+# 12.1. Thêm vào Agent/.env:
+#   NORABT_NARRATIVE_BACKEND=cli
+cd Agent/deploy && docker compose up -d
+
+# 12.2. Xác nhận qua /healthz -- kỳ vọng "narrative": "ok (claude X.Y.Z)"
+#       với X.Y.Z là phiên bản cao nhất hiện có trong
+#       ~/.local/share/claude/versions trên host. "binary_missing" nghĩa
+#       là thư mục versions rỗng hoặc không mount được (kiểm bằng
+#       `docker exec norabt-agent-web ls -la /opt/claude/versions`).
+#       "no_credentials" nghĩa là mount .credentials.json thiếu hoặc
+#       không đọc được (kiểm bằng
+#       `docker exec norabt-agent-web ls -la /opt/claude-home/.claude/`).
+curl -s http://127.0.0.1:8770/healthz | python3 -m json.tool
+
+# 12.3. Xác nhận bằng một bot thật:
+curl -s -X POST http://127.0.0.1:8770/api/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"<uniqueCode thật>"}' | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["narrative"])'
+# Kỳ vọng: một đoạn văn tiếng Việt (không phải null, không phải câu văn
+# bản mẫu "Hệ thống chưa sinh được..." -- câu đó nghĩa là cổng kiểm đã
+# chặn hoặc CLI lỗi/timeout, xem log container để biết lý do cụ thể).
+```
+
+**Sinh một lần, không sinh lại mỗi lượt xem** — narrative được tính CÙNG
+LÚC với phân tích (`_analyze_full`), rồi nằm trong đúng lớp cache
+`WebDataService` và snapshot Redis (Bước 11, nếu đã bật) mà phân tích đó
+vốn đã dùng — mở lại cùng một link trong TTL cache không gọi Claude thêm
+lần nào. Chỉ `?refresh=1` mới ép sinh lại (và tốn thêm một lượt chi phí
+thật ở trên).
+
+**LLM lỗi thì trang vẫn sống** — cùng triết lý fail-open như Redis ở Bước
+11: `claude` CLI timeout, trả lỗi, hay đầu ra không qua được cổng kiểm đều
+chỉ khiến `narrative` là một câu văn bản mẫu tĩnh, KHÔNG BAO GIỜ làm hỏng
+phần còn lại của `/api/analyze`/`GET /bot/<code>` — nhưng LUÔN được ghi
+log với lý do cụ thể (cổng nào, số/từ nào), nên `docker logs` là nơi cần
+xem nếu tính năng này liên tục trả về câu văn bản mẫu thay vì nhận định
+thật.
+
+**Giới hạn đã biết, không giấu**: thông tin xác thực trong
+`.credentials.json` có hạn, và được một PHIÊN `claude` chạy TRÊN HOST tự
+làm mới — container chỉ gắn file này chỉ-đọc nên KHÔNG THỂ tự làm mới nó.
+Nếu lâu ngày không ai chạy `claude` trên host, token có thể hết hạn; lúc
+đó `GET /healthz` vẫn báo `"narrative": "ok (claude X.Y.Z)"` (file vẫn còn
+đó, vẫn đọc được) NHƯNG mọi lượt sinh nhận định thật sẽ âm thầm trượt về
+câu văn bản mẫu — `/healthz` không có cách nào phát hiện việc này mà
+không tự gọi `claude` (việc probe liveness tuyệt đối không được làm, vì sẽ
+tốn hạn mức thật mỗi lần orchestrator poll). Cách phát hiện thật: thỉnh
+thoảng chạy lại đúng lệnh kiểm ở Bước 12.3 bằng một bot thật, hoặc theo
+dõi `docker logs` cho dòng "narrative: backend ... reported a failure".
+
 ## 2. Vận hành hằng ngày
 
 **Xem log ứng dụng (stdout/stderr container, đã giới hạn 10MB x 5 file):**
@@ -536,22 +809,30 @@ sudo certbot delete --cert-name agent.expsolution.io
 | **OKX chặn IP / trả lỗi liên tục** (`healthz` báo `okx_public_reachable: false` kéo dài, hoặc `/api/analyze` luôn lỗi 502) | IP `103.141.141.24` bị OKX rate-limit hoặc chặn (khác hẳn lỗi mạng cục bộ) | Kiểm tra trực tiếp từ host: `curl -s https://www.okx.com/api/v5/public/time` — nếu cũng lỗi/timeout từ chính host (không qua container) thì đúng là OKX/mạng phía OKX có vấn đề, không phải lỗi ở agent-web. Việc này nằm ngoài khả năng tự sửa của container — theo dõi `Agent/backend/okx/probe.py`'s `check_public_access()` để có chẩn đoán chi tiết hơn (mã lỗi OKX cụ thể), và cân nhắc giãn tần suất gọi nếu do rate-limit. |
 | **Hết dung lượng cache nến** (`Agent/data/cache/candles` phình to, hoặc container báo lỗi ghi đĩa) | Cache nến 1H tích luỹ theo số lượng asset từng được `/api/analyze` tra cứu — không tự dọn | `du -sh Agent/data/cache/candles` để xem kích thước thật. An toàn để xoá bớt/xoá sạch thư mục này bất cứ lúc nào (`rm -rf Agent/data/cache/candles/*` trên host, container không cần restart) — đây chỉ là cache, `LiveMarketDataSource` (xem `Agent/backend/sources/market_source.py`) tự tải lại từ OKX khi thiếu, không mất dữ liệu gốc nào. |
 | **`POST /api/session` báo "Hệ thống tạm thời chưa lưu được hồ sơ" (HTTP 500, kèm một mã sự cố 8 ký tự)** | `Agent/data/users` chưa được tạo trước khi `docker compose up` (nên Docker tự tạo nó thuộc quyền root — xem Bước 3.5), hoặc sai uid/gid, hoặc host hết dung lượng đĩa. Thông báo trả về CỐ Ý không nêu chi tiết (đường dẫn, mã lỗi OS) để tránh lộ cấu trúc nội bộ ra ngoài — xem `Agent/backend/web/identity.py`'s `ProfileStoreError` | `docker compose logs agent-web \| grep "mã sự cố đó"` (copy đúng mã 8 ký tự người dùng báo lại) để xem chi tiết đầy đủ (loại lỗi, traceback) mà `Agent/backend/web/app.py`'s `_log_incident` đã ghi kèm đúng mã đó. Rồi kiểm `stat -c "%u:%g %a %n" Agent/data/users` và `df -h` trên host, sửa theo Bước 3.5. |
+| **`/api/analyze` trả về nhưng `report_url`/dòng "xem chi tiết trực quan" bị THIẾU cho một caller ẩn danh (không đăng nhập, không phải admin)** | `Agent/data/usage_refs` chưa được tạo trước khi `docker compose up` (giống hệt lỗi ở dòng trên nhưng cho Việc 2's usage-ref store thay vì profile), nên `usage_ref.mint_usage_ref` không ghi được và request rơi vào nhánh lỗi 500 chung (`_log_incident`) — KHÔNG BAO GIỜ lộ mã bot thật `/bot/<code>` ra thay thế | `docker compose logs agent-web \| grep "mã sự cố đó"`, rồi kiểm `stat -c "%u:%g %a %n" Agent/data/usage_refs` và `df -h`, sửa theo Bước 3.6. |
 | **Log đầy đĩa** | Log container đã bị giới hạn (`max-size: 10m`, `max-file: 5` → tối đa 50MB, xem `docker-compose.yml`) nhưng log nginx riêng của vhost thì chưa có giới hạn riêng ở đây | Kiểm tra `/etc/logrotate.d/nginx` trên host đã bao gồm pattern `/var/log/nginx/*.log` (mặc định Ubuntu là vậy — vhost mới đặt tên `agent-expsolution-*.log` nên khớp pattern này tự động). Nếu không, thêm một block logrotate riêng cho hai file này. |
 | **`docker compose config` báo lỗi thiếu `Agent/.env`** | Bước 1 (tạo `Agent/.env`) chưa làm, hoặc chạy lệnh từ sai thư mục | Quay lại Bước 1. Lệnh `docker compose -f Agent/deploy/docker-compose.yml ...` chạy được từ bất kỳ thư mục nào (đường dẫn `-f` là tuyệt đối/tương đối tới file, `env_file: ../.env` bên trong luôn tính tương đối theo vị trí `docker-compose.yml`, không theo thư mục đang đứng khi gõ lệnh). |
+| **`/healthz` báo `"snapshot": "unreachable"` dù đã làm Bước 11** | `agent-redis` chưa healthy/chưa chạy, hoặc `NORABT_SNAPSHOT_REDIS_URL` bị sửa sai khỏi giá trị mặc định `redis://agent-redis:6379` | `docker compose ps agent-redis` xem container có "healthy" không; `docker compose logs agent-redis` nếu không. Nếu container ổn nhưng vẫn `unreachable`: kiểm tra `Agent/.env`'s `NORABT_SNAPSHOT_REDIS_URL` đúng `redis://agent-redis:6379` (không phải `host.docker.internal` hay `127.0.0.1` -- đó là địa chỉ SAI cho service riêng này). KHÔNG phải lỗi cần "sửa" gấp trong lúc chẩn đoán -- tính năng fail-open, mọi request vẫn chấm điểm trực tiếp như hôm nay, không ai bị ảnh hưởng. |
 
 ## 4. Cách ly với các dịch vụ khác trên máy
 
 - **Cổng:** chỉ `127.0.0.1:8770` (container) + `443`/`80` (nginx, dùng
   chung với mọi vhost khác trên máy nhưng qua `server_name` riêng, không
   đụng cấu hình vhost nào khác). Không mở thêm cổng nào khác.
-- **Tài nguyên:** trần cứng `cpus: 2` / `mem_limit: 2g` cho riêng container
-  này (xem lý do chi tiết trong `docker-compose.yml`) — nằm trong ngân sách
+- **Tài nguyên:** trần cứng `cpus: 2` / `mem_limit: 2g` cho agent-web và
+  `mem_limit: 192m` (`maxmemory 128mb`) cho `agent-redis` (xem lý do chi
+  tiết trong `docker-compose.yml`) — cả hai cộng lại vẫn nằm trong ngân sách
   ≤12 core/≤14GB của toàn dự án, để lại dư địa cho 6 container Docker khác
   (fms-frontend, fms-backend, fms-mongodb, giapha-db, nora-tg-bot,
   nora-vault-sync) và MySQL/MongoDB/PHP-FPM chạy trực tiếp trên host.
 - **Mạng Docker:** không khai báo `networks:` dùng chung trong
-  `docker-compose.yml` — Compose tự tạo network riêng cho project này, không
-  tham gia network của bất kỳ container nào khác đang chạy.
+  `docker-compose.yml` — Compose tự tạo network riêng (`deploy_default`) cho
+  project này, không tham gia network của bất kỳ container nào khác đang
+  chạy. `agent-redis` (service riêng cho tính năng snapshot, Bước 11) sống
+  trên CHÍNH mạng `deploy_default` này, không publish cổng nào ra host, nên
+  chỉ `agent-web` gọi được tới nó — không đổi gì về cách ly mạng tổng thể
+  của service `agent-web`, và không đụng tới `norabt-redis`
+  (`network_mode: host`) của dự án nora.
 - **Volume:** chỉ mount `Agent/data` (đọc, trừ `cache/candles` và `users`
   đọc-ghi — xem Bước 3.5) của chính dự án này — không mount bất kỳ đường dẫn
   nào thuộc dự án khác.
@@ -586,3 +867,43 @@ sudo certbot delete --cert-name agent.expsolution.io
 - **`okx_public_reachable: false` không làm container "unhealthy"**: OKX
   chặn IP/rate-limit là điều kiện bên ngoài mà khởi động lại container không
   sửa được — để nó gây restart loop chỉ tổ làm ồn log mà không giải quyết gì.
+- **Snapshot Redis (Bước 11) -- thiết kế và số đo hạ tầng thật**: xem
+  `Agent/backend/web/snapshot.py`'s module docstring cho hợp đồng đầy đủ
+  ("bộ đệm, không phải kho dữ liệu chính thức"). Tóm tắt các con số/quyết
+  định đã đo trên chính server này trước khi chốt thiết kế:
+  - **Vì sao không dùng chung `norabt-redis`**: `redis-cli config get bind`
+    trên `norabt-redis` (`redis:7-alpine`, chạy `network_mode: host`, dùng
+    CHUNG với dự án "nora" — đã có 88 khoá `candles:*`/`state:*`/
+    `universe:*` ở db0) trả về `127.0.0.1` — Redis CHỈ nhận kết nối trên
+    loopback CỦA HOST. Đã kiểm chứng trực tiếp (một container trên mạng
+    `deploy_default` gọi thẳng tới địa chỉ gateway của chính mạng đó ở cổng
+    6379) rằng kết nối bị từ chối ngay (`ConnectionRefusedError`, không
+    phải treo/timeout) — nghĩa là `extra_hosts:
+    host.docker.internal:host-gateway` một mình nó KHÔNG đủ để agent-web
+    (mạng bridge riêng) với tới Redis này, và mở thêm bind cho
+    `norabt-redis` là đổi cấu hình vận hành của dự án khác — không nên làm.
+  - **Giải pháp: `agent-redis` riêng của agent** — service mới trong
+    `docker-compose.yml`, `redis:7-alpine`, cùng mạng bridge mặc định với
+    agent-web (không `network_mode: host`, không publish cổng ra host —
+    một Redis không mật khẩu mà mở ra host là mời người lạ vào).
+    `--save "" --appendonly no` tắt hoàn toàn RDB/AOF: snapshot là bộ đệm
+    tái tạo được, mất là chấm điểm lại, không phải mất dữ liệu gốc — tắt
+    lưu bền nghĩa là không có file ảnh nào đọng trên đĩa và mỗi lần khởi
+    động lại là một cache sạch. `--maxmemory 128mb --maxmemory-policy
+    allkeys-lru` + `mem_limit: 192m` ở cấp container chặn trần bộ nhớ, nằm
+    gọn trong ràng buộc cứng của dự án (≤12 core/≤14GB RAM toàn hệ thống).
+    `agent-web`'s `depends_on: agent-redis (condition: service_healthy)`
+    chỉ quyết định thứ tự khởi động — không biến Redis thành phụ thuộc
+    cứng, agent-web vẫn chạy bình thường nếu agent-redis chết sau đó.
+  - db1 riêng (`REDIS_DB_INDEX` trong snapshot.py) + tiền tố khoá riêng
+    (`agent:report:`) + `SNAPSHOT_MAX_BYTES` (512KB/khoá) + TTL 24h
+    (`SNAPSHOT_TTL_SECONDS`) vẫn được giữ nguyên trên `agent-redis` dù giờ
+    đây là instance riêng — không còn là điều kiện sống còn để tách khỏi 88
+    khoá của nora (đã tách hẳn bằng một Redis instance khác), nhưng vẫn là
+    lớp phòng thủ rẻ nếu `NORABT_SNAPSHOT_REDIS_URL` lỡ bị trỏ sai. snapshot.py
+    không bao giờ gọi `FLUSHDB`/`FLUSHALL`/`KEYS *`.
+  - Mọi timeout Redis trong snapshot.py
+    (`REDIS_CONNECT_TIMEOUT_SECONDS`/`REDIS_SOCKET_TIMEOUT_SECONDS`, 0.5s)
+    vẫn giữ nguyên để bảo vệ trước tình huống Redis tồn tại, kết nối được,
+    nhưng treo/nghẽn mạng — không riêng gì tình huống "connection refused"
+    từng đo được với `norabt-redis`.

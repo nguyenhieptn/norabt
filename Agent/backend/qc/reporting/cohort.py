@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from Agent.backend.infra.config import config
 from Agent.backend.infra.quality import EvaluationMode
+from Agent.backend.market.coverage import plan_market_coverage, resolve_planned_markets
 from Agent.backend.market.schemas.market_result import MarketResult
 from Agent.backend.market.service import MarketDataUnavailableError, MarketService
 from Agent.backend.mcp.schemas.bot_result import BotResult, PositionSide
@@ -31,6 +33,8 @@ from Agent.backend.qc.reporting.gaps import EvidenceGap, build_gaps
 from Agent.backend.qc.scoring.fusion import DIMENSION_LABEL_VI
 from Agent.backend.qc.service import QCCoreService
 from Agent.backend.universe.registry import UniverseRegistry
+
+logger = logging.getLogger(__name__)
 
 TIER_ORDER = {
     RiskTier.EMERGENCY: 0,
@@ -103,6 +107,27 @@ class MarketSnapshotRow(BaseModel):
     data_quality: float = Field(..., ge=0.0, le=1.0)
 
 
+class CoveredMarketRow(BaseModel):
+    """Một thị trường ĐÃ GIẢI ĐƯỢC trong lượt phủ sóng theo mục tiêu (xem
+    Agent/backend/market/coverage.py) -- CHỈ để trình bày/đo độ phủ, không
+    bao giờ đi vào `QCCoreService.assess_bot()`."""
+
+    symbol: str
+    share_pct: float
+    market: MarketSnapshotRow
+
+
+class UncoveredMarketRow(BaseModel):
+    """Một thị trường nằm trong kế hoạch phủ sóng nhưng KHÔNG lấy được dữ
+    liệu -- cổ phiếu (SNDK, MU, SKHYNIX, LITE, PUMP, HYPE, CRCL...) hoặc hết
+    hạn chờ (`reason="TIMEOUT"`). KHÔNG suy diễn/thay bằng thị trường khác.
+    """
+
+    symbol: str
+    share_pct: float
+    reason: str
+
+
 class BotEvaluationRow(BaseModel):
     rank: int = Field(..., ge=1)
     status: str
@@ -125,6 +150,29 @@ class BotEvaluationRow(BaseModel):
     universe_eligible: bool = False
     eligibility_reason: str = "NOT_EVALUATED"
     market: Optional[MarketSnapshotRow] = None
+
+    # Việc 3: thị trường đứng thứ hai theo `exposure_share` -- CHỈ để trình
+    # bày (assessment_store.py/report_page.py), KHÔNG bao giờ đưa vào
+    # `QCCoreService.assess_bot()` phía dưới: công thức chấm điểm chỉ nhận
+    # đúng MỘT market (`traded_symbol`/`market` ở trên), y hệt trước khi ba
+    # trường này tồn tại. `None` khi bot chỉ giao dịch một mã, hoặc mã thứ
+    # hai không có dữ liệu thị trường (bỏ qua, không báo lỗi -- xem nơi
+    # chúng được gán trong `build_report`).
+    secondary_traded_symbol: Optional[str] = None
+    secondary_share_pct: Optional[float] = None
+    secondary_market: Optional[MarketSnapshotRow] = None
+
+    # Phủ sóng theo mục tiêu (xem Agent/backend/market/coverage.py) -- thay
+    # "luôn đúng 2 thị trường: chính + phụ" ở trên bằng "giải tới khi đạt
+    # X% phủ sóng exposure, có trần cứng". `resolved_markets` liệt kê MỌI
+    # thị trường đã giải được (bao gồm thị trường CHÍNH, luôn đứng đầu sau
+    # khi sort theo `share_pct` giảm dần), `unresolved_markets` liệt kê
+    # những mã nằm trong kế hoạch nhưng KHÔNG lấy được dữ liệu,
+    # `coverage_achieved_pct` là tỉ trọng THẬT đã phủ được (0-100, KHÔNG
+    # phải mục tiêu) -- `None` khi bot không đo được exposure nào cả.
+    resolved_markets: List[CoveredMarketRow] = Field(default_factory=list)
+    unresolved_markets: List[UncoveredMarketRow] = Field(default_factory=list)
+    coverage_achieved_pct: Optional[float] = None
 
     position_side: Optional[str] = None
     open_positions: Optional[int] = None
@@ -209,13 +257,43 @@ class BotEvaluationRow(BaseModel):
     profit_pct_worst: Optional[float] = None
     profit_pct_p05: Optional[float] = None
     profit_pct_p50: Optional[float] = None
+    profit_pct_p25: Optional[float] = None
+    profit_pct_p75: Optional[float] = None
     profit_pct_p95: Optional[float] = None
+    # Biểu đồ drawdown theo phân vị của trang báo cáo vẽ đủ 5 cột
+    # Median/P90/P95/P99/Worst. Trước đây chỉ P95 và Worst đi được tới
+    # đĩa, nên ba cột còn lại vẽ ra vạch trống -- phần mô phỏng vẫn tính
+    # cả ba, chỉ là không ai chuyển tiếp chúng.
+    median_max_drawdown: Optional[float] = None
+    p90_max_drawdown: Optional[float] = None
+    p99_max_drawdown: Optional[float] = None
+    # Nhóm CẢNH BÁO TRUNG THỰC về chính lần mô phỏng: mẫu mỏng, và tầm
+    # dự phóng dài hơn quãng thời gian bot thật sự đã chạy. Trang báo cáo
+    # đã có sẵn chỗ in chúng và vẫn đọc đúng các khoá này, nhưng không
+    # khoá nào tới được đĩa -- nên phần tự nhận giới hạn im lặng suốt,
+    # tức là báo cáo trông CHẮC CHẮN hơn mức bằng chứng cho phép.
+    simulation_sample_is_thin: Optional[bool] = None
+    simulation_warnings: List[str] = Field(default_factory=list)
+    observed_span_days: Optional[float] = None
+    horizon_calendar_days: Optional[float] = None
+    horizon_exceeds_observed: Optional[bool] = None
+    horizon_stability_label: Optional[str] = None
     psr: Optional[float] = None
     deflated_sharpe: Optional[float] = None
     min_track_record_trades: Optional[float] = None
     selection_trials: Optional[int] = None
     inference_reliable: bool = True
     p_5_loss_streak: Optional[float] = None
+    p_10_loss_streak: Optional[float] = None
+    # Baseline/excess đi KÈM số quan sát, không phải phụ kiện: xem
+    # `monte_carlo.loss_streak_baseline_probability`. Riêng con số quan
+    # sát không phân biệt nổi "bot vào lệnh nhiều" với "bot thua cụm",
+    # nên bỏ rơi hai trường này là làm cột Excess của bảng báo cáo rỗng
+    # vĩnh viễn -- đúng thứ đã xảy ra trước khi thêm chúng vào đây.
+    p_5_loss_streak_baseline: Optional[float] = None
+    p_10_loss_streak_baseline: Optional[float] = None
+    p_5_loss_streak_excess: Optional[float] = None
+    p_10_loss_streak_excess: Optional[float] = None
 
     risk_score: Optional[float] = None
     quality_score: Optional[float] = None
@@ -238,6 +316,20 @@ class BotEvaluationRow(BaseModel):
     dimension_scores: Dict[str, float] = Field(default_factory=dict)
     top_risk_drivers: List[str] = Field(default_factory=list)
     unknown_dimensions: List[str] = Field(default_factory=list)
+    unknown_dimension_reasons: Dict[str, str] = Field(default_factory=dict)
+    dimension_weights: Dict[str, float] = Field(default_factory=dict)
+    dimension_confidence: Dict[str, float] = Field(default_factory=dict)
+    total_weight: Optional[float] = None
+    applicable_dimensions: Optional[int] = None
+    # Chất lượng dữ liệu của chính bot. Đường CHẤM SỐNG luôn có
+    # (`evidence.data_quality`), đường ĐỌC TỪ ĐĨA thì không -- mà phần
+    # lớn lượt xem thật đi đường đĩa, nên khối giải thích ĐỘ TIN CẬY
+    # luôn ở trạng thái suy giảm: nó phải nói "bản ghi đã lưu không
+    # mang chi tiết này" cho gần như mọi bot. Ba số dưới đây là đúng
+    # những gì `web/score_basis.full_confidence_basis` đọc.
+    data_quality_overall_score: Optional[float] = None
+    data_quality_freshness_score: Optional[float] = None
+    data_quality_completeness_score: Optional[float] = None
     limitations_count: int = 0
 
     conclusion: str
@@ -355,48 +447,48 @@ class CohortAssessmentService:
         parts: List[str] = []
         if market is None:
             parts.append(
-                f"Chưa có dữ liệu thị trường cho {bot.identity.symbol} — instrument bot "
-                f"thực sự giao dịch, nên các chiều phụ thuộc thị trường để UNKNOWN."
+                f"No market data for {bot.identity.symbol} — the instrument the bot "
+                f"actually trades — so market-dependent dimensions are left UNKNOWN."
             )
         else:
             structure = market.structure_state
             parts.append(
-                f"Thị trường {market.symbol} ({market.venue_type}) đang {structure.trend_state.value}, "
-                f"biến động {structure.volatility_state.value}, thanh khoản "
-                f"{market.liquidity_state.state_tier.value}, dòng tiền "
+                f"Market {market.symbol} ({market.venue_type}) is {structure.trend_state.value}, "
+                f"volatility {structure.volatility_state.value}, liquidity "
+                f"{market.liquidity_state.state_tier.value}, flow "
                 f"{market.orderflow_state.flow_bias}."
             )
 
         state = bot.current_state
         if state.current_position_side == PositionSide.FLAT:
-            posture = "Bot đang đóng hết vị thế (FLAT)"
+            posture = "The bot has closed all positions (FLAT)"
         elif state.current_position_side == PositionSide.UNKNOWN:
-            posture = f"Bot đang mở {state.open_positions_count} vị thế nhưng thiếu định danh instrument"
+            posture = f"The bot has {state.open_positions_count} open positions but is missing instrument identifiers"
         else:
-            bits = [f"{state.open_positions_count} vị thế"]
+            bits = [f"{state.open_positions_count} positions"]
             if state.current_leverage is not None:
-                bits.append(f"đòn bẩy tối đa {state.current_leverage:.0f}x")
+                bits.append(f"max leverage {state.current_leverage:.0f}x")
             if state.gross_exposure is not None:
-                bits.append(f"exposure gộp {state.gross_exposure:,.0f} USDT")
+                bits.append(f"gross exposure {state.gross_exposure:,.0f} USDT")
             if state.unrealized_pnl is not None and state.unrealized_pnl < 0:
-                bits.append(f"lỗ chưa thực hiện {state.unrealized_pnl:,.0f} USDT")
+                bits.append(f"unrealised loss {state.unrealized_pnl:,.0f} USDT")
             posture = (
-                f"Bot đang giữ {state.current_position_side.value} ({', '.join(bits)})"
+                f"The bot is holding {state.current_position_side.value} ({', '.join(bits)})"
             )
             if state.exposure_by_symbol:
                 top = sorted(state.exposure_by_symbol.items(), key=lambda kv: -kv[1])[
                     :3
                 ]
-                posture += " trên " + ", ".join(
+                posture += " on " + ", ".join(
                     f"{sym} {value:,.0f}" for sym, value in top
                 )
             elif state.unknown_positions_count:
                 posture += (
-                    f", {state.unknown_positions_count} vị thế chưa rõ instrument"
+                    f", {state.unknown_positions_count} positions with unknown instrument"
                 )
         performance = bot.performance
         metrics = [
-            f"{performance.trade_count} lệnh",
+            f"{performance.trade_count} trades",
             f"win {performance.win_rate:.0f}%",
         ]
         if performance.profit_factor is not None:
@@ -405,17 +497,17 @@ class CohortAssessmentService:
             metrics.append(f"MaxDD {performance.max_drawdown_pct:.1f}%")
         elif performance.max_drawdown_abs is not None:
             metrics.append(
-                f"MaxDD {performance.max_drawdown_abs:,.0f} USDT (không có nền vốn hợp lệ)"
+                f"MaxDD {performance.max_drawdown_abs:,.0f} USDT (no valid capital basis)"
             )
         if bot.simulation_results.p95_max_drawdown is not None:
             metrics.append(
-                f"P95DD {bot.simulation_results.p95_max_drawdown:.1f}% vốn hiện tại"
+                f"P95DD {bot.simulation_results.p95_max_drawdown:.1f}% of current capital"
             )
         if bot.simulation_results.p_ruin:
-            metrics.append(f"P(cháy TK) {bot.simulation_results.p_ruin:.1f}%")
+            metrics.append(f"P(ruin) {bot.simulation_results.p_ruin:.1f}%")
         if bot.capital.capital_at_risk:
             metrics.append(
-                f"vốn tham chiếu {bot.capital.capital_at_risk:,.0f} USDT "
+                f"reference capital {bot.capital.capital_at_risk:,.0f} USDT "
                 f"({bot.capital.basis})"
             )
         parts.append(f"{posture}; {', '.join(metrics)}.")
@@ -423,29 +515,29 @@ class CohortAssessmentService:
         deferred = bot.deferred_loss
         if deferred.distorts_headline_metrics and deferred.open_loss:
             lead = (
-                "CHƯA TỪNG CHỐT LỖ"
+                "NEVER REALIZED A LOSS"
                 if deferred.never_realized_a_loss
-                else "LỖ HOÃN NHẬN"
+                else "DEFERRED LOSS"
             )
-            detail = f"{lead}: đang ôm {deferred.open_loss:,.0f} USDT lỗ chưa chốt"
+            detail = f"{lead}: currently holding {deferred.open_loss:,.0f} USDT of unrealised loss"
             if deferred.open_loss_to_capital_pct:
-                detail += f" ({deferred.open_loss_to_capital_pct:.0f}% vốn)"
+                detail += f" ({deferred.open_loss_to_capital_pct:.0f}% of capital)"
             if (
                 deferred.booked_profit_factor is not None
                 and deferred.marked_profit_factor is not None
             ):
                 detail += (
-                    f". Chốt hết thì PF từ {deferred.booked_profit_factor:.2f} "
-                    f"còn {deferred.marked_profit_factor:.2f}"
+                    f". If everything were closed, PF would go from "
+                    f"{deferred.booked_profit_factor:.2f} to {deferred.marked_profit_factor:.2f}"
                 )
             elif deferred.marked_profit_factor is not None:
                 detail += (
-                    f". Chưa từng chốt lỗ nên PF vô nghĩa; chốt hết thì PF là "
-                    f"{deferred.marked_profit_factor:.2f}"
+                    f". PF is meaningless since no loss has ever been realized; if "
+                    f"everything were closed, PF would be {deferred.marked_profit_factor:.2f}"
                 )
             parts.append(
                 detail
-                + ". Win rate, PF và MaxDD bên dưới chỉ mô tả những lệnh bot chọn đóng."
+                + ". The win rate, PF, and MaxDD below only describe the trades the bot chose to close."
             )
 
         drivers = [
@@ -458,27 +550,27 @@ class CohortAssessmentService:
             named = ", ".join(
                 f"{item.dimension_name} {item.score:.0f}" for item in drivers[:3]
             )
-            parts.append(f"Chiều rủi ro vượt ngưỡng: {named}.")
+            parts.append(f"Risk dimensions above threshold: {named}.")
         else:
-            parts.append("Không có chiều rủi ro nào vượt ngưỡng cảnh báo.")
+            parts.append("No risk dimension is above the warning threshold.")
 
         parts.append(
-            f"Kết luận: {assessment.risk_tier.value} "
-            f"({assessment.risk_score:.1f}/100, tin cậy {assessment.confidence:.0f}%) "
-            f"→ đề xuất {assessment.recommended_action}."
+            f"Conclusion: {assessment.risk_tier.value} "
+            f"({assessment.risk_score:.1f}/100, confidence {assessment.confidence:.0f}%) "
+            f"→ recommended action {assessment.recommended_action}."
         )
         if bot.drawdown_analysis.wiped_out:
             parts.append(
-                "CẢNH BÁO: đường vốn tuần từng chạm 0 — tài khoản đã cháy ít nhất một lần "
-                "trong cửa sổ quan sát."
+                "WARNING: the weekly equity curve has touched 0 — the account has been "
+                "wiped out at least once within the observation window."
             )
         if state.capital_consistency == "MARGIN_EXCEEDS_CAPITAL":
             parts.append(
-                "Margin cam kết vượt vốn báo cáo — số vốn cần xác minh trước khi tin các tỷ lệ theo vốn."
+                "Committed margin exceeds reported capital — the capital figure needs verification before trusting any capital-based ratios."
             )
         if assessment.confidence < 60.0:
             parts.append(
-                "Độ tin cậy thấp nên cần bổ sung bằng chứng trước khi hành động."
+                "Confidence is low, so more evidence is needed before acting."
             )
         return " ".join(parts)
 
@@ -547,7 +639,7 @@ class CohortAssessmentService:
                         snapshot_venue=venue_type,
                         bot_folder=bot_folder,
                         snapshot_locations=[location],
-                        conclusion="Không đánh giá được vì dữ liệu đầu vào không hợp lệ.",
+                        conclusion="Could not be assessed because the input data was invalid.",
                         # The exception message is the only diagnostic an
                         # operator has in live mode (which bot, which OKX
                         # endpoint, why) -- never swallow it.
@@ -588,9 +680,98 @@ class CohortAssessmentService:
             locations: List[str] = entry["locations"]  # type: ignore[assignment]
             selected: str = str(entry["selected"])
             traded = bot.identity.symbol
-            if traded not in markets:
-                markets[traded] = self._resolve_market(traded, now)
+
+            # Phủ sóng theo mục tiêu (thay "luôn đúng 2 thị trường: chính +
+            # phụ" ở bản trước) -- xem Agent/backend/market/coverage.py cho
+            # toàn bộ lý do (đo thật trên 30 bot: chỉ giải 1-2 mã như trước
+            # chỉ phủ trung vị 44.1%/61.7% giá trị giao dịch, trong khi
+            # trung vị chỉ cần 4 mã để đạt 80%). `markets` vẫn là cache DÙNG
+            # CHUNG suốt lượt `scan()` này (không phải riêng cho bot này) --
+            # chỉ symbol nào CHƯA có bot trước đó trong cùng lượt scan chạm
+            # tới mới thực sự cần một future/lời gọi mạng ở đây.
+            exposure_share = bot.identity.symbol_exposure_share or {}
+            planned_symbols = plan_market_coverage(traded, exposure_share)
+            pending: List[str] = [sym for sym in planned_symbols if sym not in markets]
+            if pending:
+                resolved_now = resolve_planned_markets(
+                    pending,
+                    traded,
+                    lambda sym: self._resolve_market(sym, now),
+                    thread_name_prefix="norabt-cohort-market",
+                )
+                # QUAN TRỌNG: `resolve_planned_markets` chỉ trả về symbol đã
+                # thật sự resolve xong (một symbol hết hạn chờ đơn giản
+                # KHÔNG có mặt trong `resolved_now`) -- nên merge thẳng vào
+                # `markets` là an toàn, KHÔNG BAO GIỜ ghi nhầm một kết quả
+                # "hết hạn chờ" thành "không có dữ liệu" vào cache DÙNG
+                # CHUNG. `markets` còn được các bot XỬ LÝ SAU tra lại theo
+                # symbol: nếu một symbol phụ chậm của bot NÀY lại là symbol
+                # CHÍNH của một bot khác phía sau, ghi nhầm vào cache dùng
+                # chung sẽ khiến bot đó bị chấm với market=None dù thị
+                # trường thật ra vẫn có -- SAI công thức chấm điểm, đúng thứ
+                # nhiệm vụ này cấm tuyệt đối. Bỏ qua timeout chỉ ảnh hưởng
+                # tới PHẦN TRÌNH BÀY của đúng bot đang xét
+                # (`unresolved_market_rows` bên dưới), để bot sau vẫn có cơ
+                # hội tự resolve lại bình thường.
+                markets.update(resolved_now)
+
             market, resolution = markets[traded]
+
+            resolved_market_rows: List[CoveredMarketRow] = []
+            unresolved_market_rows: List[UncoveredMarketRow] = []
+            for symbol in planned_symbols:
+                # KHÔNG làm tròn ở đây -- `secondary_share_pct` (tính từ
+                # đây, xem `secondary_row` bên dưới) phải giữ nguyên độ
+                # chính xác float gốc như hành vi trước khi có phủ sóng
+                # theo mục tiêu (`exposure_share[sym] * 100.0`, không làm
+                # tròn); làm tròn chỉ diễn ra ở tầng trình bày/serialize
+                # (assessment_store.py, report_page.py's `_pct`).
+                share_pct = float(exposure_share.get(symbol, 0.0) or 0.0) * 100.0
+                outcome = markets.get(symbol)
+                if outcome is None:
+                    # Hết hạn chờ chung của thị trường phụ (xem
+                    # resolve_planned_markets) -- ghi nhận CHƯA ĐO ĐƯỢC.
+                    unresolved_market_rows.append(
+                        UncoveredMarketRow(
+                            symbol=symbol, share_pct=share_pct, reason="TIMEOUT"
+                        )
+                    )
+                    continue
+                candidate_market, candidate_resolution = outcome
+                if candidate_market is None:
+                    unresolved_market_rows.append(
+                        UncoveredMarketRow(
+                            symbol=symbol,
+                            share_pct=share_pct,
+                            reason=candidate_resolution,
+                        )
+                    )
+                else:
+                    resolved_market_rows.append(
+                        CoveredMarketRow(
+                            symbol=symbol,
+                            share_pct=share_pct,
+                            market=self._market_row(candidate_market),
+                        )
+                    )
+            resolved_market_rows.sort(key=lambda item: item.share_pct, reverse=True)
+            coverage_achieved_pct = (
+                round(sum(item.share_pct for item in resolved_market_rows), 2)
+                if exposure_share
+                else None
+            )
+            # `secondary_*` (giữ nguyên tên/hình dạng cho assessment_store.py
+            # /report_page.py) giờ là thị trường XẾP HẠNG CAO NHẤT trong
+            # `resolved_market_rows` khác thị trường CHÍNH -- không nhất
+            # thiết còn là đúng mã có exposure cao thứ nhì bot BÁO CÁO, xem
+            # module comment của `market/coverage.py`.
+            secondary_row = next(
+                (item for item in resolved_market_rows if item.symbol != traded),
+                None,
+            )
+            secondary_symbol = secondary_row.symbol if secondary_row else None
+            secondary_share_pct = secondary_row.share_pct if secondary_row else None
+            secondary_market_row = secondary_row.market if secondary_row else None
 
             assessment = QCCoreService.assess_bot(
                 market,
@@ -611,6 +792,33 @@ class CohortAssessmentService:
                 for name, item in dimensions.items()
                 if item.status == EvidenceStatus.UNKNOWN
             ]
+            # Mỗi ống kính không đo được đều TỰ NÓI vì sao (`common.unknown`
+            # đặt lý do vào `key_findings[0]`), nhưng trước đây chỉ cái tên
+            # được giữ lại. Trang báo cáo vì thế in mỗi chữ "not measured"
+            # trơ trọi, đúng thứ mà chính phần diễn giải của nó cảnh báo là
+            # "không phải rủi ro thấp, chỉ là chưa có bằng chứng" -- mà lại
+            # không nói được bằng chứng nào đang thiếu.
+            # Trọng số và độ tin cậy là thứ câu giải thích điểm TRÍCH DẪN
+            # ("Tail risk at only 30/100 (weight 1.3) pulls the average
+            # down") nhưng trước đây không được lưu riêng, nên bảng liệt kê
+            # từng chiều trên trang báo cáo phải ghi "weight not present in
+            # the saved record" ở cả 10 dòng -- trong khi con số ấy vừa mới
+            # được dùng ngay phía trên để tính chính điểm đang giải thích.
+            dimension_weights = {
+                name: item.weight
+                for name, item in dimensions.items()
+                if item.weight is not None
+            }
+            dimension_confidence = {
+                name: item.confidence
+                for name, item in dimensions.items()
+                if item.confidence is not None
+            }
+            unknown_reasons = {
+                name: item.key_findings[0]
+                for name, item in dimensions.items()
+                if item.status == EvidenceStatus.UNKNOWN and item.key_findings
+            }
             drivers = sorted(available.items(), key=lambda kv: kv[1], reverse=True)
             eligible = market is not None and market.asset_id in eligible_ids
             reason = (
@@ -644,6 +852,12 @@ class CohortAssessmentService:
                     universe_eligible=eligible,
                     eligibility_reason=reason,
                     market=self._market_row(market) if market else None,
+                    secondary_traded_symbol=secondary_symbol,
+                    secondary_share_pct=secondary_share_pct,
+                    secondary_market=secondary_market_row,
+                    resolved_markets=resolved_market_rows,
+                    unresolved_markets=unresolved_market_rows,
+                    coverage_achieved_pct=coverage_achieved_pct,
                     position_side=bot.current_state.current_position_side.value,
                     open_positions=bot.current_state.open_positions_count,
                     unknown_positions_count=bot.current_state.unknown_positions_count,
@@ -720,6 +934,17 @@ class CohortAssessmentService:
                     profit_pct_p05=bot.simulation_results.profit_pct_p05,
                     profit_pct_p50=bot.simulation_results.profit_pct_p50,
                     profit_pct_p95=bot.simulation_results.profit_pct_p95,
+                    profit_pct_p25=bot.simulation_results.profit_pct_p25,
+                    profit_pct_p75=bot.simulation_results.profit_pct_p75,
+                    median_max_drawdown=bot.simulation_results.median_max_drawdown,
+                    p90_max_drawdown=bot.simulation_results.p90_max_drawdown,
+                    p99_max_drawdown=bot.simulation_results.p99_max_drawdown,
+                    simulation_sample_is_thin=bot.simulation_results.sample_is_thin,
+                    simulation_warnings=list(bot.simulation_results.warnings or []),
+                    observed_span_days=bot.simulation_results.observed_span_days,
+                    horizon_calendar_days=bot.simulation_results.horizon_calendar_days,
+                    horizon_exceeds_observed=bot.simulation_results.horizon_exceeds_observed,
+                    horizon_stability_label=bot.simulation_results.horizon_stability_label,
                     psr=bot.simulation_results.probabilistic_sharpe,
                     deflated_sharpe=bot.simulation_results.deflated_sharpe,
                     min_track_record_trades=(
@@ -731,6 +956,11 @@ class CohortAssessmentService:
                     p_mdd_gt_15=bot.simulation_results.p_mdd_gt_15,
                     p95_max_drawdown=bot.simulation_results.p95_max_drawdown,
                     p_5_loss_streak=bot.simulation_results.p_5_loss_streak,
+                    p_10_loss_streak=bot.simulation_results.p_10_loss_streak,
+                    p_5_loss_streak_baseline=bot.simulation_results.p_5_loss_streak_baseline,
+                    p_10_loss_streak_baseline=bot.simulation_results.p_10_loss_streak_baseline,
+                    p_5_loss_streak_excess=bot.simulation_results.p_5_loss_streak_excess,
+                    p_10_loss_streak_excess=bot.simulation_results.p_10_loss_streak_excess,
                     risk_score=assessment.risk_score,
                     quality_score=assessment.quality_score,
                     verdict=assessment.verdict,
@@ -757,6 +987,20 @@ class CohortAssessmentService:
                         if score >= 45
                     ],
                     unknown_dimensions=unknown,
+                    unknown_dimension_reasons=unknown_reasons,
+                    dimension_weights=dimension_weights,
+                    dimension_confidence=dimension_confidence,
+                    total_weight=assessment.score_breakdown.total_weight,
+                    applicable_dimensions=(
+                        assessment.score_breakdown.applicable_dimensions
+                    ),
+                    data_quality_overall_score=bot.data_quality.overall_score,
+                    data_quality_freshness_score=(
+                        bot.data_quality.freshness_score
+                    ),
+                    data_quality_completeness_score=(
+                        bot.data_quality.completeness_score
+                    ),
                     limitations_count=len(assessment.limitations),
                     conclusion=self._conclusion(market, bot, assessment),
                 )
@@ -786,14 +1030,14 @@ class CohortAssessmentService:
         duplicated = [row for row in ordered if row.duplicate_snapshots > 1]
         if duplicated:
             warnings.append(
-                f"{len(duplicated)}/{len(rows)} bot bị nhân bản trong dataset "
-                f"(tổng {sum(row.duplicate_snapshots for row in duplicated)} thư mục snapshot trùng nội dung)."
+                f"{len(duplicated)}/{len(rows)} bots are duplicated in the dataset "
+                f"(a total of {sum(row.duplicate_snapshots for row in duplicated)} snapshot folders with identical content)."
             )
         mismatched = [row for row in ordered if row.identity_warnings]
         if mismatched:
             warnings.append(
-                f"{len(mismatched)} bot có asset_context không khớp instrument thực giao dịch; "
-                "thị trường được lấy theo sổ lệnh, không theo tên thư mục."
+                f"{len(mismatched)} bots have an asset_context that doesn't match the instrument actually traded; "
+                "the market is taken from the ledger, not the folder name."
             )
         no_market = [
             row
@@ -802,11 +1046,11 @@ class CohortAssessmentService:
         ]
         if no_market:
             warnings.append(
-                "Thiếu dữ liệu thị trường cho: "
+                "Missing market data for: "
                 + ", ".join(sorted({row.traded_symbol for row in no_market}))
             )
         if failures:
-            warnings.append(f"{len(failures)} snapshot không đánh giá được.")
+            warnings.append(f"{len(failures)} snapshots could not be assessed.")
 
         return CohortReport(
             generated_at_ms=now,

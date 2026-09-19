@@ -146,8 +146,8 @@ class TestCompareSameData:
             simulation_horizon=SIM_HORIZON,
         )
         text = render_same_data(cmp)
-        assert "SO SÁNH KIỂU A" in text
-        assert "KẾT LUẬN: ĐÚNG" in text
+        assert "TYPE A COMPARISON" in text
+        assert "CONCLUSION: PASS" in text
 
     def test_detects_a_real_divergence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The diff machinery must actually catch a mismatch, not just always
@@ -174,7 +174,7 @@ class TestCompareSameData:
         )
         assert not cmp.identical
         assert cmp.fatal_diffs
-        assert "KẾT LUẬN: SAI" in render_same_data(cmp)
+        assert "CONCLUSION: FAIL" in render_same_data(cmp)
 
 
 # --------------------------------------------------------------------------- #
@@ -235,7 +235,7 @@ class TestClassifyBotComparison:
             _row(market=_market(trend="DOWN", volatility="HIGH", last_price=110.0)),
         )
         assert cmp.group == GROUP_DRIFT
-        assert "thị trường" in cmp.explanation
+        assert "the market" in cmp.explanation
 
     def test_trade_count_delta_explains_drift(self) -> None:
         cmp = classify_bot_comparison(
@@ -292,13 +292,13 @@ class TestRenderLiveVsFile:
             ],
         )
         text = render_live_vs_file(comparisons, FIXED_MS)
-        assert "BẤT THƯỜNG" in text
-        assert "CHƯA tương đương" in text
+        assert "ANOMALY" in text
+        assert "NOT yet fully equivalent" in text
 
     def test_all_clear_conclusion_when_nothing_anomalous(self) -> None:
         comparisons = compare_cohorts([_row(unique_code="A")], [_row(unique_code="A")])
         text = render_live_vs_file(comparisons, FIXED_MS)
-        assert "nhóm BẤT THƯỜNG rỗng" in text
+        assert "the ANOMALY group is empty" in text
 
     def test_tier_change_is_called_out(self) -> None:
         comparisons = compare_cohorts(
@@ -306,8 +306,8 @@ class TestRenderLiveVsFile:
             [_row(unique_code="A", risk_tier="CRITICAL", trade_count=110)],
         )
         text = render_live_vs_file(comparisons, FIXED_MS)
-        assert "ĐỔI XẾP LOẠI" in text
-        assert "WATCH → CRITICAL" in text
+        assert "TIER CHANGED" in text
+        assert "WATCH -> CRITICAL" in text
 
 
 # --------------------------------------------------------------------------- #
@@ -696,10 +696,19 @@ class TestDefaultSelectionCodes:
 
 class _FakeReport:
     """Minimal stand-in for a *Report pydantic model: only what main() touches
-    under --json (model_dump) or under persist_* (blocks/rows) is needed."""
+    under --json (model_dump) or under persist_* (blocks/rows) is needed.
+
+    `generated_at_ms` (0 -- a harmless placeholder, never asserted on by any
+    test using this fixture) is needed because Việc 4 made `persist_assessment`
+    reachable even under `--no-write` (it now builds every payload -- Việc
+    4's own narrative -- and only skips the actual disk write), so a `--report
+    all`/`--no-write` run now reaches `assessment_store.persist()`'s own
+    `report.generated_at_ms` read that it used to skip entirely.
+    """
 
     blocks: List[Any] = []
     rows: List[Any] = []
+    generated_at_ms: int = 0
 
     def model_dump(self, mode: str = "json") -> Dict[str, Any]:
         return {"fake": True}
@@ -887,7 +896,7 @@ class TestOutDirWiring:
         monkeypatch.setattr(
             run_report,
             "persist_assessment",
-            lambda report, data_dir: (
+            lambda report, data_dir, **kwargs: (
                 captured.setdefault("data_dir", Path(data_dir)) and []
             ),
         )

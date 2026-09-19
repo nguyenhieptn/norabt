@@ -76,7 +76,7 @@ def test_a_high_win_rate_bot_with_small_excess_is_not_penalized():
         )
     )
     assert result.score == 15.0
-    assert not any("phần vượt thật" in f for f in result.key_findings)
+    assert not any("real excess=" in f for f in result.key_findings)
 
 
 def test_a_bot_with_real_excess_streak_risk_is_still_penalized():
@@ -92,7 +92,7 @@ def test_a_bot_with_real_excess_streak_risk_is_still_penalized():
         )
     )
     assert result.score == 30.0
-    finding = next(f for f in result.key_findings if "phần vượt thật" in f)
+    finding = next(f for f in result.key_findings if "real excess=" in f)
     assert "65.0" in finding and "5.0" in finding and "60.0" in finding
 
 
@@ -126,7 +126,7 @@ def test_findings_report_the_horizon_in_calendar_days_when_available():
     result = _evaluate(
         _sim(trades_per_day=50.0, horizon_calendar_days=10.0, horizon_trades=500)
     )
-    assert any("ngày lịch" in f for f in result.key_findings)
+    assert any("calendar days" in f for f in result.key_findings)
 
 
 def test_findings_warn_when_the_horizon_extrapolates_past_observed_data():
@@ -137,13 +137,13 @@ def test_findings_warn_when_the_horizon_extrapolates_past_observed_data():
             horizon_calendar_days=90.0,
         )
     )
-    assert any("ngoại suy" in f for f in result.key_findings)
+    assert any("extrapolation" in f for f in result.key_findings)
 
 
 def test_findings_say_nothing_about_horizon_when_not_computable():
     result = _evaluate(_sim())
-    assert not any("ngày lịch" in f for f in result.key_findings)
-    assert not any("ngoại suy" in f for f in result.key_findings)
+    assert not any("calendar days" in f for f in result.key_findings)
+    assert not any("extrapolation" in f for f in result.key_findings)
 
 
 def test_evaluate_still_reports_unknown_when_simulation_is_unavailable():

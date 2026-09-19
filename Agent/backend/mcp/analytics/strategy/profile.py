@@ -114,7 +114,7 @@ class StrategyPhaseAnalyzer:
         if total < MIN_TRADES_PER_PHASE:
             return "UNKNOWN", None
         follow_pct = following / total * 100.0
-        evidence = f"{following}/{total} lệnh mở thuận chiều biến động 24h trước đó"
+        evidence = f"{following}/{total} entries opened in the direction of the prior 24h move"
         if follow_pct >= ENTRY_STYLE_MARGIN_PCT:
             return "TREND_FOLLOWING", evidence
         if follow_pct <= 100.0 - ENTRY_STYLE_MARGIN_PCT:

@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Agentic Dossier — Hồ Sơ Mật Mã Tác Tử (X Layer x OKX MCP Edition)</title>
+  <link rel="stylesheet" href="../tokens.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* Reset & X Layer Minimalist Geometry */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #000000;
+      color: #f8fafc;
+      font-family: var(--sans, 'Inter', sans-serif);
+      line-height: 1.6;
+      font-size: 14.5px;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    /* Top Command & Agent HUD Bar */
+    .agent-hud-bar {
+      background: rgba(10, 10, 10, 0.95);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(16px);
+    }
+    .hud-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .xlayer-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-weight: 800;
+      font-size: 1.1rem;
+      letter-spacing: 0.02em;
+    }
+    .x-symbol {
+      background: #fff;
+      color: #000;
+      width: 22px;
+      height: 22px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 0.8rem;
+    }
+    .hud-chip {
+      font-family: var(--mono, monospace);
+      font-size: 0.75rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 3px 10px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #00f0ff;
+      box-shadow: 0 0 8px #00f0ff;
+    }
+    .tee-badge {
+      border-color: rgba(139, 92, 246, 0.4);
+      color: #c4b5fd;
+      background: rgba(139, 92, 246, 0.1);
+    }
+
+    /* Natural Language Agent Command Input */
+    .command-strip {
+      background: #090c15;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .command-box {
+      width: 100%;
+      max-width: 900px;
+      background: #000;
+      border: 1px solid rgba(0, 240, 255, 0.3);
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.1);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      padding: 8px 16px;
+      gap: 12px;
+    }
+    .command-prompt-symbol {
+      color: #00f0ff;
+      font-family: var(--mono, monospace);
+      font-weight: 700;
+    }
+    .command-input {
+      background: transparent;
+      border: none;
+      color: #fff;
+      font-family: var(--mono, monospace);
+      font-size: 0.88rem;
+      width: 100%;
+      outline: none;
+    }
+    .command-input::placeholder {
+      color: #475569;
+    }
+    .command-shortcut {
+      background: #1e293b;
+      color: #94a3b8;
+      font-family: var(--mono, monospace);
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* Main Split-Screen Workspace */
+    .dossier-workspace {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 1fr 480px;
+      gap: 28px;
+    }
+
+    /* CỘT TRÁI: VĂN BẢN BÁO CÁO MẬT (The Intelligence Briefing) */
+    .briefing-column {
+      background: #0a0e17;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      padding: 32px;
+      position: relative;
+    }
+    .dossier-stamp {
+      position: absolute;
+      top: 24px;
+      right: 32px;
+      border: 2px solid #ef4444;
+      color: #ef4444;
+      font-family: var(--mono, monospace);
+      font-weight: 900;
+      font-size: 0.85rem;
+      padding: 4px 12px;
+      border-radius: 4px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      transform: rotate(-3deg);
+      opacity: 0.85;
+    }
+    .briefing-header {
+      margin-bottom: 24px;
+    }
+    .dossier-id {
+      font-family: var(--mono, monospace);
+      font-size: 0.75rem;
+      color: #00f0ff;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .briefing-title {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 1.85rem;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.25;
+      margin-bottom: 12px;
+    }
+
+    /* Briefing Sections (Như Tài Liệu Mật Phân Mục) */
+    .dossier-section {
+      margin: 28px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding-top: 20px;
+    }
+    .section-label {
+      font-family: var(--mono, monospace);
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #8b5cf6;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .section-headline {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+    .briefing-text {
+      color: #cbd5e1;
+      line-height: 1.75;
+      font-size: 0.95rem;
+      margin-bottom: 14px;
+    }
+    .briefing-text strong {
+      color: #fff;
+    }
+
+    /* Callout Note */
+    .intel-note {
+      background: rgba(0, 240, 255, 0.04);
+      border-left: 3px solid #00f0ff;
+      padding: 12px 16px;
+      border-radius: 0 8px 8px 0;
+      font-size: 0.88rem;
+      color: #e0f2fe;
+      margin: 16px 0;
+    }
+
+    /* CỘT PHẢI: BẰNG CHỨNG TOÁN HỌC & X-RAY (The Mathematical Evidence) */
+    .evidence-column {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Widget 1: X-Ray Hero Score */
+    .xray-card {
+      background: #0a0e17;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      padding: 20px;
+    }
+    .card-label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--mono, monospace);
+      font-size: 0.75rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    .hero-radial-box {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 10px 0;
+    }
+    .gauge-circle {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      border: 4px solid #ef4444;
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.35);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(239, 68, 68, 0.05);
+      flex-shrink: 0;
+    }
+    .gauge-circle-num {
+      font-family: var(--display, 'Space Grotesk', sans-serif);
+      font-size: 2.5rem;
+      font-weight: 800;
+      line-height: 1;
+      color: #ef4444;
+    }
+    .gauge-circle-sub {
+      font-size: 0.65rem;
+      font-family: var(--mono, monospace);
+      color: #94a3b8;
+    }
+
+    /* Widget 2: X-Ray Open Positions Table */
+    .position-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      font-family: var(--mono, monospace);
+      margin-top: 10px;
+    }
+    .position-table th {
+      text-align: left;
+      color: #64748b;
+      padding: 6px 8px;
+      border-bottom: 1px solid #1e293b;
+    }
+    .position-table td {
+      padding: 8px 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    /* Widget 3: MCP Agent Execution Stream */
+    .mcp-terminal {
+      background: #05070c;
+      border: 1px solid rgba(0, 240, 255, 0.2);
+      border-radius: 12px;
+      padding: 16px;
+      font-family: var(--mono, monospace);
+      font-size: 0.78rem;
+    }
+    .mcp-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #00f0ff;
+      font-weight: 700;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(0, 240, 255, 0.15);
+    }
+    .mcp-log-item {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+    .mcp-step-code {
+      color: #8b5cf6;
+      font-weight: 700;
+    }
+    .mcp-step-desc {
+      color: #94a3b8;
+    }
+    .mcp-step-desc strong {
+      color: #e2e8f0;
+    }
+
+    @media (max-width: 1024px) {
+      .dossier-workspace {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Agent HUD Bar -->
+  <header class="agent-hud-bar">
+    <div class="hud-left">
+      <div class="xlayer-brand">
+        <span class="x-symbol">X</span>
+        <span>AGENT QC SUPERVISOR</span>
+      </div>
+      <span class="hud-chip">
+        <span class="status-dot"></span> SNAPSHOT: 14:00 UTC
+      </span>
+      <span class="hud-chip tee-badge">
+        🔒 TEE VERIFIED
+      </span>
+    </div>
+    <div style="font-family: var(--mono); font-size: 0.75rem; color: #94a3b8;">
+      ENGINE LATENCY: <span style="color: #00e599;">38ms</span> · MODE: <span style="color: #00f0ff;">READ_ONLY</span>
+    </div>
+  </header>
+
+  <!-- Natural Language Command Bar -->
+  <div class="command-strip">
+    <div class="command-box">
+      <span class="command-prompt-symbol">prompt&gt;</span>
+      <input 
+        type="text" 
+        class="command-input" 
+        value="Explain risk breakdown for Pure-Symbol-Yarrow (241CFF1D95076351)"
+        placeholder="Nhập câu lệnh hỏi AI Supervisor..."
+      >
+      <span class="command-shortcut">ENTER</span>
+    </div>
+  </div>
+
+  <!-- Workspace 2 Cột Split-Screen -->
+  <div class="dossier-workspace">
+
+    <!-- CỘT TRÁI: VĂN BẢN PHÂN TÍCH TÌNH BÁO (Báo cáo đọc như bài báo mật) -->
+    <main class="briefing-column">
+      
+      <div class="dossier-stamp">VETO DECREE</div>
+
+      <div class="briefing-header">
+        <div class="dossier-id">DECLASSIFIED QUANT DOSSIER // REF: NORABT-241C</div>
+        <h1 class="briefing-title">
+          Bản Tường Trình Tình Báo: Giải Mã Rủi Ro Của Tác Tử Pure-Symbol-Yarrow
+        </h1>
+        <div style="font-family: var(--mono); font-size: 0.8rem; color: #94a3b8;">
+          Mục tiêu: Đánh giá độc lập trước khi phê duyệt dòng vốn sao chép · Người lập: Nora AI Fusion Engine
+        </div>
+      </div>
+
+      <!-- Section 1 -->
+      <section class="dossier-section">
+        <div class="section-label">MỤC 01 · TỔNG QUAN TÁC TỬ & HÀNH VI LƯỚT SÓNG</div>
+        <h2 class="section-headline">Nghịch Lý Lợi Nhuận: Thắng Nhiều Lệnh Nhỏ, Thua Ít Lệnh Đậm</h2>
+        <p class="briefing-text">
+          Tác tử <strong>Pure-Symbol-Yarrow</strong> vận hành với tần suất cao (trung bình <strong>10.8 lệnh/ngày</strong>) tập trung trên hợp đồng tương lai ETH. Hồ sơ ghi nhận một nghịch lý quen thuộc trong giới thuật toán: <strong>tỷ lệ thắng danh nghĩa đạt 81.7%</strong> trên 502 lệnh đã chốt, nhưng <strong>profit factor chỉ là 0.78</strong> và payoff ratio dừng lại ở mức <strong>0.18</strong>.
+        </p>
+        <div class="intel-note">
+          <strong>Điểm mù tâm lý:</strong> Người dùng sao chép nhìn thấy chuỗi lệnh xanh dài dằng dặc mỗi sáng, nhưng tổng tài sản ròng thực tế lại hao hụt <strong>-$10,366 USDT</strong>.
+        </div>
+      </section>
+
+      <!-- Section 2 -->
+      <section class="dossier-section">
+        <div class="section-label">MỤC 02 · GIẢI PHẪU LỖ HOÃN NHẬN</div>
+        <h2 class="section-headline">Sổ Vị Thế Mở: Nguy Cơ Tiềm Ẩn Đang Được Giấu Kín?</h2>
+        <p class="briefing-text">
+          Khác với giao diện sàn giao dịch chỉ đo lường lệnh đã đóng, hệ thống thanh tra Nora đã tái định giá sổ lệnh mở theo giá thị trường (Mark-to-Market). Bot hiện đang gồng <strong>2 vị thế mở</strong> với tổng mức lỗ chưa chốt là <strong>-2,091 USDT</strong> (tương đương 2.3% vốn tham chiếu). 
+        </p>
+        <p class="briefing-text">
+          Nếu thanh lý toàn bộ danh mục ngay thời điểm này, Profit Factor sẽ sụt giảm từ <code>0.78</code> về <code>0.75</code>. Do mức giảm không làm đảo lộn hoàn toàn kết luận (bot vốn dĩ đã ở trạng thái lỗ ròng), hồ sơ được xếp loại <code>REPRESENTATIVE</code> (thừa nhận kết quả phản ánh đúng bản chất).
+        </p>
+      </section>
+
+      <!-- Section 3 -->
+      <section class="dossier-section">
+        <div class="section-label">MỤC 03 · KÍCH HOẠT QUY TẮC KHẨN CẤP VETO</div>
+        <h2 class="section-headline">Vì Sao Điểm Rủi Ro Bị Áp Sàn 85/100?</h2>
+        <p class="briefing-text">
+          Nếu tính theo mức bình quân gia quyền thông thường của 10 chiều rủi ro, số điểm của bot chỉ dừng ở <strong>62.0</strong>. Tuy nhiên, thuật toán QC Core đã kích hoạt <strong>Sàn VETO tuyệt đối</strong>, nâng điểm cưỡng chế lên <strong>85.0/100</strong>.
+        </p>
+        <p class="briefing-text">
+          Nguyên nhân trực tiếp: Trong mô phỏng thử nghiệm với kịch bản sốc thị trường (biến động giá 2x, spread giãn 3x, thanh khoản giảm 50%), tác tử bộc lộ <strong>rủi ro đuôi mô phỏng cực đoan</strong>, dẫn đến xác suất sụt vốn sâu lên đến 43.2%.
+        </p>
+      </section>
+
+      <!-- Section 4 -->
+      <section class="dossier-section">
+        <div class="section-label">MỤC 04 · KẾT LUẬN & CHỈ THỊ HÀNH ĐỘNG</div>
+        <h2 class="section-headline">Khuyến Cáo Cuối Cùng Dành Cho Nhà Đầu Tư</h2>
+        <p class="briefing-text">
+          Xếp loại chính thức: <strong>SỤT VỐN: CAO · CHẤT LƯỢNG: YẾU</strong>. Chỉ số Sharpe âm <code>-2.11</code> xác nhận không có bất kỳ lợi thế thống kê nào. 
+        </p>
+        <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 8px; padding: 16px; color: #fecdd3; margin-top: 16px;">
+          <strong style="color: #fff; font-size: 1rem;">CHỈ THỊ KIỂM SOÁT VỐN: HẠ TỶ TRỌNG (REDUCE)</strong><br>
+          Ngừng mở thêm vốn phân bổ cho bot này. Tiến hành đóng vị thế theo từng nhịp hồi của thị trường.
+        </div>
+      </section>
+
+    </main>
+
+    <!-- CỘT PHẢI: BẰNG CHỨNG TOÁN HỌC & GIÁM SÁT X-RAY (HUD Data) -->
+    <aside class="evidence-column">
+
+      <!-- Hero Radial Metric -->
+      <div class="xray-card">
+        <div class="card-label-row">
+          <span>ĐÁNH GIÁ RỦI RO ĐỘC LẬP</span>
+          <span style="color: #ef4444;">VETO ACTIVE</span>
+        </div>
+        <div class="hero-radial-box">
+          <div class="gauge-circle">
+            <div class="gauge-circle-num">85</div>
+            <div class="gauge-circle-sub">SCORE</div>
+          </div>
+          <div>
+            <div style="font-family: var(--display); font-size: 1.15rem; font-weight: 700; color: #fff;">
+              NGUY HIỂM CAO
+            </div>
+            <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;">
+              Sụt vốn: Cao · Chất lượng: Yếu
+            </div>
+            <div style="font-family: var(--mono); font-size: 0.75rem; color: #00f0ff; margin-top: 6px;">
+              Tự tin: 69.5% (Mẫu 502 lệnh)
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Open Positions X-Ray -->
+      <div class="xray-card">
+        <div class="card-label-row">
+          <span>X-RAY SỔ LỆNH VỊ THẾ MỞ</span>
+          <span style="color: #f59e0b;">2 VỊ THẾ ĐANG GỒNG</span>
+        </div>
+        <table class="position-table">
+          <thead>
+            <tr>
+              <th>Cặp / Nhánh</th>
+              <th>Giá Vào</th>
+              <th>Giá Đánh Dấu</th>
+              <th>Lỗ Mở (PnL)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="color: #00f0ff;">ETH-SWAP Long</td>
+              <td>$3,542.1</td>
+              <td>$3,480.0</td>
+              <td style="color: #ef4444;">-$1,240</td>
+            </tr>
+            <tr>
+              <td style="color: #00f0ff;">ETH-SWAP Long</td>
+              <td>$3,510.4</td>
+              <td>$3,480.0</td>
+              <td style="color: #ef4444;">-$851</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="font-size: 0.72rem; color: #64748b; margin-top: 8px; font-family: var(--mono);">
+          *Đánh dấu theo nến Anchor 14:00 UTC của sàn OKX
+        </div>
+      </div>
+
+      <!-- MCP Tool Execution Telemetry Terminal -->
+      <div class="mcp-terminal">
+        <div class="mcp-head">
+          <span>⚡ MCP TOOL CALL TELEMETRY</span>
+          <span style="font-size: 0.7rem; color: #00e599;">ALL GATES PASSED</span>
+        </div>
+        <div class="mcp-log-item">
+          <span class="mcp-step-code">[01]</span>
+          <span class="mcp-step-desc"><code>mcp.market.get_orderbook</code>: Đọc sổ nến ETH (Freshness: A)</span>
+        </div>
+        <div class="mcp-log-item">
+          <span class="mcp-step-code">[02]</span>
+          <span class="mcp-step-desc"><code>mcp.bot.deferred_loss</code>: PF 0.78 → 0.75 (Lỗ mở 2.3%)</span>
+        </div>
+        <div class="mcp-log-item">
+          <span class="mcp-step-code">[03]</span>
+          <span class="mcp-step-desc"><code>mcp.analytics.monte_carlo</code>: 10,000 runs (VaR 95% = 43.2%)</span>
+        </div>
+        <div class="mcp-log-item">
+          <span class="mcp-step-code">[04]</span>
+          <span class="mcp-step-desc"><code>qc.fusion.enforce_veto</code>: Ghi đè sàn <strong>85 điểm</strong></span>
+        </div>
+      </div>
+
+      <!-- Action Box -->
+      <div class="xray-card" style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.04);">
+        <div style="font-family: var(--mono); font-size: 0.75rem; color: #f87171; text-transform: uppercase;">
+          LỆNH KIỂM SOÁT TỰ TRỊ
+        </div>
+        <div style="font-size: 1.05rem; font-weight: 700; color: #fff; margin: 6px 0 10px;">
+          REDUCE / DỪNG SAO CHÉP
+        </div>
+        <button 
+          style="width: 100%; background: #ef4444; border: none; padding: 10px; border-radius: 6px; font-weight: 700; color: #fff; font-family: var(--mono); font-size: 0.82rem; cursor: pointer;"
+          onclick="alert('Lệnh kiểm soát rủi ro: Đã kích hoạt quy trình hạ tỷ trọng bảo vệ tài khoản.');"
+        >
+          THỰC THI KHUYẾN NGHỊ BẢO VỆ VỐN
+        </button>
+      </div>
+
+    </aside>
+
+  </div>
+
+</body>
+</html>

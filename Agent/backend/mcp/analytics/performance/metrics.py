@@ -72,8 +72,19 @@ class PerformanceMetricsCalculator:
                 sharpe = float(
                     np.mean(returns) / sample_std * math.sqrt(periods_per_year)
                 )
-            downside = returns[returns < 0]
-            if len(downside) >= 2:
+            # Target downside deviation theo đúng định nghĩa chuẩn
+            # (Sortino và Price, 1994) với ngưỡng mục tiêu T = 0:
+            #
+            #     DD = √( (1/N) · Σ_{i=1..N} min(rᵢ − T, 0)² )
+            #
+            # Mẫu số là N TỔNG SỐ quan sát, KHÔNG phải số quan sát âm: những
+            # kỳ có lãi đóng góp số 0 vào tổng, chứ không bị loại khỏi phép
+            # chia. Bản cũ ở đây lấy trung bình trên riêng các lệnh lỗ, tức
+            # chia cho N_lỗ -- làm DD phình lên hệ số √(N/N_lỗ) và Sortino bị
+            # hạ thấp tương ứng. Với một bot thắng 65% thì hệ số đó là 1.69,
+            # tức chỉ số hiển thị chỉ bằng ~59% giá trị đúng.
+            downside = np.minimum(returns, 0.0)
+            if len(returns[returns < 0]) >= 2:
                 downside_deviation = float(np.sqrt(np.mean(np.square(downside))))
                 if downside_deviation > 1e-12:
                     sortino = float(
@@ -92,7 +103,24 @@ class PerformanceMetricsCalculator:
             else None
         )
         roi = reported_roi_pct
-        calmar = roi / max_dd if roi is not None and max_dd and max_dd > 0 else None
+        # Calmar chuẩn = lợi nhuận ĐÃ QUY NĂM chia sụt vốn tối đa, không phải
+        # ROI tích luỹ chia sụt vốn. Hai thứ này lệch nhau đúng bằng độ dài
+        # quãng quan sát: cùng một mức sụt vốn, bot chạy 3 tháng và bot chạy 3
+        # năm mà có cùng ROI tích luỹ thì KHÔNG cùng chất lượng, và bản cũ cho
+        # chúng cùng một con số.
+        #
+        # Quy năm theo kiểu gộp (CAGR), không phải nhân tuyến tính:
+        #     CAGR = (1 + ROI)^(365.25 / số_ngày) − 1
+        #
+        # Chặn dưới 30 ngày: ngoại suy một quãng ngắn hơn thế lên cả năm cho
+        # ra con số vô nghĩa (ROI 20% trong 5 ngày thành CAGR hàng nghìn phần
+        # trăm). Thà không có chỉ số còn hơn có một chỉ số bịa.
+        calmar = None
+        if roi is not None and max_dd and max_dd > 0 and coverage_days >= 30.0:
+            growth = 1.0 + roi / 100.0
+            if growth > 0.0:
+                annualised_pct = (growth ** (365.25 / coverage_days) - 1.0) * 100.0
+                calmar = annualised_pct / max_dd
         recovery = total_pnl / max_dd_abs if max_dd_abs > 0 else None
 
         max_win_streak = max_loss_streak = current_streak = 0

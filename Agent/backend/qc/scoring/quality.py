@@ -63,7 +63,8 @@ def assess(bot: BotResult) -> QualityScore:
         effective_pf = perf.profit_factor
     else:
         notes.append(
-            f"PF dùng để chấm là PF sau khi chốt hết sổ mở ({effective_pf:.2f})"
+            f"The profit factor used for scoring is the one after closing the "
+            f"open book ({effective_pf:.2f})"
         )
     components["profitability"] = _band(
         effective_pf, [(3.0, 100.0), (2.0, 85.0), (1.5, 70.0), (1.2, 55.0), (1.0, 35.0)]
@@ -84,7 +85,7 @@ def assess(bot: BotResult) -> QualityScore:
             [(-5.0, 100.0), (-10.0, 85.0), (-20.0, 65.0), (-35.0, 40.0), (-60.0, 15.0)],
         )
     elif drawdown.max_dd_pct_capped:
-        notes.append("Sụt vốn vượt vốn ghi nhận nên không chấm được kiểm soát rủi ro")
+        notes.append("Drawdown exceeds the recorded capital, so drawdown control cannot be scored")
 
     # 4. Honesty of the headline: how far the book moves once open positions are
     # marked. This is what separates a real record from a curated one.
@@ -96,11 +97,12 @@ def assess(bot: BotResult) -> QualityScore:
         )
         if ratio < 0.5:
             notes.append(
-                f"Chốt hết sổ mở thì PF chỉ còn {ratio:.0%} so với PF trên sổ đã chốt"
+                f"Closing the open book leaves profit factor at only {ratio:.0%} of its "
+                f"value on the closed book"
             )
     elif deferred.never_realized_a_loss:
         components["honesty"] = 10.0
-        notes.append("Chưa từng ghi nhận một lệnh lỗ nào: sổ đã chốt bị chọn lọc")
+        notes.append("Not a single losing trade has ever been booked: the closed book is filtered")
 
     # 5. Robustness across market phases, when enough of the ledger could be placed.
     if strategy.phase_coverage_pct is not None and strategy.phase_coverage_pct >= 30:
@@ -114,7 +116,7 @@ def assess(bot: BotResult) -> QualityScore:
 
     measured = {k: v for k, v in components.items() if v is not None}
     if not measured:
-        return QualityScore(None, components, [], ["Không đủ bằng chứng để chấm"])
+        return QualityScore(None, components, [], ["Not enough evidence to score"])
 
     total_weight = sum(WEIGHTS[k] for k in measured)
     score = sum(v * WEIGHTS[k] for k, v in measured.items()) / total_weight

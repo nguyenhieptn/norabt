@@ -14,7 +14,38 @@ from Agent.backend.mcp.schemas.bot_result import (
 class MonteCarloSimulationEngine:
     """Bounded IID/block bootstrap over realized trade PnL, owned by Logic 2."""
 
-    MIN_SAMPLE_SIZE = 20
+    # Số quan sát TỐI THIỂU để chạy bootstrap. Hạ từ 20 xuống 10 (18/09) --
+    # con số 20 cũ là số tròn duy nhất trong cả class này không kèm một dòng
+    # giải thích nào, trong khi chính dự án đã có sẵn một ngưỡng "đủ mẫu"
+    # được định nghĩa và dùng ở chỗ khác: `PHASE_CONFIDENCE_ENOUGH_TRADES =
+    # 10` ("N >= 10 -> đủ mẫu, được rút ra quy luật", xem
+    # Agent/backend/web/report_page.py). Để hai ngưỡng lệch nhau nghĩa là
+    # cùng một cỡ mẫu vừa "đủ để rút ra quy luật" ở mục phân tích pha, vừa
+    # "không đủ để mô phỏng" ở Monte Carlo -- không có cơ sở nào biện minh
+    # cho sự vênh đó.
+    #
+    # PHẠM VI ẢNH HƯỞNG đã ĐO trước khi đổi, không ước lượng: toàn bộ 31 bot
+    # trong kho đã chấm đều có >= 33 lệnh (nhỏ nhất 33), nên KHÔNG một điểm
+    # số hay phán quyết nào đang tồn tại bị thay đổi. Việc hạ ngưỡng chỉ mở
+    # khoá cho những bot trước đây KHÔNG nhận được gì cả -- điển hình là bot
+    # giấu sổ lệnh (OKX 60004) mà thứ duy nhất đo được là ~12 điểm vốn tuần.
+    MIN_SAMPLE_SIZE = 10
+    # 10 <= n < 20: chạy được, nhưng phải NÓI RÕ là mẫu mỏng (xem
+    # `sample_is_thin` + `_THIN_SAMPLE_WARNING_VI` bên dưới). Lý do thống kê
+    # thật, không phải sự thận trọng chung chung: một phân vị bootstrap chỉ
+    # phân giải được tới cỡ 1/n, nên ở n=12 con số gọi là "phân vị 5" thực
+    # chất đang được đọc ra từ 12 giá trị rời rạc -- ước lượng vẫn tính được
+    # nhưng sai số chuẩn của nó rất lớn, đặc biệt ở hai đuôi.
+    THIN_SAMPLE_SIZE = 20
+    # Câu cảnh báo DUY NHẤT cho trạng thái mẫu mỏng -- tầng trình bày đọc
+    # `sample_is_thin` rồi hiện đúng câu này, không tự viết lại.
+    THIN_SAMPLE_WARNING_VI = (
+        "Thin sample ({n} observations, below {thin}): the simulation still "
+        "runs, but read it as an INDICATIVE RANGE rather than a firm estimate. "
+        "A bootstrap percentile can only resolve to about 1/n, so at this "
+        "sample size the figures in both tails (bad-case return, probability "
+        "of ruin, bad-case drawdown) carry a large standard error."
+    )
     MAX_ITERATIONS = 50_000
     MAX_HORIZON = 500
     BATCH_SIZE = 2_000
@@ -34,9 +65,26 @@ class MonteCarloSimulationEngine:
     # horizon -- it never feeds the QC verdict.
     HORIZON_OK_THRESHOLD_PCT = 50.0
 
-    STABLE_LABEL = "ỔN ĐỊNH MỌI HORIZON"
-    SHORT_ONLY_LABEL = "CHỈ ỔN Ở NGẮN HẠN"
-    NEEDS_TIME_LABEL = "CẦN THỜI GIAN"
+    # `horizon_exceeds_observed` must only fire on a *meaningful*
+    # extrapolation, never on floating-point noise. With the default
+    # (caller leaves `--horizon` blank), `horizon_calendar_days` is derived
+    # from `horizon / trades_per_day` where `horizon == len(trades)` and
+    # `trades_per_day == len(trades) / observed_span_days` -- i.e.
+    # `horizon_calendar_days` and `observed_span_days` are the SAME
+    # quantity computed via two different float expressions. They are
+    # mathematically equal but can differ in the last bit (observed on a
+    # real bot: a 1e-14 day gap), so a bare `>` comparison flags every bot
+    # that uses the default horizon, not just genuine overruns. Requiring
+    # the gap to clear both a relative floor (percent of the observed span)
+    # and an absolute floor (whole days) keeps rounding noise silent while
+    # still catching real extrapolation, e.g. a 500-trade horizon requested
+    # against a 72-trade/57-day history (~7x, far past both floors).
+    HORIZON_EXCEEDS_OBSERVED_REL_THRESHOLD = 0.02
+    HORIZON_EXCEEDS_OBSERVED_ABS_THRESHOLD_DAYS = 1.0
+
+    STABLE_LABEL = "STABLE ACROSS HORIZONS"
+    SHORT_ONLY_LABEL = "HOLDS ONLY AT SHORT HORIZON"
+    NEEDS_TIME_LABEL = "NEEDS MORE TIME"
 
     @staticmethod
     def loss_streak_baseline_probability(
@@ -118,6 +166,35 @@ class MonteCarloSimulationEngine:
         return len(trades) / observed_span_days, observed_span_days
 
     @classmethod
+    def _horizon_exceeds_observed(
+        cls,
+        horizon_calendar_days: Optional[float],
+        observed_span_days: Optional[float],
+    ) -> Optional[bool]:
+        """True only when the simulated horizon runs meaningfully past the
+        calendar span actually observed -- see
+        `HORIZON_EXCEEDS_OBSERVED_REL_THRESHOLD`'s own comment for why a
+        bare `>` on these two numbers is unsafe (they are the same quantity
+        under the default horizon and can differ only by float noise).
+
+        Both a relative floor (percent of the observed span) and an
+        absolute floor (whole days) must be cleared, so a long-lived bot's
+        genuinely small overrun does not fire on relative percent alone,
+        and a short-lived bot's tiny absolute gap does not fire on absolute
+        days alone.
+        """
+        if horizon_calendar_days is None or observed_span_days is None:
+            return None
+        gap_days = horizon_calendar_days - observed_span_days
+        rel_threshold_days = (
+            observed_span_days * cls.HORIZON_EXCEEDS_OBSERVED_REL_THRESHOLD
+        )
+        return (
+            gap_days > rel_threshold_days
+            and gap_days > cls.HORIZON_EXCEEDS_OBSERVED_ABS_THRESHOLD_DAYS
+        )
+
+    @classmethod
     def run_simulation(
         cls,
         trades: List[TradeLedgerItem],
@@ -163,6 +240,14 @@ class MonteCarloSimulationEngine:
                 warnings=warnings,
             )
 
+        sample_is_thin = len(trades) < cls.THIN_SAMPLE_SIZE
+        if sample_is_thin:
+            warnings.append(
+                cls.THIN_SAMPLE_WARNING_VI.format(
+                    n=len(trades), thin=cls.THIN_SAMPLE_SIZE
+                )
+            )
+
         pnls = np.asarray([trade.realized_pnl for trade in trades], dtype=np.float64)
 
         # Translate the trade-count horizon into calendar time using this
@@ -175,10 +260,8 @@ class MonteCarloSimulationEngine:
             if trades_per_day is not None and trades_per_day > 0
             else None
         )
-        horizon_exceeds_observed = (
-            horizon_calendar_days > observed_span_days
-            if horizon_calendar_days is not None and observed_span_days is not None
-            else None
+        horizon_exceeds_observed = cls._horizon_exceeds_observed(
+            horizon_calendar_days, observed_span_days
         )
 
         # MEDIUM is computed first and exactly as this method always has --
@@ -223,6 +306,7 @@ class MonteCarloSimulationEngine:
             capital_basis=capital_basis,
             capital_at_risk=initial_equity,
             is_valid=True,
+            sample_is_thin=sample_is_thin,
             horizon_basis=horizon_basis,
             warnings=warnings,
             horizon_scenarios=horizon_scenarios,

@@ -6,7 +6,26 @@ import numpy as np
 
 
 class BootstrapSampler:
-    """Deterministic-capable IID and moving-block bootstrap sampler."""
+    """Bộ lấy mẫu IID và moving-block, tất định được theo seed.
+
+    KHÔNG PHẢI bộ lấy mẫu mà engine đang dùng. Không một đường chạy sản xuất
+    nào gọi tới lớp này (chỉ `__init__.py` của package và một test tham
+    chiếu). Ghi rõ ở đây vì nó dễ gây hiểu nhầm nghiêm trọng: `block_resample`
+    dưới đây là MOVING-BLOCK bootstrap (Künsch, 1989) -- độ dài khối CỐ ĐỊNH,
+    lấy từ các cửa sổ chồng lấn, KHÔNG vòng lại đầu chuỗi, nên chuỗi tái chọn
+    KHÔNG dừng.
+
+    Thứ mà báo cáo trích dẫn và engine thật sự chạy là STATIONARY bootstrap
+    (Politis và Romano, 1994), cài trong
+    `Agent/backend/mcp/analytics/simulation/monte_carlo.py::_simulate_horizon`:
+    ở đó mỗi bước khởi động lại với xác suất 1/L nên độ dài khối là biến ngẫu
+    nhiên HÌNH HỌC kỳ vọng L, chỉ số lấy modulo độ dài sổ lệnh nên chuỗi VÒNG
+    TRÒN, và L = n^(1/3) theo tốc độ chuẩn. Ba điểm đó chính là cái phân biệt
+    stationary bootstrap với moving-block.
+
+    Đừng dùng lớp này cho phần mô phỏng rủi ro nếu không muốn đổi phương pháp
+    thống kê mà báo cáo đang công bố.
+    """
 
     @staticmethod
     def iid_resample(

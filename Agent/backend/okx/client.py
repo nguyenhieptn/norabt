@@ -91,7 +91,7 @@ class OkxApiError(OkxError):
     def __init__(self, code: str, msg: str) -> None:
         self.code = code
         self.msg = msg
-        super().__init__(f"OKX API trả lỗi (code={code}): {msg}")
+        super().__init__(f"OKX API returned an error (code={code}): {msg}")
 
 
 class OkxTransportError(OkxError):
@@ -155,8 +155,9 @@ class OkxClient:
         if not self.credentials.is_complete:
             missing = ", ".join(self.credentials.missing_fields)
             raise OkxCredentialsMissing(
-                "Thiếu thông tin xác thực OKX, cần khai báo biến môi trường: "
-                f"{missing}. Xem hướng dẫn tại Agent/.env.example."
+                "OKX credentials are missing, the following environment "
+                f"variables must be set: {missing}. See the guide at "
+                "Agent/.env.example."
             )
         timestamp = self._timestamp()
         result = {
@@ -242,7 +243,7 @@ class OkxClient:
                     time.sleep(0.3 * (2**attempt))
                     continue
                 raise OkxTransportError(
-                    f"Không kết nối được tới OKX ({request_path}): {exc}"
+                    f"Could not connect to OKX ({request_path}): {exc}"
                 ) from exc
             # Reached by both the plain-success path and the HTTPError path
             # above (never by the URLError/TimeoutError/OSError path, which
@@ -257,7 +258,7 @@ class OkxClient:
             return payload.get("data", payload)
         # Defensive only: the loop above always returns or raises before
         # falling through, since max_attempts >= 1.
-        raise OkxTransportError(f"Không gọi được OKX ({request_path}): {last_error}")
+        raise OkxTransportError(f"Could not call OKX ({request_path}): {last_error}")
 
     @staticmethod
     def _parse(raw: bytes, request_path: str) -> Dict[str, Any]:
@@ -265,5 +266,5 @@ class OkxClient:
             return json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
             raise OkxTransportError(
-                f"OKX trả về dữ liệu không hợp lệ cho {request_path}: {exc}"
+                f"OKX returned invalid data for {request_path}: {exc}"
             ) from exc

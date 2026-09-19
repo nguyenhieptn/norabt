@@ -4,7 +4,8 @@ assessment, as opposed to the raw JSON `/api/analyze` returns.
 
 Everything needed to render the page is already sitting in the dict
 `WebDataService.analyze()` returns (see `Agent/backend/web/data.py`'s module
-docstring for its 14 top-level keys): this module only turns that dict into
+docstring for its top-level keys, including the optional `narrative` field
+from Agent/backend/qc/reporting/narrative.py): this module only turns that dict into
 HTML/CSS/inline-SVG, it computes nothing new and calls no scoring code of its
 own. `app.py` (owned by a parallel task at the time this module was written)
 is expected to call `render_bot_report_html(result)` from its `GET
@@ -40,7 +41,7 @@ Layout (see the task's own numbered spec, mirrored 1:1 in the section
 functions below): header -> conclusion/recommendation -> per-dimension
 scores -> Monte Carlo -> statistical inference -> trade metrics -> traded
 assets. Sections 3 through 7 each carry at least one collapsible
-`<details>` "Đọc thế nào / Dựa trên đâu" block -- see `_theory` -- because a
+`<details>` "Phương pháp luận & diễn giải" block -- see `_theory` -- because a
 dashboard of numbers with no explanation of what they mean or where they
 come from is exactly the failure mode the project owner's own brief called
 out ("thiếu vế thứ ba là hỏng"). The Vietnamese in those blocks and in this
@@ -60,14 +61,21 @@ every other section outright.
 from __future__ import annotations
 
 import html
+import json
 import logging
 import math
 import re
+from datetime import datetime, timedelta, timezone
 from numbers import Real
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from Agent.backend.infra.config import config
+from Agent.backend.web import limited_view
+from Agent.backend.web import score_basis
+from Agent.backend.web.loss_analysis import compute_loss_profile
+from Agent.backend.market.coverage import MARKET_COVERAGE_TARGET_PCT
+from Agent.backend.qc.reporting.reasons import LIQ_VI, TREND_VI, VOL_VI
 
 logger = logging.getLogger(__name__)
 
@@ -172,26 +180,30 @@ DIMENSION_ORDER: Tuple[str, ...] = (
 )
 
 DIMENSION_LABEL_VI: Dict[str, str] = {
-    "market_alignment": "Đồng thuận thị trường",
-    "performance_quality": "Chất lượng hiệu suất",
-    "return_r_quality": "Chất lượng lợi nhuận / R",
-    "drawdown_risk": "Rủi ro sụt vốn",
-    "tail_risk": "Rủi ro đuôi",
-    "leverage_exposure": "Đòn bẩy / Exposure",
-    "behavioral_risk": "Hành vi giao dịch",
-    "strategy_drift": "Độ bền chiến lược qua các pha",
-    "liquidity_execution": "Thanh khoản / Khớp lệnh",
-    "portfolio_risk": "Rủi ro danh mục",
+    "market_alignment": "Market alignment",
+    "performance_quality": "Performance quality",
+    "return_r_quality": "Return / R quality",
+    "drawdown_risk": "Drawdown risk",
+    "tail_risk": "Tail risk",
+    "leverage_exposure": "Leverage / exposure",
+    "behavioral_risk": "Trading behaviour",
+    "strategy_drift": "Strategy durability across phases",
+    "liquidity_execution": "Liquidity / execution",
+    "portfolio_risk": "Portfolio risk",
 }
 
 TIER_LABEL_VI: Dict[str, str] = {
-    "EMERGENCY": "KHẨN CẤP",
-    "CRITICAL": "NGHIÊM TRỌNG",
-    "HIGH": "CAO",
-    "ELEVATED": "NÂNG CAO",
-    "WATCH": "THEO DÕI",
-    "HEALTHY": "AN TOÀN",
-    "UNKNOWN": "CHƯA ĐO ĐƯỢC",
+    "EMERGENCY": "EMERGENCY",
+    "CRITICAL": "CRITICAL",
+    "HIGH": "HIGH",
+    "ELEVATED": "ELEVATED",
+    "WATCH": "WATCH",
+    # "Khoẻ" (RiskTier.HEALTHY), not "AN TOÀN": that exact string is reserved
+    # for the (removed) old 4-bucket bot-level verdict label, and this is a
+    # per-dimension risk tier -- a different, more granular axis. See
+    # Agent/backend/qc/scoring/verdict.py's module docstring.
+    "HEALTHY": "HEALTHY",
+    "UNKNOWN": "UNMEASURED",
 }
 
 # Green -> red as the tier gets worse; UNKNOWN is neutral grey, never green
@@ -206,17 +218,124 @@ TIER_COLOR: Dict[str, str] = {
     "UNKNOWN": "#9ca3af",
 }
 
+# --------------------------------------------------------------------------- #
+# Việc 1/Việc 2 -- "Cách bot này chơi": vocabulary for translating the enum
+# values `Agent/backend/mcp/analytics/strategy/profile.py` /
+# `Agent/backend/mcp/analytics/behavior/detector.py` produce (surfaced in
+# `evidence["strategy"]`/`evidence["behavioral"]`, see data.py's
+# `_strategy_evidence`/`_behavioral_evidence`) into plain Vietnamese. Kept
+# local to this module rather than imported from those trees, same
+# reasoning as DIMENSION_LABEL_VI/TIER_LABEL_VI above (off-limits to touch,
+# and this module already owns its own presentation vocabulary).
+# --------------------------------------------------------------------------- #
+
+MARKET_PHASE_LABEL_VI: Dict[str, str] = {
+    "UPTREND_CALM": "uptrend, calm",
+    "UPTREND_VOLATILE": "uptrend, highly volatile",
+    "DOWNTREND_CALM": "downtrend, calm",
+    "DOWNTREND_VOLATILE": "downtrend, highly volatile",
+    "RANGE_CALM": "sideways, calm",
+    "RANGE_VOLATILE": "sideways, highly volatile",
+    "UNKNOWN": "phase not identified",
+}
+
+DIRECTIONAL_BIAS_LABEL_VI: Dict[str, str] = {
+    "LONG_ONLY": "long only, no short trades",
+    "SHORT_ONLY": "short only, no long trades",
+    "LONG_TILTED": "leans long",
+    "SHORT_TILTED": "leans short",
+    "TWO_WAY": "trades both directions, fairly balanced",
+    "UNKNOWN": "not enough evidence to determine",
+}
+
+ENTRY_STYLE_LABEL_VI: Dict[str, str] = {
+    "TREND_FOLLOWING": "trend-following (buys as price rises, sells as price falls)",
+    "MEAN_REVERSION": "mean-reversion (buys as price falls, sells as price rises)",
+    "MIXED": "a mix of both styles, no clear lean",
+    "UNKNOWN": "not enough evidence to determine",
+}
+
+# Different vocabulary from the three maps above -- see data.py's own
+# `_OBSERVED_PROFILE_VI` comment for why this one is NOT translated at the
+# source (it doubles as a scoring-input matching key).
+OBSERVED_PROFILE_LABEL_VI: Dict[str, str] = {
+    "Scalping": "short-term scalping",
+    "Swing": "swing holding",
+    "DayTrading": "intraday trading",
+    "Grid/Martingale-like": "grid / martingale-style (repeated stacked entries)",
+    "UNKNOWN": "not yet determined",
+}
+
+BEHAVIORAL_TIER_LABEL_VI: Dict[str, str] = {
+    "LOW": "low",
+    "MEDIUM": "medium",
+    "HIGH": "high",
+    "CRITICAL": "critical",
+    "UNKNOWN": "not measured",
+}
+
+# Three-tier confidence a reader needs PER ROW of the phase cross-tab --
+# coordinator's own explicit threshold, and explicitly finer than profile.py's
+# own single `MIN_TRADES_PER_PHASE=5` cutoff (which only gates whether a row
+# feeds best_phase/worst_phase/regime_dependence -- a presentational concern
+# report_page.py has no business re-deriving, see that module's own
+# docstring). A 1-trade "100% win rate" row must never read as equally solid
+# evidence as a 15-trade one (coordinator's own explicit example), hence the
+# split at the very bottom rather than a single small/not-small badge.
+PHASE_CONFIDENCE_ENOUGH_TRADES = 10  # N >= 10 -> đủ mẫu, được rút ra quy luật
+PHASE_CONFIDENCE_THIN_TRADES = 3  # 3 <= N < 10 -> mẫu mỏng, chỉ tham khảo
+# N < PHASE_CONFIDENCE_THIN_TRADES -> chưa đủ ý nghĩa, không đại diện.
+PHASE_CONFIDENCE_ENOUGH_VI = "enough sample"
+PHASE_CONFIDENCE_THIN_VI = "thin sample"
+PHASE_CONFIDENCE_INSUFFICIENT_VI = "not yet meaningful"
+# Below this coverage, most of the ledger never got assigned a market phase
+# at all -- the cross-tab is a strong hint, not a firm conclusion (task's
+# own explicit "ranh giới" requirement).
+PHASE_COVERAGE_WARN_PCT = 60.0
+
+
+def _phase_confidence_vi(trades: Any) -> str:
+    """`N >= 10` -> `"đủ mẫu"`, `3 <= N < 10` -> `"mẫu mỏng"`, everything else
+    (`N < 3`, missing, or non-numeric) -> `"chưa đủ ý nghĩa"` -- coordinator's
+    own explicit three-tier threshold. Degrades to the STRICTEST tier on bad
+    input (never the most lenient one): a row this function cannot even
+    count is exactly the kind of row that must not be trusted by default.
+    """
+    if (
+        not isinstance(trades, (int, float))
+        or isinstance(trades, bool)
+        or not math.isfinite(trades)
+    ):
+        return PHASE_CONFIDENCE_INSUFFICIENT_VI
+    if trades >= PHASE_CONFIDENCE_ENOUGH_TRADES:
+        return PHASE_CONFIDENCE_ENOUGH_VI
+    if trades >= PHASE_CONFIDENCE_THIN_TRADES:
+        return PHASE_CONFIDENCE_THIN_VI
+    return PHASE_CONFIDENCE_INSUFFICIENT_VI
+
+
+def _phase_label_vi(phase: Any) -> str:
+    return MARKET_PHASE_LABEL_VI.get(
+        str(phase or "UNKNOWN").upper(), "phase not identified"
+    )
+
+
+# Keys match the English asset-state constants `data.py` already emits
+# (`ASSET_STATE_TRADING`/`ASSET_STATE_HOLDING`/`ASSET_STATE_LEFT` --
+# "TRADING"/"HOLDING ONLY"/"EXITED"), not this module's own label
+# vocabulary: `_render_assets` below reads `a.get("state")` and looks it up
+# here directly, with no translation step of its own.
 ASSET_STATE_COLOR: Dict[str, str] = {
-    "ĐANG GIAO DỊCH": "#16a34a",
-    "CHỈ ĐANG ÔM": "#dc2626",
-    "ĐÃ RỜI": "#6b7280",
+    "TRADING": "#16a34a",
+    "HOLDING ONLY": "#dc2626",
+    "EXITED": "#6b7280",
 }
 
 # --------------------------------------------------------------------------- #
 # Shared design tokens (task's Việc 3) -- Agent/web/tokens.css is now the ONE
-# place a verdict-tier color (or a page-chrome/type-scale/spacing/radius
+# place a verdict-state color (or a page-chrome/type-scale/spacing/radius
 # value) is written down; this module previously hardcoded its own copy of
-# the 4-tier `VERDICT_COLOR` values as Python string literals, with no
+# the `VERDICT_COLOR` values as Python string literals, with no
 # guarantee the React SPA (Agent/frontend/) would ever be told about a
 # change to them. See tokens.css's own header comment for the full design
 # and for why admin_page.py needs no separate wiring (it already imports
@@ -232,33 +351,37 @@ ASSET_STATE_COLOR: Dict[str, str] = {
 
 _DESIGN_TOKENS_PATH = Path(config.BASE_DIR) / "web" / "tokens.css"
 
-# Same 5 values this module hardcoded before tokens.css existed -- used
-# verbatim whenever the token file cannot be read/parsed at all (missing
-# checkout, bad permissions, a syntax error a human introduced by hand-
-# editing the CSS), so a broken/absent token file degrades this module's
-# OWN color choices back to exactly what they always were, rather than
-# breaking every rendered page's verdict badge.
+# Same 6 values this module falls back to whenever tokens.css cannot be
+# read/parsed at all (missing checkout, bad permissions, a syntax error a
+# human introduced by hand-editing the CSS), so a broken/absent token file
+# degrades this module's OWN color choices back to a known-good set, rather
+# than breaking every rendered page's verdict badge. Kept byte-identical to
+# tokens.css's own `:root` values (see that file's "Verdict classification"
+# block) so the two never silently drift.
 _FALLBACK_VERDICT_COLOR: Dict[str, str] = {
-    "NGUY HIỂM": "#dc2626",
-    "TIỀM ẨN": "#d97706",
-    "TIỀM NĂNG": "#16a34a",
-    "AN TOÀN": "#0284c7",
-    "THIẾU BẰNG CHỨNG": "#6b7280",
+    "DRAWDOWN: HIGH · QUALITY: WEAK": "#dc2626",
+    "DRAWDOWN: HIGH · QUALITY: GOOD": "#d97706",
+    "DRAWDOWN: LOW · QUALITY: GOOD": "#16a34a",
+    "DRAWDOWN: LOW · QUALITY: WEAK": "#0284c7",
+    "HIDDEN RISK": "#7c3aed",
+    "INSUFFICIENT EVIDENCE": "#6b7280",
 }
 
 # CSS custom-property name -> the Vietnamese verdict label it colors, per
 # tokens.css's own "Verdict classification" block. A dict, not a reverse
 # lookup built from `_FALLBACK_VERDICT_COLOR`'s keys, because the CSS
-# variable NAME is deliberately English/semantic ("danger"/"watch"/
-# "positive"/"safe"/"unknown") while the Python-side key stays the
-# Vietnamese label every call site (`_verdict_color`, admin_page.py's own
-# `VERDICT_COLOR.get(verdict, ...)`) already looks up by.
+# variable NAME is deliberately English/semantic ("high-dd-weak-q"/
+# "high-dd-good-q"/"low-dd-good-q"/"low-dd-weak-q"/"hidden-risk"/"unknown")
+# while the Python-side key stays the Vietnamese label every call site
+# (`_verdict_color`, admin_page.py's own `VERDICT_COLOR.get(verdict, ...)`)
+# already looks up by.
 _VERDICT_TOKEN_TO_LABEL: Dict[str, str] = {
-    "--verdict-danger": "NGUY HIỂM",
-    "--verdict-watch": "TIỀM ẨN",
-    "--verdict-positive": "TIỀM NĂNG",
-    "--verdict-safe": "AN TOÀN",
-    "--verdict-unknown": "THIẾU BẰNG CHỨNG",
+    "--verdict-high-dd-weak-q": "DRAWDOWN: HIGH · QUALITY: WEAK",
+    "--verdict-high-dd-good-q": "DRAWDOWN: HIGH · QUALITY: GOOD",
+    "--verdict-low-dd-good-q": "DRAWDOWN: LOW · QUALITY: GOOD",
+    "--verdict-low-dd-weak-q": "DRAWDOWN: LOW · QUALITY: WEAK",
+    "--verdict-hidden-risk": "HIDDEN RISK",
+    "--verdict-unknown": "INSUFFICIENT EVIDENCE",
 }
 
 # Matches one `--custom-property: value;` declaration, capturing the name
@@ -312,8 +435,8 @@ def _design_tokens_css_text() -> str:
         return _DESIGN_TOKENS_PATH.read_text(encoding="utf-8")
     except OSError as exc:
         logger.warning(
-            "Không đọc được design token %s -- dùng màu mặc định trong mã "
-            "nguồn: %s",
+            "Could not read design token %s -- falling back to the default colors "
+            "hardcoded in source: %s",
             _DESIGN_TOKENS_PATH,
             exc,
         )
@@ -333,7 +456,7 @@ def _load_verdict_color() -> Dict[str, str]:
     colors = dict(_FALLBACK_VERDICT_COLOR)
     tokens = _parse_root_css_custom_properties(_design_tokens_css_text())
     for var_name, label in _VERDICT_TOKEN_TO_LABEL.items():
-        value = tokens.get(var_name)
+        value = tokens.get(var_name) or tokens.get(var_name.lstrip("-"))
         if value:
             colors[label] = value
     return colors
@@ -347,9 +470,9 @@ def _load_verdict_color() -> Dict[str, str]:
 VERDICT_COLOR: Dict[str, str] = _load_verdict_color()
 
 HORIZON_LABEL_VI: Dict[str, str] = {
-    "SHORT": "NGẮN",
-    "MEDIUM": "TRUNG",
-    "LONG": "DÀI",
+    "SHORT": "SHORT",
+    "MEDIUM": "MEDIUM",
+    "LONG": "LONG",
 }
 
 
@@ -367,7 +490,7 @@ def _verdict_color(verdict: Any) -> str:
 
 
 def _theory(
-    read_html: str, basis_html: str, *, label: str = "Đọc thế nào & dựa trên đâu"
+    read_html: str, basis_html: str, *, label: str = "Methodology & interpretation"
 ) -> str:
     """One collapsible "sở cứ + lý thuyết" block -- the task's own explicit
     third requirement, distinct from a chart or a raw number: what a value
@@ -380,30 +503,360 @@ def _theory(
         '<details class="theory">'
         f"<summary>{_esc(label)}</summary>"
         '<div class="theory-body">'
-        f"<p><strong>Đọc thế nào:</strong> {read_html}</p>"
-        f"<p><strong>Dựa trên đâu:</strong> {basis_html}</p>"
+        f"<p><strong>Interpretation:</strong> {read_html}</p>"
+        f"<p><strong>Method:</strong> {basis_html}</p>"
         "</div></details>"
     )
 
 
-def _section(title: str, body: str, *, anchor: Optional[str] = None) -> str:
+def _section(
+    title: str,
+    body: str,
+    *,
+    anchor: Optional[str] = None,
+    tone: str = "",
+    pair: bool = False,
+    eyebrow: str = "",
+    note: str = "",
+) -> str:
+    """`tone` chọn mức nổi bật của cả khối `<section>` -- phần thiết kế lại
+    (Việc "nhìn xấu quá") giải quyết đúng than phiền "mọi mục trông như
+    nhau": `"primary"` cho khối kết luận/điểm số (nổi bật nhất, viền nhấn +
+    nền ánh accent), `"quiet"` cho khối kỹ thuật/kiểm toán thuần số liệu
+    (lùi xuống, tiêu đề nhỏ và trầm hơn), `""` (mặc định, giữ NGUYÊN
+    `class="card"` như trước -- hai test `test_report_page.py` khoá đúng
+    chuỗi `class="card" id="thi-truong"`/`id="cach-choi"` bằng regex nên hai
+    mục đó KHÔNG được đổi tone HAY `pair`) là mức trung tính hiện có từ
+    trước.
+
+    `eyebrow`/`note` (cùng mặc định rỗng nên mọi lời gọi cũ không đổi
+    hình dạng) là hai chỗ chữ nhỏ trong `.block-h`: eyebrow đứng TRÊN tiêu
+    đề (nhãn mono viết hoa, nói mục này thuộc nhóm nào), note nằm sát mép
+    phải cùng hàng với tiêu đề (chú thích ngắn, ví dụ nguồn số liệu) --
+    đúng cấu trúc `.block-h`/`.block-b` của bảng điều khiển Nora.
+
+    `pair=True` thêm class `card-pair`, cho `.tab-panel` (xem `_CSS`'s
+    `@media (min-width: 1100px)`) phép ghép mục này với mục liền kề vào
+    chung một hàng lưới 2 cột trên màn rộng thay vì luôn chiếm trọn một
+    hàng riêng -- chỉ bật ở những mục đã kiểm tra là đủ ngắn/gọn để đứng
+    cạnh nhau (ví dụ hai mục kỹ thuật liền kề trong tab Lệnh & Vị Thế),
+    KHÔNG bật tràn lan vì một mục dài đứng lẻ loi cạnh khoảng trống trông
+    còn xấu hơn cả xếp dọc.
+    """
     if not body:
         return ""
     anchor_attr = f' id="{_esc(anchor)}"' if anchor else ""
-    return f'<section class="card"{anchor_attr}><h2>{_esc(title)}</h2>{body}</section>'
-
-
-def _stat_tile(label: str, value: str, *, color: Optional[str] = None) -> str:
-    style = f' style="color:{color}"' if color else ""
+    tone_cls = f" card-{tone}" if tone else ""
+    pair_cls = " card-pair" if pair else ""
+    eyebrow_html = f'<span class="eyebrow">{_esc(eyebrow)}</span>' if eyebrow else ""
+    note_html = f'<span class="note">{_esc(note)}</span>' if note else ""
     return (
-        '<div class="stat-tile">'
+        f'<section class="card{tone_cls}{pair_cls}"{anchor_attr}>'
+        f'<header class="block-h">{eyebrow_html}<h2>{_esc(title)}</h2>{note_html}</header>'
+        f'<div class="block-b">{body}</div>'
+        "</section>"
+    )
+
+
+METRIC_FORMULA_INFO: Dict[str, Dict[str, str]] = {
+    # Headline scores
+    "risk_score": {
+        "title": "Overall risk score (0-100)",
+        "formula": "Risk Score = Min(100, Max(Veto_Floors, Weighted_Average(10 Risk Dimensions)))",
+        "desc": "Scale of 0-100 (lower is safer). Combines 10 independent risk dimensions (drawdown, leverage, fat tails, holding losers, ...), with a Veto Floor & Emergency Override mechanism that forces the score to 100 when a liquidation risk or extreme risk is detected.",
+    },
+    "quality_score": {
+        "title": "Strategy quality score (0-100)",
+        "formula": "Quality Score = Base(50) + Bonus(Sharpe, Sortino, Calmar, WinRate, Expectancy) - Risk Penalty",
+        "desc": "Scale of 0-100 (higher is better). A comprehensive assessment of return per unit of risk, the ability to preserve capital when the market turns unfavourable, and the stability of the closed-trade sequence.",
+    },
+    "confidence": {
+        "title": "Data confidence (0-100%)",
+        "formula": "Confidence = f(Number of trades N, Observation period T, Market-phase distribution)",
+        "desc": "Measures whether the sample size is statistically adequate: fewer than 30 trades is considered insufficient data; a bot that has gone through all market phases (up/down/sideways) with more than 100 trades reaches high confidence.",
+    },
+    # 10 Risk Dimensions
+    "tail_risk": {
+        "title": "Tail risk",
+        "formula": "Kurtosis, Skewness, 95% CVaR, Max Loss Outlier relative to standard deviation",
+        "desc": "Measures the risk of black-swan events or extreme losing trades outside the normal distribution that could wipe out accumulated profit.",
+    },
+    "drawdown_risk": {
+        "title": "Drawdown risk",
+        "formula": "Max Drawdown %, Recovery Days, length of consecutive drawdown streaks",
+        "desc": "Measures the depth and duration of the account's fall from its peak, the psychological pressure it creates, and the risk of the bot's followers blowing up their account.",
+    },
+    "behavioral_risk": {
+        "title": "Trading behaviour risk",
+        "formula": "Detects martingale, averaging down, raising leverage after a loss, order-entry loops",
+        "desc": "Assesses high-risk or undisciplined trading habits found in the trade ledger that could lead to a sudden account blow-up.",
+    },
+    "leverage_exposure": {
+        "title": "Leverage & exposure",
+        "formula": "Actual leverage ratio / capital, margin utilisation, concurrent-position exposure ratio",
+        "desc": "Measures how much financial leverage is used and the risk of forced liquidation by the exchange during sharp market moves.",
+    },
+    "strategy_drift": {
+        "title": "Strategy durability across phases",
+        "formula": "Consistency of entry style, performance deviation across uptrend / downtrend / sideways phases",
+        "desc": "Checks whether the bot keeps to its own rules or drifts and loses effectiveness when the market changes phase.",
+    },
+    "liquidity_execution": {
+        "title": "Liquidity & execution",
+        "formula": "Estimated slippage, order size relative to order-book depth of the traded pair",
+        "desc": "Measures slippage risk when copying the bot's trades, especially on thinly traded pairs.",
+    },
+    "performance_quality": {
+        "title": "Performance quality",
+        "formula": "Profit Factor, Sharpe, Sortino, Calmar, average win/loss ratio",
+        "desc": "Assesses actual profit generated relative to the risk taken, over the history of closed trades.",
+    },
+    "return_r_quality": {
+        "title": "Return / R quality",
+        "formula": "Distribution of per-trade R-multiples, expectancy per unit of risk accepted (R)",
+        "desc": "Measures positive asymmetry: how much money is made per unit of capital put at risk.",
+    },
+    "portfolio_risk": {
+        "title": "Portfolio risk",
+        "formula": "Cross-asset correlation, capital concentration in a single position",
+        "desc": "Measures the risk of concentrating capital in one coin or holding several positions whose moves are correlated.",
+    },
+    "market_alignment": {
+        "title": "Market alignment",
+        "formula": "Beta versus BTC/ETH, alignment with or against the broader market trend",
+        "desc": "Measures whether the bot makes money through genuine skill (alpha) or simply by riding a broad market rally (beta).",
+    },
+    "drawdown": {
+        "title": "Drawdown risk",
+        "formula": "Max Drawdown %, Recovery Days, length of consecutive drawdown streaks",
+        "desc": "Measures the depth and duration of the account's fall from its peak, the psychological pressure it creates, and the risk of the bot's followers blowing up their account.",
+    },
+    "stability": {
+        "title": "Performance stability",
+        "formula": "Variance of weekly return ratios, equity curve smoothness, consistency index",
+        "desc": "Assesses whether return comes from steady, repeatable execution or volatile spikes.",
+    },
+    "win_cadence": {
+        "title": "Win & loss cadence",
+        "formula": "Autocorrelation of trade outcomes, streak length distribution, clustering of losses",
+        "desc": "Measures whether losses occur in clusters that could exhaust follower capital.",
+    },
+    "monte_carlo": {
+        "title": "Monte Carlo simulation",
+        "formula": "10,000 bootstrap simulations of return distribution, CVaR and probability of ruin",
+        "desc": "Stress-tests the historical return distribution across thousands of simulated market paths.",
+    },
+    "trade_count": {
+        "title": "Total closed trades",
+        "formula": "Trade count = total number of completed position closes",
+        "desc": "Counted directly from the bot's public closed-trade log on OKX. Every time the bot closes a position (win or loss) it counts as one trade.",
+    },
+    "win_rate": {
+        "title": "Win rate",
+        "formula": "Win Rate (%) = (trades with PnL > 0 / total trades) × 100%",
+        "desc": "The percentage of closed trades with a positive result. Note: a high win rate does not guarantee safety if the bot holds losers instead of cutting them.",
+    },
+    "profit_factor": {
+        "title": "Profit factor",
+        "formula": "Profit Factor = total profit from winning trades / |total loss from losing trades|",
+        "desc": "The ratio of total profit to total absolute loss. PF > 1.0: the bot has a net profit; PF < 1.0: total losses exceed total profit (losing money); PF > 1.5: a strongly profitable system.",
+    },
+    "payoff_ratio": {
+        "title": "Payoff ratio",
+        "formula": "Payoff Ratio = average profit per winning trade / |average loss per losing trade|",
+        "desc": "The ratio between the average win and the average loss. A payoff ratio above 1.0 means each win tends to be larger than each loss.",
+    },
+    "expectancy": {
+        "title": "Expectancy per trade",
+        "formula": "Expectancy = (win rate × average win) - (loss rate × |average loss|)",
+        "desc": "The average expected profit for each new trade opened (USDT). Reflects the strategy's mathematical edge: positive means an edge, negative means it loses money over time.",
+    },
+    "total_pnl": {
+        "title": "Total PnL (cumulative)",
+        "formula": "Total PnL = Σ (PnL of every closed trade)",
+        "desc": "The total realised profit or loss (USDT) accumulated across the bot's entire closed-trade history.",
+    },
+    "max_drawdown_pct": {
+        "title": "Max drawdown",
+        "formula": "Max DD (%) = Max [ (highest capital peak - next lowest trough) / capital peak ] × 100%",
+        "desc": "The largest fall in capital from its highest peak to the lowest trough in the bot's history. Measures the worst stretch a copier of this bot has ever had to endure.",
+    },
+    "current_drawdown_pct": {
+        "title": "Current drawdown",
+        "formula": "Current DD (%) = [ (most recent capital peak - current capital) / most recent capital peak ] × 100%",
+        "desc": "How far the account currently sits below the highest capital peak the bot has ever reached.",
+    },
+    "sharpe_ratio": {
+        "title": "Sharpe ratio",
+        "formula": "Sharpe = (average return - risk-free rate) / standard deviation of returns (σ)",
+        "desc": "Measures return earned per unit of total volatility. Sharpe > 1 is decent, > 2 is excellent. Penalises upside and downside volatility equally.",
+    },
+    "sortino_ratio": {
+        "title": "Sortino ratio",
+        "formula": "Sortino = (average return - risk-free rate) / downside deviation",
+        "desc": "Similar to Sharpe but only counts the volatility of LOSING trades (downside risk), without penalising large wins. A more honest reflection of the ability to preserve capital.",
+    },
+    "calmar_ratio": {
+        "title": "Calmar ratio (annualised return / max drawdown)",
+        "formula": "Calmar = annualised return / max drawdown",
+        "desc": "The ratio between the annualised rate of capital growth and the deepest drawdown ever suffered. A higher Calmar ratio means faster recovery after a drawdown.",
+    },
+    "max_win_streak": {
+        "title": "Longest winning streak",
+        "formula": "Max Win Streak = the most consecutive trades with PnL > 0",
+        "desc": "The record number of consecutive winning trades with no losing trade in between.",
+    },
+    "max_loss_streak": {
+        "title": "Longest losing streak",
+        "formula": "Max Loss Streak = the most consecutive trades with PnL ≤ 0",
+        "desc": "The record number of consecutive losing trades in the bot's history. Critical for managing capital and avoiding an account blow-up during a sustained drawdown.",
+    },
+    "average_hold_time_minutes": {
+        "title": "Average hold time",
+        "formula": "Average Hold Time = total time positions were open (minutes) / total trades",
+        "desc": "The average time from when the bot opens a position to when it closes it. Helps identify whether the bot is scalping (<30 min), day trading (a few hours), or swing trading (several days).",
+    },
+    "trade_frequency_per_day": {
+        "title": "Trade frequency (trades per day)",
+        "formula": "Frequency = total closed trades / total active days",
+        "desc": "The average number of trades per day. Reflects how active the bot is and how much it spends on trading costs (commission/slippage).",
+    },
+    # Open positions audit
+    "open_positions": {
+        "title": "Open positions",
+        "formula": "The number of positions currently OPEN and not yet closed on OKX",
+        "desc": "The number of positions the bot currently has floating in the market, not yet taken profit or stopped out.",
+    },
+    "open_loss": {
+        "title": "Unrealised loss",
+        "formula": "Unrealised loss = Σ (market price - entry price) × size, for positions currently underwater",
+        "desc": "The total mark-to-market loss across all open positions that have not yet been closed.",
+    },
+    "open_loss_to_capital_pct": {
+        "title": "Unrealised loss / capital ratio",
+        "formula": "Ratio (%) = (|unrealised loss| / the bot's reference capital) × 100%",
+        "desc": "The percentage of capital being eroded by open positions held at a loss. A high ratio warns that the bot is close to being liquidated.",
+    },
+    "marked_pf": {
+        "title": "Marked-to-market profit factor (Marked PF)",
+        "formula": "Marked PF = (realised profit + unrealised profit) / (|realised loss| + |unrealised loss|)",
+        "desc": "The profit factor if every open position were closed right now at current prices. If Marked PF < 1 while the closed-book PF > 1, the bot is holding losers to hide the true loss.",
+    },
+    "pnl_skew": {
+        "title": "PnL skewness",
+        "formula": "Skewness = E[(X - μ)³] / σ³ over the per-trade PnL series",
+        "desc": "Measures the asymmetry of returns. A deeply negative skew (< -0.5) shows the bot tends to take small profits early but occasionally suffers one enormous loss -- typical of martingale or averaging-down behaviour.",
+    },
+    "pnl_kurtosis": {
+        "title": "PnL kurtosis",
+        "formula": "Kurtosis = E[(X - μ)⁴] / σ⁴ over the per-trade PnL series",
+        "desc": "Measures how fat the tails of the distribution are. Kurtosis > 3 indicates the bot carries fat-tail risk, with extreme swings happening more often than a normal distribution would predict.",
+    },
+    # Statistical inference
+    "sharpe_per_trade": {
+        "title": "Sharpe per trade",
+        "formula": "Sharpe_trade = average PnL per trade / standard deviation of PnL per trade",
+        "desc": "The Sharpe ratio computed over individual trades instead of over a daily or monthly time series.",
+    },
+    "probabilistic_sharpe": {
+        "title": "Probabilistic Sharpe Ratio (PSR)",
+        "formula": "PSR(SR*) = Z [ (SR - SR*) × √(N - 1) / √(1 - Skew×SR + (Kurt-1)/4 × SR²) ]",
+        "desc": "The probability that the true Sharpe ratio exceeds zero once sample length, skew and fat tails are corrected for (Bailey & López de Prado, 2012). PSR above 95% is needed before claiming a genuine edge.",
+    },
+    "deflated_sharpe": {
+        "title": "Deflated Sharpe Ratio (DSR)",
+        "formula": "DSR = PSR(SR_benchmark), where SR_benchmark is the maximum expected Sharpe from trying many bots",
+        "desc": "Corrects the probabilistic Sharpe ratio for the fact that this bot was picked out of a larger group of candidates. DSR removes the luck introduced by selecting the best-looking bot in hindsight (selection bias).",
+    },
+    "min_track_record_trades": {
+        "title": "Minimum trades required (MinTRL)",
+        "formula": "MinTRL = 1 + [1 - Skew×SR + (Kurt-1)/4 × SR²] × (Z_0.95 / SR)²",
+        "desc": "The minimum number of trades the bot needs for its Sharpe ratio to reach 95% statistical confidence. If the current trade count is below MinTRL, the Sharpe result is not yet reliable.",
+    },
+    "sample_size": {
+        "title": "Inference sample size",
+        "formula": "Sample size = the number of trades fed into the statistical test",
+        "desc": "The total number of trade observations used to run the statistical inference model.",
+    },
+    "selection_trials": {
+        "title": "Number of candidates compared (Selection Trials)",
+        "formula": "The number of bots in the pool this bot was selected from",
+        "desc": "The number of strategies/bots evaluated at the same time. Used to compute how much the DSR result should be discounted.",
+    },
+}
+
+
+def _calc_label_html(label: str, info_key: Optional[str] = None) -> str:
+    """Render a parameter label with native title tooltip and clickable formula button."""
+    info = METRIC_FORMULA_INFO.get(info_key) if info_key else None
+    if not info:
+        return _esc(label)
+
+    title = _esc(info.get("title", label))
+    formula = _esc(info.get("formula", ""))
+    desc = _esc(info.get("desc", ""))
+    escaped_key = _esc(info_key or "")
+    tooltip = f"{title}\n📐 Formula: {formula}\n💡 Criteria: {desc}"
+
+    return (
+        f'<span class="param-label" title="{_esc(tooltip)}" data-metric-key="{escaped_key}" '
+        f'data-title="{title}" data-formula="{formula}" data-desc="{desc}">'
+        f'{_esc(label)} '
+        f'<button type="button" class="formula-star-btn" onclick="openFormulaModal(\'{escaped_key}\')" '
+        f'data-metric-key="{escaped_key}" data-title="{title}" data-formula="{formula}" data-desc="{desc}" '
+        f'title="View formula: {title}" aria-label="View formula {title}">*</button>'
+        f'</span>'
+    )
+
+
+def _stat_tile(
+    label: str,
+    value: str,
+    *,
+    color: Optional[str] = None,
+    size: str = "",
+    info_key: Optional[str] = None,
+    basis_anchor: Optional[str] = None,
+) -> str:
+    """`size="hero"` là biến thể to/đậm hơn dùng riêng cho 3 ô điểm số đầu
+    trang (rủi ro/chất lượng/độ tin cậy) -- đúng yêu cầu "kết luận + điểm số
+    phải nổi bật nhất". Mặc định `size=""` giữ nguyên `class="stat-tile"`
+    như trước, không ảnh hưởng mọi lời gọi khác trong module này.
+
+    `basis_anchor`, khi có, thêm một dấu `*` bấm được ngay sau nhãn, dẫn tới
+    `#{basis_anchor}` -- id của khối "Chú thích giải thích điểm số" trong
+    mục "Điểm từng chiều rủi ro" (xem `_render_score_basis`). Chủ dự án yêu
+    cầu thẳng: "nên có sao ở đó để giải thích những tiêu chí và công thức để
+    ra được score đấy". Không dùng JS: trình duyệt hiện đại tự mở một
+    `<details>` đang đóng khi mục tiêu điều hướng theo fragment nằm bên
+    trong nó, nên một thẻ `<a href="#...">` thường là đủ. Mặc định `None`
+    (không đổi hình dạng của mọi lời gọi cũ).
+    """
+    style = f' style="color:{color}"' if color else ""
+    tile_style = f' style="--tile-accent:{color}"' if color else ""
+    size_cls = f" stat-tile-{size}" if size else ""
+    label_markup = _calc_label_html(label, info_key) if info_key else _esc(label)
+    if basis_anchor and not info_key:
+        label_markup += (
+            f' <a class="score-basis-star" href="#{_esc(basis_anchor)}" '
+            f'aria-label="See how {_esc(label)} is calculated" title="See how this score is calculated">*</a>'
+        )
+    return (
+        f'<div class="stat-tile{size_cls}"{tile_style}>'
         f'<div class="stat-value"{style}>{_esc(value)}</div>'
-        f'<div class="stat-label">{_esc(label)}</div>'
+        f'<div class="stat-label">{label_markup}</div>'
         "</div>"
     )
 
 
-def _table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
+def _table(
+    headers: Sequence[str],
+    rows: Sequence[Sequence[str]],
+    *,
+    table_class: str = "",
+    table_id: str = "",
+    page_size: Optional[int] = None,
+) -> str:
     """Every cell is passed through the caller already escaped/formatted --
     this only lays out the markup, and wraps the whole thing in a horizontal
     scroll container so a wide table never widens the page itself (task's
@@ -415,8 +868,11 @@ def _table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
     body_rows = "".join(
         "<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>" for row in rows
     )
+    cls_attr = f' class="{_esc(table_class)}"' if table_class else ""
+    id_attr = f' id="{_esc(table_id)}"' if table_id else ""
+    page_attr = f' data-page-size="{page_size}"' if page_size else ""
     return (
-        '<div class="table-scroll"><table>'
+        f'<div class="table-scroll"><table{id_attr}{cls_attr}{page_attr}>'
         f"<thead><tr>{head}</tr></thead><tbody>{body_rows}</tbody>"
         "</table></div>"
     )
@@ -462,8 +918,14 @@ def _svg(
     # shows, for a screen reader, since `role="img"` alone gives it no
     # accessible name of its own.
     aria_attr = f' aria-label="{_esc(aria_label)}"' if aria_label else ""
+    # KHÔNG ghi `height` cố định: với `width="100%"` + `height="{h}"` thì
+    # `preserveAspectRatio` mặc định (xMidYMid meet) ghim nội dung ở đúng cỡ
+    # gốc rồi căn giữa -- trên thẻ rộng (trang đã full màn hình) thành ra hai
+    # mảng trắng lớn hai bên. Bỏ `height` + CSS `height:auto` cho nội dung
+    # giãn ĐỀU theo bề ngang thật; mỗi loại biểu đồ tự chặn bằng `max-width`
+    # trong `_CSS` để chữ không phóng to quá cỡ đọc.
     return (
-        f'<svg viewBox="0 0 {w} {h}" width="100%" height="{h}"{cls}{aria_attr} '
+        f'<svg viewBox="0 0 {w} {h}" width="100%"{cls}{aria_attr} '
         f'role="img" xmlns="http://www.w3.org/2000/svg">{body}</svg>'
     )
 
@@ -509,12 +971,14 @@ def _text(
     anchor: str = "start",
     cls: str = "",
     fill: str = "",
+    extra: str = "",
 ) -> str:
     fill_attr = f' fill="{_esc(fill)}"' if fill else ""
     cls_attr = f' class="{_esc(cls)}"' if cls else ""
+    extra_attr = f" {extra.strip()}" if extra else ""
     return (
         f'<text x="{_coord(x)}" y="{_coord(y)}" text-anchor="{_esc(anchor)}"'
-        f"{cls_attr}{fill_attr}>{_esc(text)}</text>"
+        f"{cls_attr}{fill_attr}{extra_attr}>{_esc(text)}</text>"
     )
 
 
@@ -524,7 +988,16 @@ def _text(
 
 
 class _BarRow:
-    __slots__ = ("label", "value", "color", "value_text", "measured", "tag")
+    __slots__ = (
+        "label",
+        "value",
+        "color",
+        "value_text",
+        "measured",
+        "tag",
+        "info_key",
+        "note",
+    )
 
     def __init__(
         self,
@@ -535,6 +1008,8 @@ class _BarRow:
         *,
         measured: bool = True,
         tag: Optional[str] = None,
+        info_key: Optional[str] = None,
+        note: Optional[str] = None,
     ) -> None:
         self.label = label
         self.value = value
@@ -542,47 +1017,85 @@ class _BarRow:
         self.value_text = value_text
         self.measured = measured
         self.tag = tag
+        self.info_key = info_key
+        self.note = note
 
 
 def _horizontal_bars(
-    rows: Sequence[_BarRow], *, max_value: float = 100.0, width: float = 640.0
+    rows: Sequence[_BarRow], *, max_value: float = 100.0, width: float = 750.0
 ) -> str:
     if not rows:
         return ""
-    row_h = 34.0
-    top_pad = 6.0
-    label_w = 190.0
-    value_w = 90.0
-    track_x = label_w + 10.0
+    row_h = 38.0  # khoảng thở thoáng đãng giữa các thanh
+    top_pad = 8.0
+    label_w = 230.0
+    value_w = 135.0
+    track_x = label_w + 12.0
     track_w = max(width - track_x - value_w - 10.0, 40.0)
     height = top_pad * 2 + row_h * len(rows)
     parts: List[str] = []
     for i, row in enumerate(rows):
         y = top_pad + i * row_h
-        mid = y + row_h * 0.62
-        label_text = row.label if len(row.label) <= 26 else row.label[:25] + "…"
-        parts.append(_text(0, mid, label_text, cls="bar-label"))
-        parts.append(
-            _rect(track_x, y + 6, track_w, row_h - 16, fill="var(--track)", rx=5)
+        mid = y + row_h * 0.60
+        info = METRIC_FORMULA_INFO.get(row.info_key) if row.info_key else None
+        row_parts: List[str] = []
+        # Câu ống kính tự viết khi không đo được chiều này. Nối SAU phần mô tả
+        # công thức (thứ giống nhau ở mọi bot) chứ không thay thế nó: người
+        # đọc cần biết cả "chiều này là gì" lẫn "vì sao bot NÀY không có nó".
+        note_suffix = f" -- {row.note}" if row.note else ""
+        if info:
+            tooltip_str = f"{info.get('title', row.label)}: {info.get('desc', '')} (Formula: {info.get('formula', '')}){note_suffix}"
+            row_parts.append(f"<title>{_esc(tooltip_str)}</title>")
+            star_label = f"{row.label} *"
+            escaped_key = _esc(row.info_key or "")
+            t_title = _esc(info.get("title", row.label))
+            t_formula = _esc(info.get("formula", ""))
+            t_desc = _esc(info.get("desc", ""))
+            text_extra = (
+                f'style="cursor:pointer" data-metric-key="{escaped_key}" '
+                f'data-title="{t_title}" data-formula="{t_formula}" data-desc="{t_desc}" '
+                f'title="{_esc(tooltip_str)}" onclick="openFormulaModal(\'{escaped_key}\')"'
+            )
+        elif row.note:
+            star_label = row.label
+            text_extra = f'title="{_esc(row.note)}"'
+        else:
+            star_label = row.label
+            text_extra = ""
+
+        label_text = star_label if len(star_label) <= 38 else star_label[:37] + "…"
+        row_parts.append(_text(0, mid, label_text, cls="bar-label", extra=text_extra))
+        row_parts.append(
+            _rect(track_x, y + 6, track_w, row_h - 16, fill="var(--track)", rx=6)
         )
         if row.measured and row.value is not None:
             frac = _clamp(float(row.value) / max_value if max_value else 0.0, 0.0, 1.0)
-            parts.append(
-                _rect(track_x, y + 6, track_w * frac, row_h - 16, fill=row.color, rx=5)
+            row_parts.append(
+                _rect(track_x, y + 6, track_w * frac, row_h - 16, fill=row.color, rx=6)
             )
         else:
             # Unmeasured: a flat hatched-looking muted bar rather than a
             # numeric value -- a neutral placeholder score must never look
             # like a real measurement (task's own LIMITED requirement).
-            parts.append(
+            row_parts.append(
+                _rect(track_x, y + 6, track_w, row_h - 16, fill="var(--track)", rx=6)
+            )
+            row_parts.append(
                 _rect(
-                    track_x, y + 6, track_w, row_h - 16, fill="var(--track-muted)", rx=5
+                    track_x,
+                    y + 6,
+                    track_w,
+                    row_h - 16,
+                    fill="none",
+                    rx=6,
+                    extra='stroke="var(--axis)" stroke-width="1" stroke-dasharray="5 4"',
                 )
             )
-        value_x = track_x + track_w + 8
-        parts.append(_text(value_x, mid, row.value_text, cls="bar-value"))
+        value_x = track_x + track_w + 10
+        row_parts.append(_text(value_x, mid, row.value_text, cls="bar-value"))
         if row.tag:
-            parts.append(_text(track_x + 4, y + row_h - 3, row.tag, cls="bar-tag"))
+            row_parts.append(_text(track_x + 4, y + row_h - 3, row.tag, cls="bar-tag"))
+        parts.append(f'<g class="bar-row-g">{"".join(row_parts)}</g>')
     return _svg(width, height, "".join(parts), extra_class="bar-chart")
 
 
@@ -770,7 +1283,8 @@ def _pie_chart(
       * A slice with a genuine `0` value contributes no wedge geometry at
         all (nothing to draw), but keeps its direct label -- so a category
         that legitimately has zero members (e.g. no bot fell in the
-        "AN TOÀN" tier this run) still shows up as "0 · 0.0%" rather than
+        "DRAWDOWN: LOW · QUALITY: WEAK" state this run) still shows up as
+        "0 · 0.0%" rather than
         silently vanishing from the picture, which would look like a bug
         rather than a fact about the data.
 
@@ -790,7 +1304,7 @@ def _pie_chart(
         body = (
             f'<circle cx="{_coord(cx)}" cy="{_coord(cy)}" r="{_coord(radius)}" '
             'fill="transparent" stroke="var(--track)" stroke-width="2"/>'
-            + _text(cx, cy, "Không có dữ liệu", anchor="middle", cls="pie-empty")
+            + _text(cx, cy, "No data", anchor="middle", cls="pie-empty")
         )
         return _svg(width, height, body, extra_class="pie-chart")
 
@@ -841,7 +1355,7 @@ def _pie_chart(
         height,
         "".join(parts),
         extra_class="pie-chart",
-        aria_label="Biểu đồ tròn",
+        aria_label="Pie chart",
     )
 
 
@@ -854,9 +1368,11 @@ def _pie_chart(
 def _line_chart(
     ys: Sequence[Any],
     *,
-    width: float = 640.0,
-    height: float = 220.0,
+    width: float = 750.0,
+    height: float = 460.0,
     y_unit: str = "",
+    x_label_prefix: str = "Trade",
+    aria_label: str = "Cumulative capital curve by closed trade",
 ) -> str:
     """Plot `ys` (already the values to draw, e.g. a running cumulative sum
     the caller computed) against a plain 0..n-1 sequence index.
@@ -883,10 +1399,10 @@ def _line_chart(
     if n == 0:
         return ""
 
-    left_pad = 56.0
-    right_pad = 12.0
-    top_pad = 18.0
-    bottom_pad = 30.0
+    left_pad = 95.0
+    right_pad = 145.0
+    top_pad = 28.0
+    bottom_pad = 36.0
     plot_w = max(width - left_pad - right_pad, 40.0)
     plot_h = max(height - top_pad - bottom_pad, 40.0)
 
@@ -903,23 +1419,62 @@ def _line_chart(
         return x, y
 
     zero_y = top_pad + plot_h * (1.0 - (0.0 - lo) / (hi - lo))
-    parts: List[str] = [
+
+    # Gradient hai màu: Trên zero baseline (lãi > 0) màu xanh lá (#10b981),
+    # Dưới zero baseline (lỗ < 0) màu đỏ (#ef4444)
+    gradient_id = f"pnl-grad-{abs(hash(tuple(pts[:min(len(pts), 8)])))}"
+    grad_defs = ""
+    if hi > 0.0 and lo < 0.0:
+        zero_pct = _clamp(((zero_y - top_pad) / plot_h) * 100.0, 0.0, 100.0)
+        grad_defs = (
+            f'<defs>'
+            f'<linearGradient id="{gradient_id}" x1="0" y1="{_coord(top_pad)}" x2="0" y2="{_coord(top_pad + plot_h)}" gradientUnits="userSpaceOnUse">'
+            f'<stop offset="0%" stop-color="#10b981"/>'
+            f'<stop offset="{zero_pct:.2f}%" stop-color="#10b981"/>'
+            f'<stop offset="{zero_pct:.2f}%" stop-color="#ef4444"/>'
+            f'<stop offset="100%" stop-color="#ef4444"/>'
+            f'</linearGradient>'
+            f'</defs>'
+        )
+        stroke = f"url(#{gradient_id})"
+    elif hi <= 0.0:
+        stroke = "#ef4444"
+    else:
+        stroke = "#10b981"
+
+    parts: List[str] = []
+    if grad_defs:
+        parts.append(grad_defs)
+
+    # Đường trục zero baseline
+    parts.append(
         _line(
             left_pad,
             zero_y,
             left_pad + plot_w,
             zero_y,
-            stroke="var(--axis)",
-            dash="3,3",
+            stroke="var(--line-2, #64748b)",
+            dash="4,4",
         )
-    ]
+    )
+    if abs(zero_y - (top_pad + 4)) > 14 and abs(zero_y - (top_pad + plot_h + 2)) > 14:
+        parts.append(
+            _text(
+                left_pad - 8,
+                zero_y + 3,
+                f"0{y_unit}",
+                anchor="end",
+                cls="line-axis-label",
+            )
+        )
 
-    stroke = "#16a34a" if pts[-1] >= 0.0 else "#dc2626"
+    last_is_profit = pts[-1] >= 0.0
+    stroke_last = "#10b981" if last_is_profit else "#ef4444"
     x_last, y_last = xy(n - 1, pts[-1])
 
     if n == 1:
         parts.append(
-            f'<circle cx="{_coord(x_last)}" cy="{_coord(y_last)}" r="4" fill="{stroke}"/>'
+            f'<circle cx="{_coord(x_last)}" cy="{_coord(y_last)}" r="5" fill="{stroke_last}"/>'
         )
     else:
         coords = " ".join(
@@ -927,60 +1482,96 @@ def _line_chart(
         )
         parts.append(
             f'<polyline points="{coords}" fill="transparent" stroke="{stroke}" '
-            'stroke-width="2.2"/>'
+            'stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>'
         )
         x0, y0 = xy(0, pts[0])
+        first_color = "#10b981" if pts[0] >= 0.0 else "#ef4444"
         parts.append(
-            f'<circle cx="{_coord(x0)}" cy="{_coord(y0)}" r="3" fill="var(--axis)"/>'
+            f'<circle cx="{_coord(x0)}" cy="{_coord(y0)}" r="4" fill="{first_color}"/>'
         )
         parts.append(
-            f'<circle cx="{_coord(x_last)}" cy="{_coord(y_last)}" r="4" fill="{stroke}"/>'
+            f'<circle cx="{_coord(x_last)}" cy="{_coord(y_last)}" r="5" fill="{stroke_last}"/>'
         )
         peak_i = max(range(n), key=lambda i: pts[i])
         trough_i = min(range(n), key=lambda i: pts[i])
         for i, tag, color in (
-            (peak_i, "Đỉnh", "#16a34a"),
-            (trough_i, "Đáy", "#dc2626"),
+            (peak_i, "Peak", "#10b981"),
+            (trough_i, "Trough", "#ef4444"),
         ):
             if i in (0, n - 1):
                 continue
             x, y = xy(i, pts[i])
             parts.append(
-                f'<circle cx="{_coord(x)}" cy="{_coord(y)}" r="3" fill="{color}"/>'
+                f'<circle cx="{_coord(x)}" cy="{_coord(y)}" r="4" fill="{color}"/>'
             )
+            marker_anchor = "middle"
+            if x < left_pad + 45.0:
+                marker_anchor = "start"
+            elif x > left_pad + plot_w - 45.0:
+                marker_anchor = "end"
+
+            marker_y = y + 16 if tag == "Trough" else y - 8
             parts.append(
                 _text(
                     x,
-                    y - 8,
+                    marker_y,
                     f"{tag} {pts[i]:,.0f}{y_unit}",
-                    anchor="middle",
+                    anchor=marker_anchor,
                     cls="line-marker",
                 )
             )
 
+    # Nhãn điểm cuối: đặt tại lề phải ngoài plot, không bao giờ đè lên nhãn Đáy/Đỉnh
+    y_end = _clamp(y_last + 4, top_pad + 12, height - bottom_pad - 4)
     parts.append(
         _text(
-            x_last,
-            y_last - 10,
+            left_pad + plot_w + 10,
+            y_end,
             f"{pts[-1]:,.0f}{y_unit}",
-            anchor="end",
+            anchor="start",
             cls="line-end-label",
+            extra=f'fill="{stroke_last}"',
         )
     )
+
+    # Nhãn trục Y: đặt bên ngoài bên trái plot với anchor="end", không bao giờ đè vào đường line
     parts.append(
-        _text(left_pad, top_pad - 4, f"{hi:,.0f}{y_unit}", cls="line-axis-label")
+        _text(
+            left_pad - 8,
+            top_pad + 4,
+            f"{hi:,.0f}{y_unit}",
+            anchor="end",
+            cls="line-axis-label",
+        )
     )
     parts.append(
         _text(
-            left_pad, top_pad + plot_h + 2, f"{lo:,.0f}{y_unit}", cls="line-axis-label"
+            left_pad - 8,
+            top_pad + plot_h + 2,
+            f"{lo:,.0f}{y_unit}",
+            anchor="end",
+            cls="line-axis-label",
         )
     )
-    parts.append(_text(left_pad, height - 2, "Lệnh #1", cls="line-axis-label"))
+
+    # Nhãn trục X: <prefix> #1 và <prefix> #n -- mặc định "Lệnh" (chuỗi lệnh
+    # đã chốt), caller truyền `x_label_prefix` khác (vd. "Tuần", "Điểm") khi
+    # trục thời gian không phải là các lệnh (xem các mục LIMITED bên dưới,
+    # vẽ trên đường vốn tuần / chuỗi pnlRatio công khai thay vì sổ lệnh).
+    parts.append(
+        _text(
+            left_pad,
+            height - 6,
+            f"{x_label_prefix} #1",
+            anchor="start",
+            cls="line-axis-label",
+        )
+    )
     parts.append(
         _text(
             left_pad + plot_w,
-            height - 2,
-            f"Lệnh #{n}",
+            height - 6,
+            f"{x_label_prefix} #{n}",
             anchor="end",
             cls="line-axis-label",
         )
@@ -991,7 +1582,7 @@ def _line_chart(
         height,
         "".join(parts),
         extra_class="line-chart",
-        aria_label="Đường vốn tích luỹ theo lệnh đã chốt",
+        aria_label=aria_label,
     )
 
 
@@ -1000,21 +1591,61 @@ def _line_chart(
 # --------------------------------------------------------------------------- #
 
 
-def _render_header(result: Dict[str, Any]) -> str:
-    name = result.get("name") or result.get("code") or "Bot"
-    code = result.get("code") or ""
-    verdict = result.get("verdict")
-    verdict_color = _verdict_color(verdict)
+def _has_score_basis(evidence: Any) -> bool:
+    """Liệu mục "Điểm từng chiều rủi ro" (anchor `diem-chieu`) sẽ thực sự
+    render nội dung nào đó cho `result` này hay không -- dùng để quyết định
+    có gắn dấu `*` bấm được trên các ô điểm số hero hay không (một dấu sao
+    dẫn tới một fragment rỗng/không tồn tại còn tệ hơn không có dấu sao).
+    Cùng đúng điều kiện `_render_dimensions_section` đã dùng để quyết định
+    render hay trả `""`.
+    """
+    if not isinstance(evidence, dict):
+        return False
+    dimensions = evidence.get("dimensions")
+    if isinstance(dimensions, dict) and dimensions:
+        return True
+    components = evidence.get("components")
+    return isinstance(components, list) and bool(components)
+
+
+def _render_hero_scores(result: Dict[str, Any]) -> str:
     risk = result.get("risk")
     quality = result.get("quality")
     confidence = result.get("confidence")
+    verdict_basis = result.get("verdict_basis")
 
+    has_basis = _has_score_basis(result.get("evidence"))
     tiles = [
         _stat_tile(
-            "Điểm rủi ro (càng thấp càng tốt)", _num(risk, 0), color=_risk_color(risk)
+            "Risk score (lower = better)",
+            _num(risk, 0),
+            color=_risk_color(risk),
+            size="hero",
+            info_key="risk_score",
+            basis_anchor="giai-thich-risk" if has_basis and risk is not None else None,
         ),
-        _stat_tile("Điểm chất lượng", _num(quality, 0)),
-        _stat_tile("Độ tin cậy đánh giá", _pct(confidence, 0)),
+        _stat_tile(
+            "Quality score",
+            _num(quality, 0),
+            color=_higher_is_better_color(quality),
+            size="hero",
+            info_key="quality_score",
+            basis_anchor=(
+                "giai-thich-quality" if has_basis and quality is not None else None
+            ),
+        ),
+        _stat_tile(
+            "Confidence",
+            _pct(confidence, 0),
+            color=_higher_is_better_color(confidence),
+            size="hero",
+            info_key="confidence",
+            basis_anchor=(
+                "giai-thich-confidence"
+                if has_basis and confidence is not None
+                else None
+            ),
+        ),
     ]
 
     veto_notice = ""
@@ -1025,52 +1656,171 @@ def _render_header(result: Dict[str, Any]) -> str:
         avg = score_breakdown.get("weighted_average")
         reason_text = "; ".join(_esc(r) for r in veto_reasons) if veto_reasons else ""
         kind = (
-            "quy tắc khẩn cấp (EMERGENCY_OVERRIDE)"
+            "emergency rule (EMERGENCY_OVERRIDE)"
             if decided_by == "EMERGENCY_OVERRIDE"
-            else "sàn veto (VETO_FLOOR)"
+            else "exchange veto (VETO_FLOOR)"
         )
         veto_notice = (
             '<div class="notice notice-danger">'
-            f"<strong>Điểm rủi ro {_num(risk, 0)} KHÔNG phải bình quân 10 chiều</strong> "
-            f"— do {kind} quyết định"
+            f"<strong>Risk score {_num(risk, 0)} is NOT the average of the 10 dimensions</strong> "
+            f"-- decided instead by the {kind}"
             + (
-                f", bình quân gia quyền thật ra chỉ {_num(avg, 1)}"
+                f", the actual weighted average is only {_num(avg, 1)}"
                 if avg is not None
                 else ""
             )
             + "."
-            + (f" Lý do veto: {reason_text}." if reason_text else "")
+            + (f" Reason for the veto: {reason_text}." if reason_text else "")
             + "</div>"
         )
 
     limited_notice = ""
     if result.get("status") == "LIMITED":
         reason = (
-            result.get("limited_reason") or "OKX không công khai đủ dữ liệu cho bot này"
+            result.get("limited_reason") or "OKX does not publicly expose enough data for this bot"
         )
         unavailable = result.get("unavailable") or []
         unavailable_vi = ", ".join(_esc(u) for u in unavailable)
         limited_notice = (
             '<div class="notice notice-warning">'
-            f"<strong>ĐÁNH GIÁ HẠN CHẾ (LIMITED)</strong> — {_esc(reason)}."
+            f"<strong>LIMITED ASSESSMENT</strong> -- {_esc(reason)}."
             + (
-                f" Không tính được: {unavailable_vi}. Trần độ tin cậy bị hạ vì thiếu"
-                " toàn bộ bằng chứng cấp độ từng lệnh."
+                f" Could not be computed: {unavailable_vi}. The confidence ceiling has"
+                " been lowered because no per-trade-level evidence is available at all."
                 if unavailable_vi
                 else ""
             )
             + "</div>"
         )
 
-    return (
-        '<header class="report-header">'
-        f'<div class="bot-name">{_esc(name)}</div>'
-        f'<div class="bot-code">Mã: <code>{_esc(code)}</code></div>'
-        f'<div class="verdict-badge" style="--badge-color:{verdict_color}">{_esc(verdict or "THIẾU BẰNG CHỨNG")}</div>'
-        f'<div class="stat-row">{"".join(tiles)}</div>'
-        f"{limited_notice}{veto_notice}"
+    verdict_basis_html = (
+        '<div class="verdict-basis collapsible-basis" id="verdict-basis-box">'
+        '<div class="basis-header" onclick="var b=document.getElementById(\'verdict-basis-box\');if(b){b.classList.toggle(\'expanded\');var p=b.querySelector(\'.basis-toggle-pill\');if(p){p.textContent=b.classList.contains(\'expanded\')?\'Collapse ▲\':\'Show methodology ▼\';}}">'
+        '<div class="basis-title-group">'
+        '<span class="basis-icon-badge">📐</span>'
+        "<div>"
+        '<div class="basis-main-title">QUANTITATIVE METHODOLOGY BASIS</div>'
+        '<div class="basis-subtitle">Independent mathematical model &middot; 4 pillars of algorithmic risk validation</div>'
+        "</div>"
+        "</div>"
+        '<div class="basis-toggle-action">'
+        '<span class="basis-academic-tag">NoraBT Quantitative Assessment Standard</span>'
+        '<span class="basis-toggle-pill">Show methodology ▼</span>'
+        "</div>"
+        "</div>"
+        '<div class="basis-collapsible-body">'
+        '<div class="basis-pillars-grid">'
+        '<div class="basis-pillar-card">'
+        '<div class="pillar-top">'
+        '<span class="pillar-badge pillar-blue">10,000 SCENARIOS</span>'
+        '<span class="pillar-tag">Non-parametric</span>'
+        "</div>"
+        '<div class="pillar-name">Stationary Bootstrap</div>'
+        '<div class="pillar-desc">Simulates 10,000 scenarios (Politis &amp; Romano, 1994) on the bot\'s own closed trade ledger -- preserves the sequence\'s autocorrelation structure instead of assuming a normal distribution.</div>'
+        "</div>"
+        '<div class="basis-pillar-card">'
+        '<div class="pillar-top">'
+        '<span class="pillar-badge pillar-amber">VaR 95% &amp; CVaR</span>'
+        '<span class="pillar-tag">Tail risk</span>'
+        "</div>"
+        '<div class="pillar-name">Expected Shortfall</div>'
+        '<div class="pillar-desc">Tail risk measured with 95% VaR and CVaR (expected shortfall) to catch stress scenarios that lead to extreme liquidation.</div>'
+        "</div>"
+        '<div class="basis-pillar-card">'
+        '<div class="pillar-top">'
+        '<span class="pillar-badge pillar-purple">PSR &amp; DSR</span>'
+        '<span class="pillar-tag">Bias correction</span>'
+        "</div>"
+        '<div class="pillar-name">Deflated Sharpe Ratio</div>'
+        '<div class="pillar-desc">Sharpe quality measured with the Probabilistic Sharpe Ratio and Deflated Sharpe Ratio (Bailey and L&oacute;pez de Prado, 2012 and 2014) -- corrected for false-edge inflation, alongside the Minimum Track Record Length.</div>'
+        "</div>"
+        '<div class="basis-pillar-card">'
+        '<div class="pillar-top">'
+        '<span class="pillar-badge pillar-green">SPEARMAN &rho; = 0.64</span>'
+        '<span class="pillar-tag">Out-of-sample validation</span>'
+        "</div>"
+        '<div class="pillar-name">36-Bot Empirical Study</div>'
+        '<div class="pillar-desc">The Spearman rank correlation between the risk score and subsequent drawdown is 0.64 (95% confidence interval [0.39-0.80]). The score does NOT forecast profit or loss.</div>'
+        "</div>"
+        "</div>"
+        '<div class="basis-verbatim-card">'
+        '<div class="verbatim-header">'
+        '<span class="verbatim-dot"></span>'
+        '<span class="verbatim-label">Full academic basis text:</span>'
+        "</div>"
+        f'<div class="basis-text">{_esc(verdict_basis)}</div>'
+        "</div>"
+        "</div>"
+        "</div>"
+        if verdict_basis
+        else ""
+    )
+    notices_html = (
+        f'<div class="header-notices">{veto_notice}{limited_notice}{verdict_basis_html}</div>'
+        if (verdict_basis_html or limited_notice or veto_notice)
+        else ""
+    )
+    return f'<div class="report-hero-scores">{"".join(tiles)}</div>{notices_html}'
+
+
+def _render_header(result: Dict[str, Any]) -> Tuple[str, str]:
+    name = result.get("name") or result.get("code") or "Bot"
+    code = result.get("code") or ""
+    verdict = result.get("verdict")
+    verdict_color = _verdict_color(verdict)
+
+    symbol = (result.get("evidence") or {}).get("traded_symbol") or (
+        result.get("market_analysis") or {}
+    ).get("symbol")
+    venue = (result.get("market_analysis") or {}).get("venue_type") or "CEX"
+    market_tag = (
+        f' · <span class="venue-symbol-badge">⚡ {_esc(symbol)} ({_esc(venue)})</span>'
+        if symbol
+        else ""
+    )
+
+    crumb_html = (
+        f'<div class="crumb">REPORT / {_esc(code)}</div>'
+        if code
+        else '<div class="crumb">REPORT</div>'
+    )
+    subnav_html = (
+        '<div class="report-subnav-bar">'
+        '<a href="/#/admin?tab=bots" class="btn-subnav-back">'
+        '<span class="back-arrow">←</span>'
+        "<span>Back to bot list</span>"
+        "</a>"
+        '<div class="subnav-crumb">'
+        '<span class="crumb-dim">Monitoring system</span>'
+        '<span class="crumb-sep">/</span>'
+        '<a href="/#/admin?tab=bots" class="crumb-link">Bot list</a>'
+        '<span class="crumb-sep">/</span>'
+        f'<span class="crumb-active">{_esc(name)}</span>'
+        "</div>"
+        "</div>"
+    )
+    main_header = (
+        f"{subnav_html}"
+        '<header class="report-header report-hero-card">'
+        '<div class="report-hero-top">'
+        '<div class="report-hero-identity">'
+        f"{crumb_html}"
+        f'<h1 class="head-title">{_esc(name)}</h1>'
+        '<div class="report-hero-meta">'
+        f'<span class="bot-code-pill">Code: <code>{_esc(code)}</code></span>'
+        f"{market_tag}"
+        f'<span class="verdict-badge" style="--badge-color:{verdict_color}">{_esc(verdict or "INSUFFICIENT EVIDENCE")}</span>'
+        "</div>"
+        "</div>"
+        "</div>"
         "</header>"
     )
+    side_blocks = (
+        '<div class="side-identity-block">'
+        f'<span class="verdict-badge" style="--badge-color:{verdict_color}">{_esc(verdict or "INSUFFICIENT EVIDENCE")}</span>'
+        "</div>"
+    )
+    return main_header, side_blocks
 
 
 def _risk_color(risk: Any) -> str:
@@ -1088,29 +1838,721 @@ def _risk_color(risk: Any) -> str:
     return "#16a34a"
 
 
+def _higher_is_better_color(value: Any) -> str:
+    """Màu cho một chỉ số mà CÀNG CAO CÀNG TỐT (điểm chất lượng, độ tin cậy
+    đánh giá) -- ảnh chụp trang thật cho thấy 2/3 ô số liệu quan trọng nhất
+    trang (chỉ có ô "Điểm rủi ro" tô màu qua `_risk_color`) trông đen trơn,
+    không phân cấp, dù cùng là những con số quan trọng nhất trang. Cùng bảng
+    màu 4 mốc với `_risk_color` (khác polarity: thấp = xấu/đỏ ở đây thay vì
+    cao = xấu/đỏ như risk) để một người đọc quen mắt với ý nghĩa xanh/đỏ trên
+    trang này không phải học thêm một bảng màu khác.
+    """
+    if not _is_finite_number(value):
+        return "#6b7280"
+    v = float(value)
+    if v >= 75:
+        return "#16a34a"
+    if v >= 50:
+        return "#ca8a04"
+    if v >= 25:
+        return "#ea580c"
+    return "#dc2626"
+
+
 # --------------------------------------------------------------------------- #
 # Section 2 -- conclusion / recommendation
 # --------------------------------------------------------------------------- #
 
 
+_CONCLUSION_WHY_PREFIX = "WHY THIS HAPPENED:"
+_CONCLUSION_PROOF_PREFIX = "EVIDENCE:"
+_CONCLUSION_VERDICT_PREFIX = "CONCLUSION:"
+
+
 def _render_conclusion(result: Dict[str, Any]) -> str:
+    """Trình bày mục "Kết luận và khuyến nghị" theo cấu trúc chuẩn đồng nhất
+    với hệ thống:
+      - Khối phán quyết nổi bật, sắc nét, tương ứng mức độ rủi ro (tone-danger / warning / success)
+      - Dòng tóm tắt định danh và các chỉ số đo lường cốt lõi
+      - Danh sách nguyên nhân và bằng chứng định lượng chuẩn mực
+      - Cảnh báo rủi ro tiềm ẩn (notice-danger)
+      - Khối lưu ý phạm vi kiểm định & thiếu dữ liệu gọn gàng.
+    """
     text_lines = result.get("text")
     if not isinstance(text_lines, list) or not text_lines:
         return ""
-    paragraphs = []
-    for line in text_lines:
-        if not isinstance(line, str) or not line.strip():
+
+    verdict_info = None
+    why_items: List[str] = []
+    proof_items: List[str] = []
+    warning_items: List[str] = []
+    limitation_items: List[str] = []
+    overview_parts: List[str] = []
+    other_lines: List[str] = []
+
+    for raw_line in text_lines:
+        if not isinstance(raw_line, str) or not raw_line.strip():
             continue
-        cls = "conclusion-line"
-        if line.upper().startswith("KẾT LUẬN") or line.upper().startswith(
-            "NGUYÊN NHÂN"
-        ):
-            cls += " conclusion-strong"
-        paragraphs.append(f'<p class="{cls}">{_esc(line)}</p>')
-    if not paragraphs:
+        line = raw_line.strip()
+        line = re.sub(r"^([^\(\)]+?)\s*\(\1\)", r"\1", line)
+        upper = line.upper()
+
+        if line.startswith(("• ", "- ", "* ")):
+            proof_items.append(line[2:].strip())
+            continue
+
+        if upper.startswith(_CONCLUSION_VERDICT_PREFIX) or upper.startswith("KẾT LUẬN:"):
+            rest = line[line.index(":") + 1 :].strip()
+            if " — " in rest:
+                headline, detail = rest.split(" — ", 1)
+            else:
+                headline, detail = rest, ""
+            verdict_info = (headline.strip(), detail.strip())
+        elif upper.startswith(_CONCLUSION_WHY_PREFIX) or upper.startswith("NGUYÊN NHÂN:"):
+            prefix_len = (
+                len(_CONCLUSION_WHY_PREFIX)
+                if upper.startswith(_CONCLUSION_WHY_PREFIX)
+                else len("NGUYÊN NHÂN:")
+            )
+            rest = line[prefix_len:].strip()
+            subs = [s.strip() for s in rest.split(";") if s.strip()]
+            why_items.extend(subs if subs else [rest])
+        elif upper.startswith(_CONCLUSION_PROOF_PREFIX) or upper.startswith("CHỨNG MINH"):
+            continue
+        elif upper.startswith("CẢNH BÁO ẨN:") or upper.startswith("CẢNH BÁO RỦI RO:"):
+            rest = line[line.index(":") + 1 :].strip()
+            subs = [s.strip() for s in rest.split(";") if s.strip()]
+            warning_items.extend(subs if subs else [rest])
+        elif upper.startswith("GIỚI HẠN DỮ LIỆU:") or upper.startswith("GIỚI HẠN:"):
+            rest = line[line.index(":") + 1 :].strip()
+            subs = [s.strip() for s in rest.split(";") if s.strip()]
+            limitation_items.extend(subs if subs else [rest])
+        elif (" — " in line and ("giao dịch " in line or "lệnh đã chốt" in line)) or (
+            "Điểm rủi ro " in line and "/100" in line
+        ) or ("độ tin cậy" in line.lower()):
+            overview_parts.append(line)
+        else:
+            other_lines.append(line)
+
+    blocks: List[str] = []
+
+    # 1. Prominent Verdict Box
+    if verdict_info:
+        headline, detail = verdict_info
+        is_veto = "VETO" in headline.upper()
+        # Bộ nhãn MỘT TRỤC cũ ("NGUY HIỂM"/"RỦI RO CAO") đã bị thay bằng sáu
+        # nhãn HAI TRỤC từ lâu, nhưng phép dò này không được cập nhật theo --
+        # nên kiểu hiển thị "nguy hiểm" (viền đỏ) chưa từng kích hoạt lần nào
+        # kể từ đó, kể cả với bot rủi ro cao nhất. Dò theo trục sụt vốn của
+        # chính bộ nhãn đang dùng, cộng nhánh rủi ro bị che.
+        upper = headline.upper()
+        is_danger = "DRAWDOWN: HIGH" in upper or "HIDDEN RISK" in upper
+        verdict_cls = (
+            "danger"
+            if (is_veto or is_danger)
+            else ("warning" if "CẢNH BÁO" in headline.upper() else "success")
+        )
+
+        detail_html = f'<p class="verdict-detail">{_esc(detail)}</p>' if detail else ""
+        blocks.append(
+            f'<div class="conclusion-verdict-box tone-{verdict_cls}">'
+            f'<div class="verdict-header-line">'
+            f'<span class="verdict-chip">{_esc(headline)}</span>'
+            f'</div>'
+            f'{detail_html}'
+            f'</div>'
+        )
+
+    # 2. Hero Scores & System Theory Description (Quantitative Methodology Basis)
+    scores_and_basis_html = _render_hero_scores(result)
+    if scores_and_basis_html:
+        blocks.append(f'<div class="conclusion-scores-wrapper">{scores_and_basis_html}</div>')
+
+    # 3. Key Metrics Overview
+    if overview_parts:
+        rendered_ov = []
+        for ol in overview_parts:
+            line_str = ol.strip()
+            if ("Điểm rủi ro " in line_str and "/100" in line_str) or ("độ tin cậy" in line_str.lower()):
+                rendered_ov.append(f'<div class="conclusion-metric-row">{_esc(line_str)}</div>')
+            elif " — " in line_str and ("giao dịch " in line_str or "lệnh đã chốt" in line_str):
+                rendered_ov.append(f'<div class="conclusion-identity-row">{_esc(line_str)}</div>')
+            else:
+                rendered_ov.append(f'<p class="conclusion-summary-text">{_esc(line_str)}</p>')
+        blocks.append('<div class="conclusion-overview-block">' + "".join(rendered_ov) + "</div>")
+
+    # 3. Why / Causes
+    if why_items:
+        items_html = "".join(f"<li>{_esc(w)}</li>" for w in why_items)
+        blocks.append(
+            '<div class="conclusion-section-block">'
+            '<div class="conclusion-sub-title">Why</div>'
+            f'<ul class="findings">{items_html}</ul>'
+            '</div>'
+        )
+
+    # 4. Proof / Quantitative Evidence
+    if proof_items:
+        items_html = "".join(f"<li>{_esc(p)}</li>" for p in proof_items)
+        blocks.append(
+            '<div class="conclusion-section-block">'
+            '<div class="conclusion-sub-title">Quantitative evidence</div>'
+            f'<ul class="findings">{items_html}</ul>'
+            '</div>'
+        )
+
+    # 5. Hidden Warnings
+    if warning_items:
+        items_html = "".join(f"<li>{_esc(w)}</li>" for w in warning_items)
+        blocks.append(
+            '<div class="notice notice-danger">'
+            '<strong>Hidden risk warning:</strong>'
+            f'<ul class="findings">{items_html}</ul>'
+            '</div>'
+        )
+
+    # 6. Other lines
+    for ol in other_lines:
+        blocks.append(f'<p class="conclusion-extra-line">{_esc(ol)}</p>')
+
+    # 7. Limitations & Missing Data Notes
+    limitation_html = ""
+    if limitation_items:
+        badge_text = f"{len(limitation_items)} notes"
+        items_html = "".join(f"<li>{_esc(it)}</li>" for it in limitation_items)
+        limitation_html = (
+            '<div class="conclusion-limitation-accordion">'
+            '<input type="checkbox" id="toggle-limitations" class="limitation-toggle-checkbox">'
+            '<label for="toggle-limitations" class="limitation-accordion-summary">'
+            f'<strong class="limitation-title">Notes on missing data &amp; testing scope</strong> '
+            f'<span class="badge badge-info">{badge_text}</span>'
+            '<span class="limitation-toggle-hint">View details ▾</span>'
+            '</label>'
+            '<div class="limitation-accordion-body">'
+            f'<ul class="findings">{items_html}</ul>'
+            '</div>'
+            '</div>'
+        )
+
+    body = '<div class="conclusion-body-wrap">' + "".join(blocks) + limitation_html + "</div>"
+    return _section("Conclusion and recommendation", body, tone="primary", anchor="ket-luan")
+
+
+# --------------------------------------------------------------------------- #
+# Việc 2/3 -- "thị trường được chấm chỉ là một phần hoạt động của bot".
+# `bot.identity.symbol_exposure_share`/`observed_symbols`
+# (Agent/backend/mcp/service.py::_resolve_identity_market) đã được tính sẵn
+# từ lâu nhưng chưa từng hiển thị ở đâu: một bot tập trung 95% vào đúng thị
+# trường được chấm và một bot chỉ giao dịch thị trường đó 30% thời gian giá
+# trị trông giống hệt nhau trên mọi biểu đồ khác của trang này. Đặt NGAY SAU
+# phần kết luận (không phải trong <details>) theo đúng yêu cầu: đây là bối
+# cảnh quyết định các chiều phụ thuộc thị trường (market_alignment,
+# liquidity_execution, leverage_exposure) có đại diện cho toàn bộ hoạt động
+# bot hay chỉ một phần của nó.
+# --------------------------------------------------------------------------- #
+
+
+def _render_market_coverage(result: Dict[str, Any]) -> str:
+    """Ẩn hoàn toàn khi `evidence.primary_share_pct` vắng mặt -- file
+    assessment.json ghi TRƯỚC Việc 2 (hoặc một FULL result mà bot không đo
+    được exposure nào) đơn giản là không có mục này, không suy diễn, không
+    báo lỗi.
+
+    Phủ sóng theo mục tiêu (xem Agent/backend/market/coverage.py) thêm
+    `evidence.resolved_markets`/`unresolved_markets`/`coverage_achieved_pct`
+    -- khi có mặt (kết quả tới từ pipeline/cohort đã giải NHIỀU thị trường),
+    headline và ngưỡng cảnh báo dùng ĐÚNG con số phủ sóng THẬT này thay vì
+    `primary_share_pct` (chỉ riêng mã chính) như trước, per yêu cầu "đừng để
+    nó nói con số cũ". Một kết quả CŨ (trước đợt này, hoặc chỉ giải được
+    đúng thị trường CHÍNH) không có `resolved_markets` -- lùi nguyên về
+    hành vi CŨ (headline/ngưỡng 60% theo `primary_share_pct`) để không nói
+    sai lệch gì so với những gì thật sự đo được cho kết quả đó.
+    """
+    evidence = result.get("evidence")
+    evidence = evidence if isinstance(evidence, dict) else {}
+    primary_share_pct = evidence.get("primary_share_pct")
+    if not _is_finite_number(primary_share_pct):
         return ""
-    body = "".join(paragraphs)
-    return _section("Kết luận và khuyến nghị", body, anchor="ket-luan")
+
+    traded_symbol = evidence.get("traded_symbol") or result.get("code") or "?"
+    observed_symbols = evidence.get("observed_symbols")
+    observed_symbols = observed_symbols if isinstance(observed_symbols, list) else []
+    share_map = evidence.get("symbol_exposure_share")
+    share_map = share_map if isinstance(share_map, dict) else {}
+
+    _raw_resolved = evidence.get("resolved_markets")
+    resolved_markets = (
+        [m for m in _raw_resolved if isinstance(m, dict) and m.get("symbol")]
+        if isinstance(_raw_resolved, list)
+        else []
+    )
+    _raw_unresolved = evidence.get("unresolved_markets")
+    unresolved_markets = (
+        [m for m in _raw_unresolved if isinstance(m, dict) and m.get("symbol")]
+        if isinstance(_raw_unresolved, list)
+        else []
+    )
+    coverage_achieved_pct = evidence.get("coverage_achieved_pct")
+    has_full_coverage_data = bool(resolved_markets) and _is_finite_number(
+        coverage_achieved_pct
+    )
+    headline_pct = (
+        coverage_achieved_pct if has_full_coverage_data else primary_share_pct
+    )
+
+    if has_full_coverage_data:
+        symbols_text = ", ".join(
+            f"{_esc(m.get('symbol'))} ({_pct(m.get('share_pct'), 0)})"
+            for m in resolved_markets
+        )
+        parts = [
+            f"<p><strong>Resolved {len(resolved_markets)} markets, covering "
+            f"{_pct(headline_pct, 0)} of the bot's trading value:</strong> "
+            f"{symbols_text}.</p>"
+        ]
+    else:
+        parts = [
+            "<p><strong>The market being scored "
+            f"({_esc(traded_symbol)}) accounts for {_pct(headline_pct, 0)} of the "
+            "bot's trading value.</strong></p>"
+        ]
+
+        others = [s for s in observed_symbols if s != traded_symbol]
+        other_cells = [
+            f"{_esc(s)} ({_pct(share_map[s] * 100.0, 0)})"
+            for s in others
+            if _is_finite_number(share_map.get(s))
+        ]
+        if other_cells:
+            parts.append(
+                "<p>The bot also trades: " + ", ".join(other_cells) + " -- these "
+                "symbols are NOT included in the market assessment above.</p>"
+            )
+
+        secondary = evidence.get("secondary_market")
+        if isinstance(secondary, dict) and secondary.get("symbol"):
+            trend = TREND_VI.get(secondary.get("trend"), "unclear")
+            vol = VOL_VI.get(secondary.get("volatility"), "unclear")
+            liq = LIQ_VI.get(secondary.get("liquidity_tier"), "unclear")
+            secondary_share = secondary.get("share_pct")
+            secondary_share_text = (
+                _pct(secondary_share, 0) if _is_finite_number(secondary_share) else "—"
+            )
+            parts.append(
+                "<p>Second-largest market by trading share: "
+                f"<strong>{_esc(secondary.get('symbol'))}</strong> "
+                f"({secondary_share_text}) -- {trend}, {vol}, {liq}.</p>"
+            )
+
+    if unresolved_markets:
+        missing_text = ", ".join(
+            f"{_esc(m.get('symbol'))} ({_pct(m.get('share_pct'), 0)})"
+            for m in unresolved_markets
+        )
+        parts.append(
+            "<p>Market data could not be measured for: "
+            + missing_text
+            + " -- NOT inferred from another market.</p>"
+        )
+
+    if has_full_coverage_data:
+        if headline_pct < MARKET_COVERAGE_TARGET_PCT:
+            parts.append(
+                '<div class="notice notice-warning">'
+                f"WARNING: only {_pct(headline_pct, 0)} of the bot's trading value "
+                f"has been covered so far (target {MARKET_COVERAGE_TARGET_PCT:.0f}%) -- "
+                "the <strong>market_alignment</strong>, <strong>liquidity_execution</strong> "
+                "and <strong>leverage_exposure</strong> dimensions are ONLY scored on the "
+                "primary market; the rest of the bot's activity has NOT been reviewed.</div>"
+            )
+    elif primary_share_pct < 60:
+        parts.append(
+            '<div class="notice notice-warning">'
+            f"WARNING: the market being scored accounts for only {_pct(primary_share_pct, 0)} "
+            "of the bot's trading value -- the <strong>market_alignment</strong>, "
+            "<strong>liquidity_execution</strong> and <strong>leverage_exposure</strong> "
+            "dimensions are ONLY scored on this part; the rest of the bot's activity "
+            "has NOT been reviewed.</div>"
+        )
+
+    return _section("Market being scored", "".join(parts), anchor="thi-truong")
+
+
+# --------------------------------------------------------------------------- #
+# Section ① -- "Cách bot này chơi": Việc 1/2's own explicit fix. The QC
+# engine already reconstructs how a bot trades from its closed ledger
+# (`Agent/backend/mcp/analytics/strategy/profile.py` /
+# `.../behavior/detector.py`) and uses it to SCORE two dimensions
+# (strategy_drift, behavioral_risk) -- but that observation never reached the
+# report itself, leaving a reader to reassemble "what does this bot actually
+# do" by hand out of ten unrelated dimension bars. This section is placed
+# right after the conclusion (project owner's own explicit placement), in
+# plain Vietnamese prose (never a bare enum), so everything below it reads
+# as evidence FOR this section rather than ten independent facts.
+# --------------------------------------------------------------------------- #
+
+
+def _phase_row_sort_key(row: Dict[str, Any]) -> float:
+    share = row.get("profit_share_pct")
+    return share if isinstance(share, (int, float)) and math.isfinite(share) else -1e18
+
+
+def _render_phase_breakdown_table(strategy: Dict[str, Any]) -> str:
+    """The pha × cách-đánh cross-tab (coordinator's own explicit addendum):
+    one row per market phase the bot was ever measured in, sorted by profit
+    contribution descending (the phase that made the money leads), each row
+    tagged with its own three-tier confidence (`_phase_confidence_vi`) so a
+    1-2 trade phase can never read as equally solid evidence as a 15-trade
+    one. Returns "" (never a broken empty table) when there is no phase
+    breakdown to show at all.
+    """
+    rows = strategy.get("phase_breakdown")
+    if not isinstance(rows, list) or not rows:
+        return ""
+    ordered = sorted(
+        (r for r in rows if isinstance(r, dict)), key=_phase_row_sort_key, reverse=True
+    )
+    if not ordered:
+        return ""
+    table_rows = []
+    for row in ordered:
+        trades = row.get("trades")
+        confidence = _phase_confidence_vi(trades)
+        phase_cell = _esc(_phase_label_vi(row.get("phase")))
+        if confidence == PHASE_CONFIDENCE_INSUFFICIENT_VI:
+            phase_cell += " " + _badge(
+                f"{PHASE_CONFIDENCE_INSUFFICIENT_VI} (not representative)", "#dc2626"
+            )
+        elif confidence == PHASE_CONFIDENCE_THIN_VI:
+            phase_cell += " " + _badge(
+                f"{PHASE_CONFIDENCE_THIN_VI} (reference only)", "#9ca3af"
+            )
+        table_rows.append(
+            [
+                phase_cell,
+                _esc(_num(trades, 0)),
+                _esc(_pct(row.get("win_rate"), 0)),
+                _esc(_money(row.get("total_pnl"))),
+                _esc(_pct(row.get("long_share_pct"), 0)) + " long",
+                _esc(_num(row.get("average_leverage"), 1)) + "x",
+                _esc(_num(row.get("median_hold_minutes"), 0)) + " min",
+                _esc(_pct(row.get("profit_share_pct"), 0)),
+            ]
+        )
+    coverage = strategy.get("phase_coverage_pct")
+    coverage_html = (
+        f'<p class="phase-coverage">Share of trades that could be assigned to a '
+        f"specific market phase: <strong>{_esc(_pct(coverage, 1))}</strong>.</p>"
+    )
+    coverage_warning = ""
+    if isinstance(coverage, (int, float)) and coverage < PHASE_COVERAGE_WARN_PCT:
+        coverage_warning = (
+            '<div class="notice notice-warning">Most trades (over '
+            f"{_esc(_pct(100.0 - coverage, 0))}) could not be assigned to a specific "
+            "market phase -- reason: some of the symbols this bot trades have no "
+            "reference candle series to determine the phase from (not a timing "
+            "mismatch or a phase-transition edge case) -- the table below is a "
+            "HINT, NOT a firm conclusion about the bot's behaviour.</div>"
+        )
+    untested = strategy.get("untested_phases")
+    untested_html = ""
+    if isinstance(untested, list) and untested:
+        names = ", ".join(_esc(_phase_label_vi(p)) for p in untested)
+        untested_html = (
+            f'<p class="phase-untested">Never traded through market phase: '
+            f"<strong>{names}</strong> -- nobody yet knows how the bot handles this phase.</p>"
+        )
+    table_html = _table(
+        [
+            "Market phase",
+            "Trades",
+            "Win rate",
+            "PnL",
+            "Bias in this phase",
+            "Avg leverage",
+            "Hold time (median)",
+            "Share of profit",
+        ],
+        table_rows,
+    )
+    return coverage_html + coverage_warning + table_html + untested_html
+
+
+def _render_strategy_section(result: Dict[str, Any]) -> str:
+    evidence = result.get("evidence")
+    if not isinstance(evidence, dict):
+        return ""
+    strategy = evidence.get("strategy")
+    behavioral = evidence.get("behavioral")
+    if not isinstance(strategy, dict) or not isinstance(behavioral, dict):
+        return ""
+
+    paragraphs: List[str] = []
+
+    profile_label = OBSERVED_PROFILE_LABEL_VI.get(
+        strategy.get("observed_profile"), "not yet determined"
+    )
+    bias_label = DIRECTIONAL_BIAS_LABEL_VI.get(
+        strategy.get("directional_bias"), "not enough evidence to determine"
+    )
+    entry_style = strategy.get("entry_style")
+    style_label = (
+        "not enough evidence to determine"
+        if entry_style == "UNKNOWN" or entry_style is None
+        else ENTRY_STYLE_LABEL_VI.get(entry_style, "not enough evidence to determine")
+    )
+    paragraphs.append(
+        "<p><strong>Observed profile</strong> from closed trades: "
+        f"{_esc(profile_label)}. <strong>Bias:</strong> {_esc(bias_label)}. "
+        f"<strong>Entry style:</strong> {_esc(style_label)}.</p>"
+    )
+
+    phase_bits: List[str] = []
+    best_phase = strategy.get("best_phase")
+    worst_phase = strategy.get("worst_phase")
+    if best_phase:
+        phase_bits.append(f"performs best in the {_esc(_phase_label_vi(best_phase))} phase")
+    if worst_phase:
+        phase_bits.append(f"performs worst in the {_esc(_phase_label_vi(worst_phase))} phase")
+    if not strategy.get("tested_in_downtrend"):
+        phase_bits.append("no evidence it has ever traded through a downtrend")
+    if phase_bits:
+        paragraphs.append(
+            "<p><strong>By market phase:</strong> "
+            + "; ".join(phase_bits)
+            + ".</p>"
+        )
+
+    flags = []
+    if behavioral.get("martingale_escalation_detected"):
+        flags.append("martingale-style stacking (raising size after a losing trade)")
+    if behavioral.get("averaging_down_detected"):
+        flags.append("averaging down by adding to a losing position in the same direction")
+    if behavioral.get("leverage_escalation_detected"):
+        flags.append("raising leverage after a losing trade")
+    if behavioral.get("reentry_loop_detected"):
+        flags.append("repeatedly re-entering in a loop")
+    tier_label = BEHAVIORAL_TIER_LABEL_VI.get(
+        behavioral.get("behavioral_risk_tier"), "not measured"
+    )
+    if flags:
+        behavior_html = (
+            "<p><strong>Behavioural signals:</strong> shows signs of "
+            + "; ".join(flags)
+            + f". Raw behavioural signal from the trade ledger: <strong>{_esc(tier_label)}</strong> "
+            "-- this is the level of the OBSERVED SIGNAL, not the scored value "
+            "of the \u201cTrading behaviour\u201d dimension in the scores section.</p>"
+        )
+    else:
+        behavior_html = (
+            "<p><strong>Behavioural signals:</strong> no sign of averaging down, "
+            "martingale-style stacking, or raising leverage after a loss found in "
+            f"the closed trade data. Raw behavioural signal from the trade ledger: <strong>{_esc(tier_label)}</strong> "
+            "-- this is the level of the OBSERVED SIGNAL, not the scored value "
+            "of the \u201cTrading behaviour\u201d dimension in the scores section.</p>"
+        )
+    paragraphs.append(behavior_html)
+
+    table_block = _render_phase_breakdown_table(strategy)
+
+    theory = _theory(
+        "This is a STRATEGY/BEHAVIOUR profile inferred from the bot's own closed "
+        "trades -- NOT self-declared by the bot, and not a scored metric. The "
+        "per-phase table (when present) is sorted by profit contribution "
+        "descending, so the first row is the phase that made the most money. "
+        "Each row carries its own confidence label: "
+        f'"{PHASE_CONFIDENCE_ENOUGH_VI}" (10 trades or more) is enough to draw a '
+        f'pattern from, "{PHASE_CONFIDENCE_THIN_VI}" (3-9 trades) should only be '
+        f'used as a reference, and "{PHASE_CONFIDENCE_INSUFFICIENT_VI}" (fewer '
+        "than 3 trades) means that row is not representative of anything -- read "
+        'it as a hint, not a validated pattern. When the profile says "not enough '
+        'evidence" or lists a phase as "never traded", that is the system '
+        "refusing to guess, not a measurement gone missing.",
+        "Agent/backend/mcp/analytics/strategy/profile.py (classifies bias, entry "
+        "style, and performance across the uptrend/downtrend/sideways \u00d7 "
+        "calm/highly-volatile market phases) and "
+        "Agent/backend/mcp/analytics/behavior/detector.py (martingale, averaging "
+        "down, raising leverage after a loss, repeated re-entry loops) -- these "
+        "two modules are ALSO the evidence behind the "
+        '"Strategy durability across phases" and "Trading behaviour" dimension '
+        "scores further below.",
+    )
+
+    body = "".join(paragraphs) + table_block + theory
+    return _section("How this bot trades", body, anchor="cach-choi")
+
+
+# --------------------------------------------------------------------------- #
+# Section 2b -- narrative ("nhận định chuyên môn"): an OPTIONAL, LLM-authored
+# paragraph built from the numbers already shown above (see
+# Agent/backend/qc/reporting/narrative.py's own module docstring for the
+# full design -- feature flag, three validation gates, fail-closed fallback).
+# Placed right after the conclusion per the task this was written for.
+#
+# Renders NOTHING when `result["narrative"]` is `None`/blank (feature off,
+# or -- for a LIMITED/NOT_FOUND result -- simply not applicable), so this
+# never adds an empty card to the page and never changes the page's
+# `<svg>`/`<details>` counts on its own: it is one more plain `<section>`
+# only when there is a narrative string to show, no chart, no collapsible
+# block.
+# --------------------------------------------------------------------------- #
+
+
+def _is_narrative_pending(text: str) -> bool:
+    t = text.lower()
+    return (
+        "15-45" in t
+        or "being drafted by the language model" in t
+        or "written assessment for this bot" in t
+        or "is being drafted" in t
+        or "language model in the background" in t
+        or "revisit the report_url" in t
+        or "detail_url" in t
+    )
+
+
+def _synthesize_3rd_person_narrative(result: Dict[str, Any]) -> str:
+    """Xây dựng nhận định chuyên môn từ góc nhìn thứ ba độc lập (3rd-person perspective)
+    dựa trên toàn bộ kết quả phân tích định lượng đã đo lường của bot."""
+    code = result.get("code") or "—"
+    name = result.get("name") or result.get("nick_name") or code
+    symbol = result.get("traded_symbol") or "the primary market"
+    risk = result.get("risk")
+    verdict = result.get("verdict") or "UNDETERMINED"
+    evidence = result.get("evidence") if isinstance(result.get("evidence"), dict) else {}
+    score_bd = evidence.get("score_breakdown") or {}
+    veto_reasons = score_bd.get("veto_reasons") or []
+
+    trade_count = result.get("trade_count")
+    win_rate = result.get("win_rate")
+    pf = result.get("profit_factor")
+    mdd = result.get("max_drawdown")
+
+    p1 = (
+        f"From an independent quantitative review, bot <strong>{_esc(str(name))}</strong> "
+        f"(code <code>{_esc(str(code))}</code>), trading the <strong>{_esc(str(symbol))}</strong> pair, "
+        f"is rated: <strong>{_esc(str(verdict))}</strong>."
+    )
+    if risk is not None:
+        p1 += f" Its overall risk score is <strong>{_num(risk, 0)}/100</strong>"
+        if veto_reasons:
+            reasons_str = "; ".join(_esc(str(r)) for r in veto_reasons)
+            p1 += f", triggered by the safety veto mechanism: <em>{reasons_str}</em>."
+        else:
+            p1 += ", based on the weighted average of the measured risk dimensions."
+
+    p2_parts = []
+    if mdd is not None:
+        p2_parts.append(f"the max drawdown recorded is {_pct(mdd, 1)}")
+    if win_rate is not None and trade_count is not None:
+        p2_parts.append(f"the win rate reached {_pct(win_rate, 1)} across {trade_count} closed trades")
+    if pf is not None:
+        p2_parts.append(f"the profit factor reached {_num(pf, 2)}")
+
+    p2 = ""
+    if p2_parts:
+        p2 = "On the performance and capital-safety profile, the system recorded " + ", ".join(p2_parts) + "."
+
+    behavioral = evidence.get("behavioral") or {}
+    b_flags = []
+    if behavioral.get("martingale_escalation_detected"):
+        b_flags.append("adding size after a losing trade (martingale)")
+    if behavioral.get("averaging_down_detected"):
+        b_flags.append("averaging down by adding more positions in the same direction")
+    if behavioral.get("leverage_escalation_detected"):
+        b_flags.append("raising leverage while the account is underwater")
+
+    if b_flags:
+        p2 += f" Notably, the algorithm detected unusual behaviour: {', '.join(b_flags)}, creating a risk of a sudden drawdown."
+
+    if "VETO" in str(verdict).upper() or (risk is not None and risk >= 70):
+        p3 = (
+            "Independent recommendation: This bot's risk level exceeds an acceptable "
+            "safety threshold. Investors should not allocate capital to this strategy, "
+            "in order to limit the risk of liquidation or a severe account drawdown."
+        )
+    elif "WARNING" in str(verdict).upper() or (risk is not None and risk >= 50):
+        p3 = (
+            "Independent recommendation: This bot shows profit potential but carries "
+            "meaningful market risk. Anyone copying its trades should allocate only a "
+            "small share of capital and set a strict account stop-loss."
+        )
+    else:
+        p3 = (
+            "Independent recommendation: This bot has maintained relatively stable "
+            "capital-management discipline over the data reviewed. Investors should "
+            "keep monitoring actual slippage and liquidity depth closely when copying "
+            "its trades."
+        )
+
+    paragraphs = [p1]
+    if p2:
+        paragraphs.append(p2)
+    paragraphs.append(p3)
+    return "".join(f"<p class='narrative-paragraph'>{p}</p>" for p in paragraphs)
+
+
+def _render_narrative(result: Dict[str, Any]) -> str:
+    text = result.get("narrative")
+    if not isinstance(text, str) or not text.strip():
+        return ""
+
+    is_pending = _is_narrative_pending(text)
+    bullets: List[str] = []
+
+    if is_pending:
+        # Khi đang chờ LLM nền, tuyệt đối không hiện câu note chờ vô nghĩa.
+        # Thay vào đó, tổng hợp ngay góc nhìn thứ ba khách quan từ dữ liệu định lượng đã đo được!
+        prose_html = _synthesize_3rd_person_narrative(result)
+    else:
+        lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
+        prose_lines: List[str] = []
+        for l in lines:
+            if l.startswith(("- ", "• ", "* ", "1. ", "2. ", "3. ", "4. ", "5. ")):
+                cleaned = re.sub(r"^([-\*•]|\d+\.)\s*", "", l)
+                bullets.append(cleaned)
+            else:
+                prose_lines.append(l)
+
+        if not bullets and prose_lines:
+            full_prose = " ".join(prose_lines)
+            sentences = [
+                s.strip()
+                for s in re.split(r"(?<=[.!?])\s+", full_prose)
+                if len(s.strip()) > 15
+            ]
+            if len(sentences) >= 2:
+                summary_text = sentences[0]
+                bullets = sentences[1:]
+                prose_html = f"<p class='narrative-paragraph'>{_esc(summary_text)}</p>"
+            else:
+                prose_html = f"<p class='narrative-paragraph'>{_esc(full_prose)}</p>"
+        else:
+            prose_html = "".join(
+                f"<p class='narrative-paragraph'>{_esc(p)}</p>" for p in prose_lines
+            )
+
+    keypoints_html = ""
+    if bullets:
+        items = "".join(f"<li>{_esc(b)}</li>" for b in bullets)
+        keypoints_html = (
+            '<div class="conclusion-section-block">'
+            '<div class="conclusion-sub-title">Key points</div>'
+            f'<ul class="findings">{items}</ul>'
+            '</div>'
+        )
+
+    body = (
+        '<div class="narrative-body-wrap">'
+        '<div class="narrative-meta-bar">'
+        '<span class="badge badge-info">INDEPENDENT VIEW</span>'
+        '<span class="meta-desc">An independent third-person view synthesised by a language model from the quantitative analysis results</span>'
+        '</div>'
+        f'<div class="narrative-prose-content">{prose_html}</div>'
+        f'{keypoints_html}'
+        '</div>'
+    )
+    return _section("Expert assessment", body, tone="primary", anchor="nhan-dinh")
 
 
 # --------------------------------------------------------------------------- #
@@ -1136,23 +2578,402 @@ def _render_dimensions_section(result: Dict[str, Any]) -> str:
             return ""
 
     theory = _theory(
-        "Mỗi thanh là một chiều rủi ro độc lập, thang 0-100, <strong>càng cao càng "
-        'rủi ro</strong> (ngược với thang "điểm chất lượng"). Thanh xám gạch là '
-        "chiều <strong>chưa đo được</strong> — không phải rủi ro thấp, chỉ là "
-        "không có bằng chứng, nên bị tính trung tính chứ không được lợi. Điểm rủi "
-        "ro tổng ở đầu trang thường KHÔNG phải trung bình cộng đơn giản của các "
-        "thanh này: nó là trung bình có trọng số theo mức nghiêm trọng của mỗi "
-        "chiều, và có thể bị ghi đè hoàn toàn bởi một sàn veto hoặc quy tắc khẩn "
-        "cấp nếu một chiều đủ tệ — xem cảnh báo ở đầu trang nếu điều đó đang xảy ra.",
-        "10 chiều và trọng số của chúng đến từ bộ đánh giá QC nội bộ "
-        "(<code>Agent/backend/qc/evaluator/lenses/*</code>), mỗi lens tự tính điểm "
-        "0-100 từ bằng chứng riêng của nó (hiệu suất đã chốt, mô phỏng Monte Carlo, "
-        "kịch bản stress, đối chiếu sổ sách...). Điểm tổng là trung bình có trọng "
-        "số qua <code>Agent/backend/qc/scoring/fusion.py</code>, có thể bị ghi đè "
-        "bởi veto khi một lỗi đủ nghiêm trọng để điểm trung bình đẹp không được "
-        "phép che nó đi.",
+        "Each bar is one independent risk dimension, scaled 0-100, where "
+        '<strong>higher means riskier</strong> (the opposite of the "quality score" '
+        "scale). A hatched grey bar is a dimension that is <strong>not yet "
+        "measured</strong> -- not a low risk, just no evidence, so it is treated "
+        "as neutral rather than given the benefit of the doubt. The overall risk "
+        "score at the top of the page is usually NOT a simple average of these "
+        "bars: it is a weighted average based on the severity of each dimension, "
+        "and can be overridden entirely by an exchange veto or an emergency rule "
+        "if one dimension is bad enough -- see the notice at the top of the page "
+        "if that is happening here.",
+        "The 10 dimensions and their weights come from the internal QC evaluator "
+        "(<code>Agent/backend/qc/evaluator/lenses/*</code>); each lens computes "
+        "its own 0-100 score from its own evidence (closed-trade performance, "
+        "Monte Carlo simulation, stress scenarios, ledger reconciliation, ...). "
+        "The overall score is a weighted average via "
+        "<code>Agent/backend/qc/scoring/fusion.py</code>, which can be overridden "
+        "by a veto when one failure is severe enough that a good-looking average "
+        "must not be allowed to hide it.",
     )
-    return _section("Điểm từng chiều rủi ro", body + theory, anchor="diem-chieu")
+    # Khối chú thích điểm số nhúng VÀO TRONG mục này, đúng như chú thích
+    # ngay dưới `_render_score_basis` đã đặt ra -- và đúng chỗ mà dấu `*`
+    # trên ba ô điểm ở đầu trang trỏ tới. Dòng gọi này trước đây thiếu, nên
+    # hàm đó đứng mồ côi: toàn bộ phần giải thích cách ra điểm (trọng số và
+    # độ tin cậy từng chiều, câu hợp nhất, và tuyên bố kiểm định
+    # out-of-sample kèm những gì nó KHÔNG chứng minh được) chưa từng hiện
+    # ra trang nào, và ba dấu `*` ở đầu trang trỏ vào chỗ trống.
+    return _section(
+        "Score by risk dimension",
+        body + _render_score_basis(result) + theory,
+        tone="primary",
+        anchor="diem-chieu",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# "CHÚ THÍCH GIẢI THÍCH ĐIỂM SỐ" -- khối mà dấu `*` bấm được trên 3 ô điểm
+# số hero (`_render_header`) dẫn tới. Nhúng VÀO TRONG mục "Điểm từng chiều
+# rủi ro" sẵn có (không phải một `<section>` mới) để giữ đúng bất biến "cùng
+# tập id mục" giữa trang LIMITED và trang đầy đủ -- cùng lý do
+# `_render_limited_measured_evidence` đã nêu. Dữ liệu đọc qua
+# `Agent/backend/web/score_basis.py` (module đó CHỈ tính/gom, không dựng
+# HTML); mọi escape/format ở đây.
+# --------------------------------------------------------------------------- #
+
+
+def _percentile_findings_html(components: List[Dict[str, Any]]) -> str:
+    """Trích đúng câu "Phân vị mô phỏng: ..." (đã có sẵn tham số/giá trị của
+    bot/cỡ quần thể/trung vị quần thể trong chính câu văn, do
+    `Agent/backend/analysis/limited.py` viết ra khi chấm bằng phân vị) từ
+    `findings` của từng thành phần, thay vì tính lại. `""` khi không thành
+    phần nào chấm bằng phân vị (quần thể chưa đủ 10 bot, xem
+    `Agent/backend/analysis/population_reference.py`).
+    """
+    rows = []
+    for c in components:
+        label = c.get("label") or c.get("name") or "—"
+        for finding in c.get("findings") or []:
+            if "Percentile" in finding or "percentile" in finding:
+                rows.append(f"<li><strong>{_esc(label)}:</strong> {_esc(finding)}</li>")
+    if not rows:
+        return ""
+    return (
+        "<p>The dimensions below are scored using the <strong>percentile rank "
+        "within the population of scored bots</strong> (not a fixed threshold -- see "
+        "<code>Agent/backend/analysis/population_reference.py</code>):</p>"
+        "<ul class='findings'>" + "".join(rows) + "</ul>"
+    )
+
+
+def _render_full_score_basis(result: Dict[str, Any]) -> str:
+    evidence = result.get("evidence") or {}
+    dims = score_basis.full_risk_dimensions(evidence)
+    if not dims:
+        return ""
+    fusion = score_basis.full_fusion_summary(evidence)
+
+    dim_rows = []
+    for d in dims:
+        label = DIMENSION_LABEL_VI.get(d["name"], str(d["name"]))
+        if d["status"] == "AVAILABLE" and d["score"] is not None:
+            weight_text = (
+                f"weight {d['weight']:.1f}"
+                if d["weight"] is not None
+                else "weight not present in the saved record"
+            )
+            conf_text = (
+                f", confidence {d['confidence'] * 100:.0f}%"
+                if d["confidence"] is not None
+                else ""
+            )
+            dim_rows.append(
+                f"<li><strong>{_esc(label)}</strong>: {_num(d['score'], 0)}/100 "
+                f"({weight_text}{conf_text})</li>"
+            )
+        else:
+            reason = d.get("reason")
+            reason_text = f" \u2014 {_esc(str(reason))}" if reason else ""
+            dim_rows.append(
+                f"<li><strong>{_esc(label)}</strong>: not measured "
+                f"({_esc(str(d['status'] or 'UNKNOWN'))}){reason_text}</li>"
+            )
+
+    if fusion["has_rich_breakdown"] and fusion["total_weight"]:
+        n = fusion["applicable_dimensions"]
+        # KHÔNG gọi con số này là "measured": `fusion.py` đặt
+        # `applicable_dimensions = len(contributions)`, tức MỌI chiều trừ
+        # loại không áp dụng -- chiều chưa đo được vẫn nằm trong đó và vẫn
+        # ăn trọng số của nó, với điểm trung tính 50. Gọi nhầm là "đo được"
+        # thì mâu thuẫn với chính đoạn diễn giải ngay trên biểu đồ ("không
+        # phải rủi ro thấp, chỉ là chưa có bằng chứng"), và làm cỡ bằng
+        # chứng trông lớn hơn thực tế.
+        unknown_n = sum(1 for d in dims if str(d.get("status") or "").upper() != "AVAILABLE")
+        unknown_clause = (
+            f", of which {unknown_n} could not be measured and "
+            f"{'enters' if unknown_n == 1 else 'enter'} as a neutral 50 rather "
+            "than being dropped"
+            if unknown_n
+            else ""
+        )
+        fusion_sentence = (
+            f"Weighted average of "
+            f"{n if n is not None else len(dims)} dimensions that count toward the "
+            f"score (total weight {fusion['total_weight']:.1f}{unknown_clause}): "
+            + (
+                f"{fusion['weighted_average']:.1f}/100."
+                if fusion["weighted_average"] is not None
+                else "could not be computed."
+            )
+        )
+    elif fusion["weighted_average"] is not None:
+        fusion_sentence = (
+            "Weighted average of the dimensions measured above (per-dimension "
+            "weight/confidence detail is not present in this bot's saved record): "
+            f"{fusion['weighted_average']:.1f}/100."
+        )
+    else:
+        fusion_sentence = (
+            "This bot's saved record does not carry enough data to restate the "
+            "weighted average -- only the per-dimension scores/status above remain."
+        )
+
+    if fusion["decided_by"] and fusion["decided_by"] != "WEIGHTED_AVERAGE":
+        kind = (
+            "emergency rule (EMERGENCY_OVERRIDE)"
+            if fusion["decided_by"] == "EMERGENCY_OVERRIDE"
+            else "exchange veto (VETO_FLOOR)"
+        )
+        final = fusion["final_score"]
+        final_text = (
+            f"{final:.0f}/100"
+            if final is not None
+            else f"{_num(result.get('risk'), 0)}/100"
+        )
+        reasons = "; ".join(_esc(r) for r in fusion["veto_reasons"])
+        veto_sentence = (
+            f"But the final score does NOT stop at that average: the {kind} raised "
+            f"the score to {final_text}" + (f" because of {reasons}." if reasons else ".")
+        )
+    else:
+        veto_sentence = (
+            "No dimension triggered an exchange veto or emergency rule for this "
+            "bot -- the final risk score remains exactly the weighted average above."
+        )
+
+    # `dim_rows` dựng ở trên rồi bị bỏ quên: nó là phần LIỆT KÊ TỪNG CHIỀU
+    # (điểm, trọng số, độ tin cậy, và lý do khi chiều đó không đo được) --
+    # đúng thứ câu hợp nhất ngay dưới nó viện dẫn ("trung bình có trọng số
+    # của các chiều ĐO ĐƯỢC Ở TRÊN") nhưng lại không có gì ở trên để trỏ
+    # tới. Dùng cùng lớp `findings` như mọi danh sách bằng chứng khác trong
+    # module này, để không sinh thêm một kiểu trình bày thứ hai.
+    dim_list_html = (
+        f"<ul class='findings'>{''.join(dim_rows)}</ul>" if dim_rows else ""
+    )
+    risk_html = (
+        '<div id="giai-thich-risk">'
+        f"<h3>Where the risk score ({_num(result.get('risk'), 0)}/100) comes from</h3>"
+        f"{dim_list_html}"
+        f"<p>{fusion_sentence} {veto_sentence}</p>"
+        f"<p>{_esc(score_basis.VALIDATION_FULL_VI)}</p>"
+        "</div>"
+    )
+
+    quality_html = (
+        '<div id="giai-thich-quality">'
+        f"<h3>What the quality score ({_num(result.get('quality'), 0)}/100) measures</h3>"
+        f"<p>{_esc(score_basis.QUALITY_METHOD_FULL_VI)}</p>"
+        "</div>"
+    )
+
+    cb = score_basis.full_confidence_basis(evidence)
+    conf_parts = [
+        "Confidence = (trust in the underlying data quality) \u00d7 (trust in how "
+        "measurable each dimension is) \u00d7 100, capped at 100 "
+        "(<code>Agent/backend/qc/scoring/fusion.py::fuse</code>)."
+    ]
+    if cb["has_data_quality"] and cb["bot_overall_score"] is not None:
+        conf_parts.append(
+            f"This bot's data quality: overall score "
+            f"{cb['bot_overall_score']:.0f}/100"
+            + (
+                f", freshness {cb['bot_freshness_score']:.0f}/100"
+                if cb["bot_freshness_score"] is not None
+                else ""
+            )
+            + "."
+        )
+    else:
+        conf_parts.append(
+            "Source data quality detail is not present in this bot's saved record."
+        )
+    if cb["dimension_confidence_count"]:
+        conf_parts.append(
+            f"{cb['dimension_confidence_count']}/{cb['dimension_count']} dimensions "
+            "carry their own confidence value (listed above)."
+        )
+    else:
+        conf_parts.append(
+            "Per-dimension confidence is not present in the saved record."
+        )
+    if not cb["has_market_context"]:
+        conf_parts.append(
+            "This bot has no market context (market_context), so the 'market "
+            "source' part of confidence does not contribute."
+        )
+    confidence_html = (
+        '<div id="giai-thich-confidence">'
+        f"<h3>What the confidence ({_pct(result.get('confidence'), 0)}) measures</h3>"
+        f"<p>{' '.join(conf_parts)}</p>"
+        "</div>"
+    )
+
+    return risk_html + quality_html + confidence_html
+
+
+def _render_limited_score_basis(result: Dict[str, Any]) -> str:
+    evidence = result.get("evidence") or {}
+    components = score_basis.limited_risk_components(evidence)
+    if not components:
+        return ""
+    fusion = score_basis.limited_fusion_summary(components)
+
+    comp_rows = []
+    for c in components:
+        label = c.get("label") or c.get("name") or "—"
+        weight_text = f"{c['weight']:.1f}" if c.get("weight") is not None else "—"
+        if c.get("status") == "AVAILABLE" and c.get("score") is not None:
+            comp_rows.append(
+                f"<li><strong>{_esc(label)}</strong>: {_num(c['score'], 0)}/100 "
+                f"(weight {weight_text})</li>"
+            )
+        else:
+            tag = (
+                "concealed"
+                if c.get("status") == "UNKNOWN_CONCEALED"
+                else "missing data"
+            )
+            comp_rows.append(
+                f"<li><strong>{_esc(label)}</strong>: {_num(c.get('score'), 0)}/100 "
+                f"({tag}, weight {weight_text})</li>"
+            )
+    concealed_labels = [
+        c.get("label") or c.get("name")
+        for c in components
+        if c.get("status") == "UNKNOWN_CONCEALED"
+    ]
+
+    weighted_average = fusion["weighted_average"]
+    fusion_sentence = (
+        (
+            f"Weighted average of {len(components)} components (total weight "
+            f"{fusion['total_weight']:.2f}): {weighted_average:.1f}/100."
+            if weighted_average is not None
+            else "The weighted average could not be computed (weight missing)."
+        )
+        + " The LIMITED ASSESSMENT branch has NO exchange veto or emergency rule -- "
+        "the risk score ALWAYS equals this weighted average exactly, with no "
+        "exception overriding it."
+    )
+    if concealed_labels:
+        fusion_sentence += (
+            f" {len(concealed_labels)} dimensions are always scored at a high risk "
+            f"level (75/100, weight 1.3) because OKX does not publicly expose this "
+            f"bot's trade ledger: "
+            + ", ".join(_esc(str(x)) for x in concealed_labels)
+            + "."
+        )
+
+    risk_html = (
+        '<div id="giai-thich-risk">'
+        f"<h3>Where the risk score ({_num(result.get('risk'), 0)}/100) comes from</h3>"
+        f"<p>{fusion_sentence}</p>"
+        + _percentile_findings_html(components)
+        + f"<p>{_esc(score_basis.VALIDATION_LIMITED_VI)}</p>"
+        "</div>"
+    )
+
+    qb = score_basis.quality_basis_limited(evidence)
+    quality_parts = ["The quality score starts from a base of 50 points."]
+    if qb:
+        if qb["lead_days"] is not None:
+            quality_parts.append(
+                f"Adds up to 15 points based on the number of days as a lead trader "
+                f"(record: {qb['lead_days']} days)."
+            )
+        if qb["pnl"] is not None:
+            sign = "positive" if qb["pnl"] > 0 else "negative"
+            quality_parts.append(
+                f"Adds 10 points if PnL is positive / subtracts 20 points if negative "
+                f"(record: PnL {qb['pnl']:,.0f} USDT, {sign})."
+            )
+        if qb["win_ratio_pct"] is not None:
+            quality_parts.append(
+                "Adds (share of winning days \u2212 50%) \u00d7 40 (public stats: share "
+                f"of winning days {qb['win_ratio_pct']:.1f}%)."
+            )
+        if qb["wiped_out"]:
+            quality_parts.append(
+                "Subtracts 30 points because the weekly capital curve fell to zero "
+                "(wiped out) at least once."
+            )
+        quality_parts.append(
+            f"Capped at {qb['cap']:.0f}/100 -- a bot that hides its trade ledger "
+            "cannot be rated 'excellent' no matter how good the surface looks."
+        )
+    else:
+        quality_parts.append(
+            "Not enough ranking/daily-stats record to state a specific basis."
+        )
+    quality_html = (
+        '<div id="giai-thich-quality">'
+        f"<h3>What the quality score ({_num(result.get('quality'), 0)}/100) measures</h3>"
+        f"<p>{' '.join(quality_parts)}</p>"
+        "</div>"
+    )
+
+    cf = score_basis.limited_confidence_breakdown(evidence)
+    if cf:
+        stream_items = "".join(
+            f"<li>{'✓' if present else '✗'} {_esc(label)}</li>"
+            for label, present in cf["stream_detail"]
+        )
+        confidence_body = (
+            "<p>Confidence = (trust in what HAS been measured, combined using the "
+            "noisy-OR rule for independent evidence: each additional source can only "
+            "INCREASE it, never decrease it) \u00d7 (coverage = weight share of the "
+            "measured dimensions / total weight), then capped by a ceiling based on "
+            "the NUMBER OF PUBLIC DATA STREAMS that could be combined for this "
+            "bot.</p>"
+            f"<p>Confidence of the measured dimensions (before coverage): "
+            f"{cf['measured_confidence_pct']:.1f}%. Coverage: "
+            f"{cf['coverage_pct']:.1f}%. Number of data streams combined: "
+            f"{cf['streams']}/4:</p>"
+            f"<ul class='findings'>{stream_items}</ul>"
+            f"<p>Confidence ceiling = min(45%, 15% + 7.5% \u00d7 {cf['streams']}) = "
+            f"{cf['ceiling_pct']:.1f}%. Implied confidence = min(ceiling, measured "
+            f"\u00d7 coverage) = {cf['implied_confidence_pct']:.1f}%.</p>"
+        )
+    else:
+        confidence_body = "<p>Not enough data to restate the confidence formula.</p>"
+    confidence_html = (
+        '<div id="giai-thich-confidence">'
+        f"<h3>What the confidence ({_pct(result.get('confidence'), 0)}) measures</h3>"
+        f"{confidence_body}"
+        "</div>"
+    )
+
+    return risk_html + quality_html + confidence_html
+
+
+def _render_score_basis(result: Dict[str, Any]) -> str:
+    """Toàn bộ khối "CHÚ THÍCH GIẢI THÍCH ĐIỂM SỐ" -- yêu cầu gốc của chủ dự
+    án: "nên có sao ở đó để giải thích những tiêu chí và công thức để ra
+    được score đấy". Bọc trong MỘT `<details>` (giống mọi khối `_theory`
+    khác trong module này) chứ không mở sẵn, để không làm trang dài thêm
+    với người không cần đọc -- nhưng trình duyệt tự mở nó khi một dấu `*` ở
+    đầu trang dẫn tới một id nằm bên trong (không cần JS, xem `_stat_tile`).
+
+    Nhánh nào (FULL/LIMITED) được chọn theo ĐÚNG hình dạng `evidence` mà
+    `_render_dimensions_section` đã dùng để chọn `_render_full_dimension_bars`
+    hay `_render_component_bars` -- không có nhánh thứ ba, không đoán.
+    """
+    evidence = result.get("evidence") or {}
+    if isinstance(evidence.get("dimensions"), dict) and evidence.get("dimensions"):
+        body = _render_full_score_basis(result)
+    elif isinstance(evidence.get("components"), list) and evidence.get("components"):
+        body = _render_limited_score_basis(result)
+    else:
+        return ""
+    if not body:
+        return ""
+    return (
+        '<details class="theory score-basis">'
+        "<summary>Score explanation notes (*)</summary>"
+        f'<div class="theory-body">{body}</div>'
+        "</details>"
+    )
 
 
 def _render_full_dimension_bars(
@@ -1166,45 +2987,45 @@ def _render_full_dimension_bars(
             continue
         seen.add(key)
         dim = dimensions.get(key) or {}
-        label = DIMENSION_LABEL_VI.get(key, dim.get("dimension_name") or key)
+        raw_label = DIMENSION_LABEL_VI.get(key, dim.get("dimension_name") or key)
         status = str(dim.get("status") or "AVAILABLE").upper()
         score = dim.get("score")
         tier = dim.get("tier")
+
         if status == "AVAILABLE" and _is_finite_number(score):
+            val_num = float(score)
+            color = _tier_color(tier)
+            tier_str = TIER_LABEL_VI.get(str(tier).upper(), tier or "—")
             rows.append(
                 _BarRow(
-                    label,
-                    float(score),
-                    _tier_color(tier),
-                    f"{float(score):.0f} · {TIER_LABEL_VI.get(str(tier).upper(), tier or '—')}",
+                    raw_label,
+                    val_num,
+                    color,
+                    f"{val_num:.0f} · {tier_str}",
+                    info_key=key,
                 )
             )
         else:
+            findings = dim.get("key_findings")
+            note = None
+            if isinstance(findings, list):
+                for finding in findings:
+                    if isinstance(finding, str) and finding.strip():
+                        note = finding.strip()
+                        break
             rows.append(
                 _BarRow(
-                    label, None, TIER_COLOR["UNKNOWN"], "chưa đo được", measured=False
+                    raw_label,
+                    None,
+                    TIER_COLOR["UNKNOWN"],
+                    "not measured",
+                    measured=False,
+                    info_key=key,
+                    note=note,
                 )
             )
-    bars = _horizontal_bars(rows)
-    findings_html = ""
-    weak_findings = [
-        (DIMENSION_LABEL_VI.get(k, k), (dimensions.get(k) or {}).get("key_findings"))
-        for k in DIMENSION_ORDER
-        if (dimensions.get(k) or {}).get("score", 0) is not None
-        and _is_finite_number((dimensions.get(k) or {}).get("score"))
-        and float((dimensions.get(k) or {}).get("score", 0)) >= 70
-        and (dimensions.get(k) or {}).get("status") == "AVAILABLE"
-    ]
-    if weak_findings:
-        items = []
-        for label, findings in weak_findings[:4]:
-            if isinstance(findings, list) and findings:
-                items.append(
-                    f"<li><strong>{_esc(label)}:</strong> {_esc(findings[0])}</li>"
-                )
-        if items:
-            findings_html = "<ul class='findings'>" + "".join(items) + "</ul>"
-    return bars + findings_html
+
+    return _horizontal_bars(rows)
 
 
 def _render_component_bars(components: List[Any]) -> str:
@@ -1212,16 +3033,18 @@ def _render_component_bars(components: List[Any]) -> str:
     for comp in components:
         if not isinstance(comp, dict):
             continue
-        label = comp.get("label") or comp.get("name") or "—"
+        raw_label = comp.get("label") or comp.get("name") or "—"
+        key = comp.get("name") or comp.get("key") or ""
+        info_key = key if key in METRIC_FORMULA_INFO else "risk_score"
         status = str(comp.get("status") or "AVAILABLE").upper()
         score = comp.get("score")
         if status == "AVAILABLE" and _is_finite_number(score):
             color = _risk_color(score)
-            rows.append(_BarRow(label, float(score), color, f"{float(score):.0f}"))
+            rows.append(_BarRow(raw_label, float(score), color, f"{float(score):.0f}", info_key=info_key))
         else:
-            tag = "che giấu" if status == "UNKNOWN_CONCEALED" else "thiếu dữ liệu"
+            tag = "concealed" if status == "UNKNOWN_CONCEALED" else "missing data"
             rows.append(
-                _BarRow(label, None, TIER_COLOR["UNKNOWN"], tag, measured=False)
+                _BarRow(raw_label, None, TIER_COLOR["UNKNOWN"], tag, measured=False, info_key=info_key)
             )
     return _horizontal_bars(rows)
 
@@ -1302,20 +3125,27 @@ def _render_growth_curve(result: Dict[str, Any]) -> str:
     if not chart:
         return ""
     theory = _theory(
-        "Trục hoành là THỨ TỰ lệnh đã chốt (lệnh #1 → lệnh cuối), không phải thời"
-        " gian thực — hai lệnh liền kề trên trục này có thể cách nhau vài phút hoặc"
-        " vài ngày. Trục tung là lãi/lỗ CỘNG DỒN kể từ lệnh đầu tiên, bằng USDT thực"
-        " tế (không quy đổi %). Một đường đi lên đều là tăng trưởng ổn định; một"
-        " đường đi ngang dài rồi tăng vọt ở một lệnh là tăng trưởng phụ thuộc vào vài"
-        " lệnh may mắn — hai hình dạng này có thể cho cùng một con số 'tổng lãi' ở"
-        " cuối nhưng độ tin cậy khác hẳn nhau. Điểm 'Đáy' đánh dấu đúng lúc vốn cộng"
-        " dồn THẤP NHẤT trong toàn bộ lịch sử — đây là một mốc thời điểm, không phải"
-        " % sụt vốn (xem mục Số liệu giao dịch cho con số phần trăm đó).",
-        "Cộng dồn trực tiếp lãi/lỗ đã chốt (realized_pnl) của từng lệnh, xếp theo"
-        " đúng thứ tự thời gian chốt lệnh (close_time) — không nội suy, không làm"
-        " mượt, không tính vị thế đang mở.",
+        "The x-axis is the ORDER of closed trades (trade #1 -> the last trade), not"
+        " real time -- two adjacent points on this axis could be minutes or days"
+        " apart. The y-axis is CUMULATIVE profit/loss since the first trade, in"
+        " actual USDT (not converted to %). A steadily rising line is stable growth;"
+        " a long flat stretch followed by one sharp jump is growth that depends on a"
+        " handful of lucky trades -- these two shapes can produce the same final"
+        " 'total profit' figure but carry very different confidence. The 'Trough'"
+        " marker flags the exact point where cumulative capital was at its LOWEST"
+        " across the whole history -- this is a point in time, not a % drawdown"
+        " figure (see the Trade metrics section for that percentage).",
+        "Directly accumulates each trade's realized profit/loss (realized_pnl), in"
+        " the exact order trades were closed (close_time) -- no interpolation, no"
+        " smoothing, and open positions are not counted.",
     )
-    return _subsection("Đường vốn tích luỹ theo lệnh đã chốt", chart, theory)
+    return (
+        '<div class="growth-curve-panel">'
+        '<h3>Cumulative capital curve by closed trade</h3>'
+        f'<div class="growth-chart-wrapper">{chart}</div>'
+        f'{theory}'
+        '</div>'
+    )
 
 
 def _render_win_loss_composition(result: Dict[str, Any]) -> str:
@@ -1351,11 +3181,11 @@ def _render_win_loss_composition(result: Dict[str, Any]) -> str:
     breakeven_count = max(total - win_count - loss_count, 0)
 
     count_slices: List[Tuple[str, Optional[float], str]] = [
-        ("Lệnh thắng", float(win_count), "#16a34a"),
-        ("Lệnh thua", float(loss_count), "#dc2626"),
+        ("Winning trades", float(win_count), "#16a34a"),
+        ("Losing trades", float(loss_count), "#dc2626"),
     ]
     if breakeven_count:
-        count_slices.append(("Hoà vốn", float(breakeven_count), "#9ca3af"))
+        count_slices.append(("Break-even", float(breakeven_count), "#9ca3af"))
     count_pie = _pie_chart(count_slices)
 
     average_win = perf.get("average_win")
@@ -1372,48 +3202,55 @@ def _render_win_loss_composition(result: Dict[str, Any]) -> str:
         if gross_profit > 0 or gross_loss > 0:
             profit_pie = _pie_chart(
                 [
-                    ("Lãi gộp", gross_profit, "#16a34a"),
-                    ("Lỗ gộp", gross_loss, "#dc2626"),
+                    ("Gross profit", gross_profit, "#16a34a"),
+                    ("Gross loss", gross_loss, "#dc2626"),
                 ]
             )
 
     if not count_pie and not profit_pie:
         return ""
 
-    cells = (
-        f'<div class="pie-cell"><h4>Cơ cấu số lệnh</h4>{count_pie}</div>'
-        if count_pie
-        else ""
-    )
-    cells += (
-        f'<div class="pie-cell"><h4>Cơ cấu lãi/lỗ gộp (USDT)</h4>{profit_pie}</div>'
-        if profit_pie
-        else ""
-    )
-    grid = f'<div class="pie-grid">{cells}</div>'
+    cells = ""
+    if count_pie:
+        cells += f'<div class="pie-card-stacked"><h4>Trade count breakdown</h4>{count_pie}</div>'
+    if profit_pie:
+        cells += f'<div class="pie-card-stacked"><h4>Gross profit/loss breakdown (USDT)</h4>{profit_pie}</div>'
+    stacked = f'<div class="pie-stack-vertical">{cells}</div>'
 
     theory = _theory(
-        "Đặt CẠNH NHAU vì chúng trả lời hai câu khác nhau. Bên trái: trong tổng SỐ"
-        " LỆNH, bao nhiêu phần trăm thắng/thua. Bên phải: trong tổng TIỀN đã kiếm/đã"
-        " mất, bao nhiêu phần là lãi gộp và bao nhiêu là lỗ gộp. Tỉ lệ thắng cao (bên"
-        " trái nghiêng hẳn về lãi) nhưng lỗ gộp vẫn chiếm phần lớn bên phải là dấu"
-        " hiệu payoff lệch: bot thắng nhiều lệnh nhỏ và thua ít lệnh nhưng mỗi lệnh"
-        " thua rất đau — một cú thua có thể xoá sạch nhiều lệnh thắng cộng lại.",
-        "Cơ cấu số lệnh tính trực tiếp từ tỉ lệ thắng/thua (win_rate/loss_rate) nhân"
-        " số lệnh đã chốt. Cơ cấu lãi/lỗ gộp suy ra từ lãi trung bình mỗi lệnh thắng"
-        " (average_win) nhân số lệnh thắng, và lỗ trung bình mỗi lệnh thua"
-        " (average_loss) nhân số lệnh thua — cùng nguồn evidence.performance đã dùng"
-        " cho bảng Số liệu giao dịch ở dưới, không phải một phép đo mới.",
+        "Placed SIDE BY SIDE because they answer two different questions. Left:"
+        " out of the total NUMBER OF TRADES, what share won versus lost. Right: out"
+        " of the total MONEY won/lost, what share is gross profit and what share is"
+        " gross loss. A high win rate (the left pie leaning heavily toward wins) but"
+        " gross loss still making up most of the right pie is the signature of a"
+        " skewed payoff: the bot wins many small trades and loses few, but each"
+        " losing trade hurts badly -- one loss can wipe out many wins combined.",
+        "The trade-count breakdown is computed directly from the win/loss rate"
+        " (win_rate/loss_rate) multiplied by the number of closed trades. The"
+        " gross profit/loss breakdown is derived from the average profit per"
+        " winning trade (average_win) times the number of wins, and the average"
+        " loss per losing trade (average_loss) times the number of losses -- the"
+        " same evidence.performance source already used for the trade metrics"
+        " table below, not a new measurement.",
     )
-    return f"<h3>Cơ cấu thắng/thua</h3>{grid}{theory}"
+    return f'<div class="win-loss-composition-panel"><h3>Win/loss composition</h3>{stacked}{theory}</div>'
 
 
 def _render_growth_section(result: Dict[str, Any]) -> str:
-    parts = [_render_growth_curve(result), _render_win_loss_composition(result)]
-    body = "".join(p for p in parts if p)
-    if not body:
+    curve_html = _render_growth_curve(result)
+    composition_html = _render_win_loss_composition(result)
+    if not curve_html and not composition_html:
         return ""
-    return _section("Tăng trưởng & cơ cấu kết quả", body, anchor="tang-truong")
+    if curve_html and composition_html:
+        body = (
+            '<div class="growth-dashboard-grid">'
+            f'<div class="growth-dashboard-left">{curve_html}</div>'
+            f'<div class="growth-dashboard-right">{composition_html}</div>'
+            '</div>'
+        )
+    else:
+        body = curve_html or composition_html
+    return _section("Growth & outcome composition", body, anchor="tang-truong")
 
 
 # --------------------------------------------------------------------------- #
@@ -1430,10 +3267,36 @@ def _render_monte_carlo(result: Dict[str, Any]) -> str:
 
     if mc.get("deferred_loss_bias"):
         parts.append(
-            '<div class="notice notice-warning">Mô phỏng này lệch lạc quan: bot đang'
-            " ôm lỗ chưa chốt, và distribution bên dưới chỉ tính trên lệnh đã chốt"
-            " nên KHÔNG thấy phần lỗ đó — xác suất thực tế xấu hơn số hiển thị.</div>"
+            '<div class="notice notice-warning">This simulation is biased optimistic:'
+            " the bot is holding an unrealised loss, and the distribution below is"
+            " computed only on closed trades, so it does NOT see that loss -- the real"
+            " probability is worse than the number shown.</div>"
         )
+
+    # Mẫu mỏng (10 <= n < 20, xem MonteCarloSimulationEngine.THIN_SAMPLE_SIZE)
+    # -- điển hình cho một bot LIMITED chỉ có ~12 điểm PnL tuần, nhưng cũng
+    # có thể xảy ra ở một bot FULL ít lệnh. Câu cảnh báo được ĐỌC từ chính
+    # `mc["warnings"]` (engine đã tự viết đúng một câu cho việc này, xem
+    # THIN_SAMPLE_WARNING_VI), không viết lại ở đây -- chỉ khi payload nào
+    # đó (vd. một fixture test cũ) thiếu hẳn `warnings` mới dùng câu dự
+    # phòng bên dưới, đọc kiểu phòng thủ đúng như engine mô tả.
+    if mc.get("sample_is_thin"):
+        thin_warnings = mc.get("warnings")
+        thin_text = (
+            "; ".join(_esc(w) for w in thin_warnings if isinstance(w, str))
+            if isinstance(thin_warnings, list)
+            else ""
+        )
+        if not thin_text:
+            thin_text = (
+                f"Thin sample ({_int_text(mc.get('sample_size'))} observations): the "
+                "simulation still runs, but should only be read as a reference range, "
+                "not a firm estimate -- a bootstrap percentile can only resolve to "
+                "about 1/n, so at this sample size the figures at both tails (the 5th "
+                "percentile, probability of ruin, the 95th percentile of drawdown) "
+                "carry a large standard error."
+            )
+        parts.append(f'<div class="notice notice-warning">{thin_text}</div>')
 
     fan_rows: List[Tuple[str, Optional[float]]] = [
         ("P05", mc.get("profit_pct_p05")),
@@ -1445,41 +3308,45 @@ def _render_monte_carlo(result: Dict[str, Any]) -> str:
     if any(_is_finite_number(v) for _, v in fan_rows):
         chart = _diverging_bars(fan_rows)
         theory = _theory(
-            "Mỗi thanh là một phân vị kết quả cuối kỳ mô phỏng, tính theo % vốn tham "
-            "chiếu; đường giữa là mốc hoà vốn (0%). Thanh xanh bên phải = có lãi ở "
-            "phân vị đó, thanh đỏ bên trái = lỗ. Nếu P05 đã âm sâu, tức trong kịch "
-            f"bản xấu (5% tệ nhất), bot lỗ {_num(abs(fan_rows[0][1]), 0) if _is_finite_number(fan_rows[0][1]) else '—'}%"
-            " vốn dù kịch bản trung vị (P50) có thể vẫn dương — khoảng cách giữa hai"
-            " con số đó chính là độ rủi ro thật, không phải con số trung vị một mình.",
-            f"Bootstrap khối dừng (stationary bootstrap, Politis &amp; Romano 1994) trên"
-            f" {_int_text(mc.get('sample_size'))} lệnh đã chốt, lặp lại"
-            f" {_int_text(mc.get('iterations'))} lần, mỗi lần vẽ ra {_int_text(mc.get('horizon_trades'))}"
-            " lệnh. Độ dài khối là ngẫu nhiên hình học với kỳ vọng L = n^(1/3) thay vì"
-            " một số cố định, để không có một lựa chọn L nào tự áp đặt lên kết quả."
-            " Mô phỏng chỉ dùng lệnh ĐÃ CHỐT, không tính vị thế đang mở — nếu bot"
-            " đang ôm lỗ chưa chốt (xem cảnh báo phía trên nếu có), các xác suất này"
-            " lạc quan hơn thực tế.",
+            "Each bar is one percentile of the simulated end-of-horizon outcome, as a"
+            " % of reference capital; the middle line is break-even (0%). A green bar"
+            " to the right = a profit at that percentile, a red bar to the left = a"
+            " loss. If P05 is already deeply negative, it means that in the bad-case"
+            f" scenario (worst 5%), the bot loses {_num(abs(fan_rows[0][1]), 0) if _is_finite_number(fan_rows[0][1]) else '—'}%"
+            " of capital even though the median scenario (P50) may still be positive"
+            " -- the gap between those two numbers is the real risk, not the median"
+            " figure alone.",
+            f"Stationary bootstrap (Politis &amp; Romano 1994) on"
+            f" {_int_text(mc.get('sample_size'))} closed trades, repeated"
+            f" {_int_text(mc.get('iterations'))} times, drawing {_int_text(mc.get('horizon_trades'))}"
+            " trades each time. Block length is geometrically random with expectation"
+            " L = n^(1/3) instead of a fixed number, so no single choice of L imposes"
+            " itself on the result. The simulation uses only CLOSED trades, not open"
+            " positions -- if the bot is holding an unrealised loss (see the notice"
+            " above if present), these probabilities are more optimistic than reality.",
         )
-        parts.append(_subsection("Phân vị kết quả cuối kỳ", chart, theory))
+        parts.append(_subsection("End-of-horizon outcome percentiles", chart, theory))
 
     dd_rows: List[Tuple[str, Optional[float]]] = [
-        ("Trung vị", mc.get("median_max_drawdown")),
+        ("Median", mc.get("median_max_drawdown")),
         ("P90", mc.get("p90_max_drawdown")),
         ("P95", mc.get("p95_max_drawdown")),
         ("P99", mc.get("p99_max_drawdown")),
-        ("Xấu nhất", mc.get("worst_percentile_drawdown")),
+        ("Worst", mc.get("worst_percentile_drawdown")),
     ]
     if any(_is_finite_number(v) for _, v in dd_rows):
         chart = _vertical_bars(dd_rows, max_value=100.0)
         theory = _theory(
-            "Sụt vốn tối đa mô phỏng được trong mỗi phân vị đường chạy, không phải "
-            'sụt vốn đã xảy ra. Cột "Xấu nhất" là đường chạy tệ nhất trong toàn bộ'
-            " số lần lặp — một cột gần 100% nghĩa là có kịch bản dẫn tới cháy gần hết"
-            " vốn tham chiếu, dù trung vị vẫn có thể trông ổn.",
-            "Tính trên cùng bộ mô phỏng bootstrap khối dừng ở trên, lấy sụt vốn tối đa"
-            " trong mỗi đường chạy rồi xếp theo phân vị qua toàn bộ số lần lặp.",
+            "The maximum drawdown simulated at each percentile of the runs, not a"
+            ' drawdown that actually happened. The "Worst" bar is the single worst'
+            " run across every iteration -- a bar near 100% means there is a scenario"
+            " that wipes out nearly all reference capital, even if the median still"
+            " looks fine.",
+            "Computed on the same stationary-bootstrap simulation above: the maximum"
+            " drawdown within each run is taken, then ranked into percentiles across"
+            " every iteration.",
         )
-        parts.append(_subsection("Sụt vốn theo phân vị mô phỏng", chart, theory))
+        parts.append(_subsection("Simulated drawdown by percentile", chart, theory))
 
     parts.append(_render_horizon_comparison(mc))
     parts.append(_render_horizon_probability_chart(mc))
@@ -1488,7 +3355,7 @@ def _render_monte_carlo(result: Dict[str, Any]) -> str:
     body = "".join(p for p in parts if p)
     if not body:
         return ""
-    return _section("Mô phỏng Monte Carlo", body, anchor="monte-carlo")
+    return _section("Monte Carlo simulation", body, anchor="monte-carlo")
 
 
 def _subsection(title: str, chart: str, theory: str) -> str:
@@ -1511,11 +3378,11 @@ def _render_horizon_comparison(mc: Dict[str, Any]) -> str:
         cards.append(
             '<div class="horizon-card">'
             f'<div class="horizon-title">{_esc(HORIZON_LABEL_VI.get(key, key))}</div>'
-            f'<div class="horizon-trades">{_int_text(s.get("horizon_trades"))} lệnh</div>'
+            f'<div class="horizon-trades">{_int_text(s.get("horizon_trades"))} trades</div>'
             f'<div class="horizon-pop" style="color:{_risk_color(100 - float(pop)) if _is_finite_number(pop) else "inherit"}">'
-            f"{_pct(pop, 0)} khả năng có lãi</div>"
-            f'<div class="horizon-sub">P(lỗ cuối kỳ) {_pct(s.get("p_loss_after_horizon"), 0)} ·'
-            f" P(cháy vốn) {_pct(s.get('p_ruin'), 0)}</div>"
+            f"{_pct(pop, 0)} chance of profit</div>"
+            f'<div class="horizon-sub">P(loss at horizon end) {_pct(s.get("p_loss_after_horizon"), 0)} &middot;'
+            f" P(ruin) {_pct(s.get('p_ruin'), 0)}</div>"
             "</div>"
         )
     if not cards:
@@ -1527,30 +3394,31 @@ def _render_horizon_comparison(mc: Dict[str, Any]) -> str:
         days = mc.get("horizon_calendar_days")
         span = mc.get("observed_span_days")
         detail = (
-            f" (mô phỏng ≈ {_num(days, 0)} ngày, dữ liệu quan sát được chỉ"
-            f" {_num(span, 0)} ngày)"
+            f" (simulated \u2248 {_num(days, 0)} days, only"
+            f" {_num(span, 0)} days of data actually observed)"
             if _is_finite_number(days) and _is_finite_number(span)
             else ""
         )
         exceeds_html = (
-            '<div class="notice notice-warning">Horizon mô phỏng dài hơn dữ liệu thực'
-            f" đã quan sát{detail}: đây là NGOẠI SUY vượt quá dữ liệu quan sát được,"
-            " không phải một kết quả đã kiểm chứng.</div>"
+            '<div class="notice notice-warning">The simulated horizon is longer than'
+            f" the actual observed data{detail}: this is an EXTRAPOLATION beyond the"
+            " observed data, not a validated result.</div>"
         )
     theory = _theory(
-        "So sánh cùng một bot ở ba độ dài mô phỏng khác nhau: NGẮN (vài lệnh sắp"
-        " tới), TRUNG (bằng đúng số lệnh bot đã có), DÀI (nhiều lệnh hơn, ngoại suy"
-        " xa hơn). Nếu ba thẻ đồng thuận (đều cao hoặc đều thấp), kết luận không"
-        " phụ thuộc vào việc chọn horizon nào. Nếu lệch nhau — ví dụ ổn ở NGẮN"
-        " nhưng xấu dần ở DÀI — nhãn phía trên sẽ nói rõ kiểu lệch đó, và đó là"
-        " tín hiệu quan trọng hơn bất kỳ con số đơn lẻ nào.",
-        "Cùng cỗ máy bootstrap khối dừng ở trên, chạy lại ba lần với ba giá trị"
-        ' horizon_trades khác nhau. "NGẮN/TRUNG/DÀI" và số ngày lịch quy đổi dùng'
-        " nhịp độ giao dịch quan sát được (lệnh/ngày) của chính bot này, không phải"
-        " một hằng số chung cho mọi bot.",
+        "Compares the same bot at three different simulation lengths: SHORT (a few"
+        " trades ahead), MEDIUM (exactly the number of trades the bot already has),"
+        " LONG (more trades, extrapolating further). If all three cards agree (all"
+        " high or all low), the conclusion does not depend on which horizon is"
+        " chosen. If they diverge -- for example solid at SHORT but worsening at"
+        " LONG -- the label above states that pattern explicitly, and that is a more"
+        " important signal than any single number.",
+        "Same stationary-bootstrap engine as above, re-run three times with three"
+        ' different horizon_trades values. "SHORT/MEDIUM/LONG" and the converted'
+        " calendar-day figures use this specific bot's own observed trading pace"
+        " (trades/day), not one constant shared across every bot.",
     )
     return _subsection(
-        "So sánh đa horizon",
+        "Multi-horizon comparison",
         f'<div class="horizon-row">{"".join(cards)}</div>{label_html}{exceeds_html}',
         theory,
     )
@@ -1577,27 +3445,28 @@ def _render_horizon_probability_chart(mc: Dict[str, Any]) -> str:
         return ""
     chart = _vertical_bars(rows, max_value=100.0, unit="%", higher_is_better=True)
     theory = _theory(
-        "Mỗi cột là xác suất mô phỏng kết thúc horizon đó CÓ LÃI (không phải mức lãi"
-        " bao nhiêu, chỉ là có hay không) — cột cao là tốt, ngược cực với biểu đồ sụt"
-        " vốn ở trên (cột cao ở đó là xấu), nên màu ở đây xanh cho cột cao, đỏ cho cột"
-        " thấp thay vì ngược lại. Ba cột tụt dần từ NGẮN xuống DÀI nghĩa là lợi thế"
-        " thống kê mỏng dần khi nhìn xa hơn; ba cột đứng yên hoặc tăng nghĩa là kết"
-        " luận không phụ thuộc việc chọn horizon nào.",
-        "Cùng bộ dữ liệu `horizon_scenarios` phía trên, chỉ trực quan hoá lại một"
-        " trường duy nhất (`probability_of_profit`) thành cột thay vì thẻ số để dễ so"
-        " sánh ba horizon cùng lúc bằng mắt.",
+        "Each bar is the simulated probability that horizon ends WITH A PROFIT (not"
+        " how much profit, just whether there is one) -- a tall bar is good, the"
+        " opposite of the drawdown chart above (where a tall bar is bad), so here"
+        " green marks a tall bar and red marks a short one instead of the reverse."
+        " Three bars declining from SHORT to LONG means the statistical edge thins"
+        " out the further out you look; three bars flat or rising means the"
+        " conclusion does not depend on which horizon is chosen.",
+        "Same `horizon_scenarios` data as above, just visualising a single field"
+        " (`probability_of_profit`) as bars instead of number cards, to make it"
+        " easier to compare all three horizons at a glance.",
     )
-    return _subsection("So sánh xác suất có lãi theo horizon (biểu đồ)", chart, theory)
+    return _subsection("Probability of profit by horizon (chart)", chart, theory)
 
 
 def _render_key_probabilities(mc: Dict[str, Any]) -> str:
     rows: List[Tuple[str, str]] = []
     if _is_finite_number(mc.get("p_ruin")):
-        rows.append(("Xác suất cháy tài khoản", _pct(mc.get("p_ruin"), 1)))
+        rows.append(("Probability of ruin", _pct(mc.get("p_ruin"), 1)))
     if _is_finite_number(mc.get("p_loss_after_horizon")):
         rows.append(
             (
-                "Xác suất lỗ khi kết thúc horizon",
+                "Probability of a loss at horizon end",
                 _pct(mc.get("p_loss_after_horizon"), 1),
             )
         )
@@ -1619,9 +3488,9 @@ def _render_key_probabilities(mc: Dict[str, Any]) -> str:
         excess = mc.get(excess_key)
         streak_rows.append(
             [
-                f"≥{n} lệnh thua liên tiếp",
+                f"\u2265{n} consecutive losing trades",
                 _pct(obs, 1),
-                _pct(base, 1) if _is_finite_number(base) else "chưa có mốc",
+                _pct(base, 1) if _is_finite_number(base) else "no baseline yet",
                 _pct(excess, 1) if _is_finite_number(excess) else "—",
             ]
         )
@@ -1632,28 +3501,30 @@ def _render_key_probabilities(mc: Dict[str, Any]) -> str:
         body += f'<div class="stat-row">{tiles}</div>'
     if streak_rows:
         body += _table(
-            ["Chuỗi thua", "Quan sát", "Mốc cơ sở (ngẫu nhiên thuần)", "Phần vượt"],
+            ["Losing streak", "Observed", "Baseline (pure randomness)", "Excess"],
             streak_rows,
         )
     if not body:
         return ""
     theory = _theory(
-        '"Quan sát" là xác suất mô phỏng thấy chuỗi thua đó thật sự xảy ra. Nhưng'
-        " xác suất gặp một chuỗi thua dài tăng lên khi bot giao dịch càng nhiều lệnh"
-        ' — kể cả một chiến lược hoàn toàn ngẫu nhiên, độc lập giữa các lệnh. "Mốc'
-        ' cơ sở" là xác suất chuỗi đó xảy ra CHỈ VÌ số lệnh nhiều, giả định mỗi'
-        ' lệnh độc lập với tỉ lệ thắng y hệt bot này. "Phần vượt" (quan sát trừ'
-        " mốc cơ sở) mới là tín hiệu thật về việc thua có xu hướng dồn cục ở bot"
-        " này hay không — phần vượt cao nghĩa là các lệnh thua không độc lập với"
-        " nhau (hành vi kiểu gồng lỗ/martingale), phần vượt gần 0 nghĩa là chuỗi"
-        " thua chỉ là hệ quả tất yếu của việc đã giao dịch nhiều lệnh, không phải"
-        " lỗi hành vi.",
-        "Mốc cơ sở tính giải tích từ phân phối nhị thức trên đúng số lệnh và tỉ lệ"
-        " thua quan sát của bot (không phải mô phỏng lại) — xem"
+        '"Observed" is the simulated probability of actually seeing that losing'
+        " streak happen. But the probability of hitting a long losing streak rises"
+        " simply because the bot trades more -- even for a strategy that is entirely"
+        ' random and independent between trades. "Baseline" is the probability of'
+        " that streak occurring PURELY because of the trade count, assuming each"
+        ' trade is independent with this exact bot\u2019s own win rate. "Excess"'
+        " (observed minus baseline) is the real signal for whether losses tend to"
+        " cluster for this bot -- a high excess means losing trades are NOT"
+        " independent of each other (behaviour like averaging down/martingale), an"
+        " excess near 0 means the losing streak is simply the inevitable result of"
+        " having traded a lot, not a behavioural flaw.",
+        "The baseline is computed analytically from the binomial distribution using"
+        " this bot's own exact trade count and observed loss rate (not re-simulated)"
+        " -- see"
         " <code>MonteCarloSimulationEngine.loss_streak_baseline_probability</code>."
-        " Phần vượt = quan sát − mốc cơ sở, giới hạn dưới ở 0.",
+        " Excess = observed \u2212 baseline, floored at 0.",
     )
-    return _subsection("Các xác suất chính", body, theory)
+    return _subsection("Key probabilities", body, theory)
 
 
 # --------------------------------------------------------------------------- #
@@ -1685,53 +3556,70 @@ def _render_statistical_inference(result: Dict[str, Any]) -> str:
         notes_html = "; ".join(_esc(n) for n in notes if isinstance(n, str))
         unreliable_notice = (
             '<div class="notice notice-danger">'
-            "<strong>Suy luận thống kê KHÔNG đáng tin cậy</strong> ở bot này"
+            "<strong>Statistical inference is NOT reliable</strong> for this bot"
             + (f": {notes_html}." if notes_html else ".")
-            + " Đọc các con số bên dưới như tham khảo, không phải kết luận chắc chắn."
+            + " Read the figures below as a reference, not a firm conclusion."
             "</div>"
         )
 
     rows = [
-        ["Sharpe mỗi lệnh", _num(mc.get("sharpe_per_trade"), 2)],
         [
-            "Probabilistic Sharpe Ratio (PSR)",
+            _calc_label_html("Sharpe per trade", "sharpe_per_trade"),
+            _num(mc.get("sharpe_per_trade"), 2),
+        ],
+        [
+            _calc_label_html(
+                "Probabilistic Sharpe Ratio (PSR)", "probabilistic_sharpe"
+            ),
             _pct(_ratio_to_pct(mc.get("probabilistic_sharpe")), 1),
         ],
         [
-            "Deflated Sharpe Ratio (DSR)",
+            _calc_label_html("Deflated Sharpe Ratio (DSR)", "deflated_sharpe"),
             _pct(_ratio_to_pct(mc.get("deflated_sharpe")), 1),
         ],
         [
-            "Số lệnh tối thiểu cần có (MinTRL)",
+            _calc_label_html(
+                "Minimum trades required (MinTRL)", "min_track_record_trades"
+            ),
             _int_text(mc.get("min_track_record_trades")),
         ],
-        ["Cỡ mẫu đã dùng để suy luận", _int_text(mc.get("sample_size"))],
         [
-            "Số ứng viên đã so sánh để chọn bot này",
+            _calc_label_html("Sample size used for inference", "sample_size"),
+            _int_text(mc.get("sample_size")),
+        ],
+        [
+            _calc_label_html(
+                "Candidates compared to select this bot", "selection_trials"
+            ),
             _int_text(mc.get("selection_trials")),
         ],
     ]
-    table = _table(["Chỉ số", "Giá trị"], rows)
+    table = _table(["Metric", "Value"], rows)
 
     theory = _theory(
-        "PSR trả lời: xác suất Sharpe THẬT của bot lớn hơn 0, sau khi trừ hao vì mẫu"
-        " ngắn, lệch (skew) và đuôi dày của phân phối lợi nhuận — một Sharpe đẹp"
-        " trên vài chục lệnh đuôi dày không phải bằng chứng ngang với Sharpe khiêm"
-        " tốn trên vài trăm lệnh sạch. DSR đi xa hơn: bot này được CHỌN vì là ứng"
-        " viên tốt nhất trong một nhóm — càng nhiều ứng viên so sánh, càng dễ có"
-        ' một cái "tốt nhất" chỉ vì may mắn; DSR trừ luôn phần may mắn kỳ vọng đó.'
-        " MinTRL là số lệnh tối thiểu bot cần thêm để Sharpe của nó đủ tin cậy ở"
-        " ngưỡng đang dùng — càng lớn so với số lệnh hiện có, kết luận càng non.",
-        "Probabilistic/Deflated Sharpe Ratio và MinTRL theo Bailey &amp; López de"
-        " Prado (2012, 2014). Ngưỡng so sánh dùng SR* = 0 (Sharpe không có lợi thế)"
-        ' — đây là mốc do hệ thống này TỰ CHỌN để hỏi "có lợi thế thật không",'
-        " không phải một mốc vay mượn từ nơi khác hay từ chính bot. DSR dùng số"
-        " ứng viên đã so sánh (selection_trials) để trừ hao phần may mắn của việc"
-        " chọn ra cái tốt nhất.",
+        "PSR answers: the probability that the bot's TRUE Sharpe ratio is greater"
+        " than 0, after discounting for a short sample, skew, and fat tails in the"
+        " return distribution -- a good-looking Sharpe over a few dozen fat-tailed"
+        " trades is not evidence on par with a modest Sharpe over a few hundred"
+        " clean trades. DSR goes further: this bot was SELECTED because it was the"
+        " best candidate in a group -- the more candidates compared, the easier it"
+        ' is for a "best one" to appear purely by luck; DSR discounts exactly that'
+        " expected luck. MinTRL is the minimum number of additional trades the bot"
+        " needs before its Sharpe is reliable at the threshold being used -- the"
+        " larger this is relative to the current trade count, the less mature the"
+        " conclusion.",
+        "Probabilistic/Deflated Sharpe Ratio and MinTRL follow Bailey &amp; L&oacute;pez de"
+        " Prado (2012, 2014). The comparison benchmark used is SR* = 0 (a Sharpe"
+        ' with no edge at all) -- this is a benchmark this system CHOSE ITSELF to ask'
+        ' "is there a genuine edge", not one borrowed from elsewhere or from the bot'
+        " itself. DSR uses the number of candidates compared (selection_trials) to"
+        " discount the luck of having picked the best one.",
     )
     return _section(
-        "Suy luận thống kê",
+        "Statistical inference",
         unreliable_notice + table + theory,
+        tone="quiet",
+        pair=True,
         anchor="suy-luan",
     )
 
@@ -1748,21 +3636,21 @@ def _ratio_to_pct(value: Any) -> Optional[float]:
 
 
 _PERFORMANCE_ROWS: Tuple[Tuple[str, str, str], ...] = (
-    ("trade_count", "Số lệnh đã chốt", "int"),
-    ("win_rate", "Tỉ lệ thắng", "pct"),
+    ("trade_count", "Closed trades", "int"),
+    ("win_rate", "Win rate", "pct"),
     ("profit_factor", "Profit factor", "num2"),
     ("payoff_ratio", "Payoff ratio", "num2"),
-    ("expectancy", "Kỳ vọng mỗi lệnh", "money"),
-    ("total_pnl", "Tổng lãi/lỗ", "money"),
-    ("max_drawdown_pct", "Sụt vốn tối đa", "pct"),
-    ("current_drawdown_pct", "Sụt vốn hiện tại", "pct"),
+    ("expectancy", "Expectancy per trade", "money"),
+    ("total_pnl", "Total PnL", "money"),
+    ("max_drawdown_pct", "Max drawdown", "pct"),
+    ("current_drawdown_pct", "Current drawdown", "pct"),
     ("sharpe_ratio", "Sharpe ratio", "num2"),
     ("sortino_ratio", "Sortino ratio", "num2"),
     ("calmar_ratio", "Calmar ratio", "num2"),
-    ("max_win_streak", "Chuỗi thắng dài nhất", "int"),
-    ("max_loss_streak", "Chuỗi thua dài nhất", "int"),
-    ("average_hold_time_minutes", "Thời gian giữ lệnh trung bình (phút)", "num1"),
-    ("trade_frequency_per_day", "Lệnh / ngày", "num2"),
+    ("max_win_streak", "Longest winning streak", "int"),
+    ("max_loss_streak", "Longest losing streak", "int"),
+    ("average_hold_time_minutes", "Average hold time (minutes)", "num1"),
+    ("trade_frequency_per_day", "Trades / day", "num2"),
 )
 
 _FORMATTERS = {
@@ -1785,25 +3673,26 @@ def _render_trade_metrics(result: Dict[str, Any]) -> str:
     for key, label, kind in _PERFORMANCE_ROWS:
         if key not in perf:
             continue
-        rows.append([label, _FORMATTERS[kind](perf.get(key))])
+        rows.append([_calc_label_html(label, key), _FORMATTERS[kind](perf.get(key))])
     if not rows:
         return ""
-    table = _table(["Chỉ số", "Giá trị"], rows)
+    table = _table(["Metric", "Value"], rows)
     theory = _theory(
-        "Đây là số liệu trên SỔ ĐÃ CHỐT — lệnh đang mở không nằm trong các con số"
-        " này (xem mục Tài sản đang giao dịch để biết vị thế đang mở). Profit"
-        " factor dưới 1 nghĩa là tổng lệnh thua lớn hơn tổng lệnh thắng — bot đang"
-        " lỗ ròng, bất kể tỉ lệ thắng trông đẹp thế nào. Sharpe/Sortino/Calmar là"
-        " lợi nhuận trên một đơn vị rủi ro (biến động, biến động xấu, sụt vốn theo"
-        " thứ tự) — càng cao càng tốt, nhưng chỉ đáng tin khi cỡ mẫu đủ lớn (xem"
-        " mục Suy luận thống kê).",
-        "Tính trực tiếp từ nhật ký giao dịch (trade ledger) công khai của bot trên"
-        " OKX copy-trading, theo định nghĩa chuẩn của từng chỉ số (profit factor ="
-        " tổng lãi / tổng lỗ tuyệt đối, payoff ratio = lãi trung bình / lỗ trung"
-        " bình, Sharpe/Sortino/Calmar theo công thức thống kê thông thường trên"
-        " chuỗi lợi nhuận từng lệnh).",
+        "This is CLOSED BOOK data -- open positions are not included in these"
+        " figures (see the Traded assets section for open positions). A profit"
+        " factor below 1 means total losses exceed total profit -- the bot is"
+        " losing money overall, no matter how good the win rate looks."
+        " Sharpe/Sortino/Calmar are return per unit of risk (volatility, downside"
+        " volatility, drawdown, respectively) -- higher is better, but only"
+        " trustworthy once the sample size is large enough (see the Statistical"
+        " inference section).",
+        "Computed directly from the bot's public trade ledger on OKX copy-trading,"
+        " using the standard definition of each metric (profit factor = total"
+        " profit / total absolute loss, payoff ratio = average win / average loss,"
+        " Sharpe/Sortino/Calmar following the usual statistical formulas over the"
+        " per-trade return series).",
     )
-    return _section("Số liệu giao dịch", table + theory, anchor="so-lieu")
+    return _section("Trade metrics", table + theory, pair=True, anchor="so-lieu")
 
 
 # --------------------------------------------------------------------------- #
@@ -1827,31 +3716,1157 @@ def _render_assets(result: Dict[str, Any]) -> str:
                 _badge(state, color),
                 _int_text(a.get("open_positions")),
                 _int_text(a.get("closed_seen")),
-                _num(a.get("last_close_days"), 1) + " ngày"
+                _num(a.get("last_close_days"), 1) + " days ago"
                 if _is_finite_number(a.get("last_close_days"))
-                else "chưa từng chốt",
+                else "never closed",
             ]
         )
     if not rows:
         return ""
     table = _table(
-        ["Tài sản", "Trạng thái", "Vị thế mở", "Lệnh đã chốt", "Lần chốt gần nhất"],
+        ["Asset", "Status", "Open positions", "Closed trades", "Last closed"],
         rows,
     )
     theory = _theory(
-        "<strong>ĐANG GIAO DỊCH</strong>: có lệnh chốt gần đây, bot còn hoạt động"
-        " tích cực trên tài sản này. <strong>CHỈ ĐANG ÔM</strong>: còn vị thế mở"
-        " nhưng đã lâu không chốt lệnh nào — bản thân trạng thái này là một tín"
-        " hiệu rủi ro, mẫu hình thường gặp là ôm lỗ chờ giá quay lại thay vì cắt"
-        " lỗ. <strong>ĐÃ RỜI</strong>: từng giao dịch nhưng không còn vị thế mở và"
-        " cũng không còn chốt lệnh mới — tài sản này không còn đại diện cho hoạt"
-        " động hiện tại của bot.",
-        "Suy từ vị thế đang mở và lịch sử lệnh đã chốt trong sổ lệnh công khai:"
-        " một tài sản có lệnh chốt trong cửa sổ hoạt động gần đây được coi là đang"
-        " giao dịch; còn vị thế mở nhưng ngoài cửa sổ đó thì là chỉ đang ôm; không"
-        " còn gì thì là đã rời.",
+        "<strong>TRADING</strong>: has a recently closed trade, the bot is still"
+        " actively trading this asset. <strong>HOLDING ONLY</strong>: still has an"
+        " open position but has not closed a trade in a long time -- this status by"
+        " itself is a risk signal, a common pattern being holding a loser and"
+        " waiting for the price to come back instead of cutting it."
+        " <strong>EXITED</strong>: has traded before but no longer has an open"
+        " position and has not closed a new trade either -- this asset no longer"
+        " represents the bot's current activity.",
+        "Inferred from open positions and the closed-trade history in the public"
+        " trade ledger: an asset with a trade closed within the recent activity"
+        " window is considered trading; an open position outside that window is"
+        " holding only; nothing at all means exited.",
     )
-    return _section("Tài sản đang giao dịch", table + theory, anchor="tai-san")
+    return _section(
+        "Traded assets", table + theory, pair=True, anchor="tai-san"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Bước 1 + 2 Tab Components: Market Analytics & Trade Analytics
+# --------------------------------------------------------------------------- #
+
+_TREND_LABEL_VI = {
+    "BULLISH": "RISING ↗",
+    "BEARISH": "FALLING ↘",
+    "SIDEWAYS": "SIDEWAYS ↔",
+}
+
+_VOLATILITY_LABEL_VI = {
+    "LOW": "LOW VOLATILITY",
+    "NORMAL": "NORMAL VOLATILITY",
+    "HIGH": "HIGH VOLATILITY ⚠️",
+}
+
+_LIQUIDITY_LABEL_VI = {
+    "DEEP": "DEEP",
+    "ADEQUATE": "ADEQUATE",
+    "THIN": "THIN / SLIPPAGE-PRONE ⚠️",
+}
+
+
+def _render_dominant_market_card(result: Dict[str, Any]) -> str:
+    market = (
+        result.get("market_analysis")
+        or ((result.get("evidence") or {}).get("market_analysis"))
+        or {}
+    )
+    evidence = result.get("evidence") or {}
+    symbol = market.get("symbol") or evidence.get("traded_symbol") or "Primary market"
+    venue = market.get("venue_type") or "CEX"
+    posture = market.get("posture") or (
+        "STABLE" if market.get("available") else "UNDETERMINED"
+    )
+    posture_evidence = market.get("posture_evidence") or []
+    trend = market.get("trend")
+    volatility = market.get("volatility")
+    liquidity = market.get("liquidity")
+    data_quality = market.get("data_quality")
+    comparison = market.get("comparison") or []
+
+    trend_text = _TREND_LABEL_VI.get(trend, "UNDETERMINED")
+    trend_color = (
+        "#16a34a" if trend == "BULLISH" else ("#dc2626" if trend == "BEARISH" else None)
+    )
+    vol_text = _VOLATILITY_LABEL_VI.get(volatility, "NORMAL")
+    liq_text = _LIQUIDITY_LABEL_VI.get(liquidity, "ADEQUATE")
+    quality_text = _pct(
+        float(data_quality) * 100 if _is_finite_number(data_quality) else 100.0, 0
+    )
+
+    # NOTE: "ỔN" matches the Vietnamese `POSTURE_STABLE` value
+    # ("ỔN ĐỊNH") that `Agent/backend/qc/reporting/market_posture.py`
+    # (out of scope for this translation pass) still produces; "STABLE"
+    # covers this module's own English fallback default above.
+    posture_color = "#16a34a" if "ỔN" in posture or posture == "STABLE" else "#d97706"
+
+    tiles = [
+        _stat_tile("Market trend", trend_text, color=trend_color),
+        _stat_tile("Volatility level", vol_text),
+        _stat_tile("Order-book liquidity", liq_text),
+        _stat_tile("Data quality", quality_text),
+    ]
+
+    evidence_bullets = (
+        "".join(f"<li>{_esc(e)}</li>" for e in posture_evidence)
+        if posture_evidence
+        else "<li>Candle and order-book data meet the Step 1 standard</li>"
+    )
+    comparison_html = ""
+    if comparison:
+        comp_bullets = "".join(f"<li>{_esc(c)}</li>" for c in comparison)
+        comparison_html = (
+            '<div class="market-comparison-box">'
+            "<h4>Performance comparison on the same market:</h4>"
+            f'<ul class="findings">{comp_bullets}</ul>'
+            "</div>"
+        )
+
+    hint = (
+        '<div class="card-hint">'
+        "<strong>Step 1 + 2 basis:</strong> Assesses the bot's actual operating environment. "
+        "Includes order-book liquidity, volatility range, and the balance of two-way order flow. "
+        "Data is loaded from the order book and historical candle series."
+        "</div>"
+    )
+
+    # "Bằng chứng trạng thái" và "so sánh hiệu suất" (khi có) bọc chung trong
+    # `market-boxes` để CSS xếp chúng NGANG HÀNG bằng Grid trên tablet+ thay
+    # vì luôn xếp chồng dọc -- xem `.market-boxes` trong `_CSS`.
+    body = (
+        f'<div class="market-hero-card">'
+        f'<div class="market-hero-title">Market pair: <strong>{_esc(symbol)} / USDT ({_esc(venue)})</strong>'
+        f' <span class="badge" style="background:{posture_color}">STATUS: {_esc(posture)}</span></div>'
+        f'<div class="stat-row">{"".join(tiles)}</div>'
+        '<div class="market-boxes">'
+        f'<div class="market-evidence-box">'
+        f"<h4>Status evidence from Step 1 + 2:</h4>"
+        f'<ul class="findings">{evidence_bullets}</ul>'
+        f"</div>"
+        f"{comparison_html}"
+        "</div>"
+        f"{hint}"
+        f"</div>"
+    )
+    return _section(
+        "Bot's primary trading market", body, anchor="thi-truong-chinh"
+    )
+
+
+def _render_open_positions_audit(result: Dict[str, Any]) -> str:
+    evidence = result.get("evidence") or {}
+    perf = evidence.get("performance") or {}
+
+    open_pos = perf.get("open_positions")
+    open_loss = perf.get("open_loss")
+    open_loss_pct = perf.get("open_loss_to_capital_pct")
+    booked_pf = perf.get("profit_factor")
+    marked_pf = perf.get("marked_profit_factor")
+    skew = perf.get("pnl_skew")
+    kurt = perf.get("pnl_kurtosis")
+
+    if all(v is None for v in (open_pos, open_loss, marked_pf, skew, kurt)):
+        return ""
+
+    tiles = []
+    if open_pos is not None:
+        tiles.append(
+            _stat_tile("Open positions", _int_text(open_pos), info_key="open_positions")
+        )
+    if open_loss is not None:
+        loss_color = (
+            "#dc2626"
+            if (_is_finite_number(open_loss) and float(open_loss) < 0)
+            else None
+        )
+        tiles.append(
+            _stat_tile(
+                "Unrealised loss", _money(open_loss), color=loss_color, info_key="open_loss"
+            )
+        )
+    if open_loss_pct is not None:
+        pct_val = (
+            float(open_loss_pct) * 100.0
+            if float(open_loss_pct) <= 1.0
+            else float(open_loss_pct)
+        )
+        tiles.append(
+            _stat_tile(
+                "Unrealised loss / capital ratio",
+                _pct(pct_val, 1),
+                info_key="open_loss_to_capital_pct",
+            )
+        )
+    if booked_pf is not None and marked_pf is not None:
+        pf_color = (
+            "#dc2626"
+            if (
+                _is_finite_number(marked_pf)
+                and float(marked_pf) < 1.0
+                and float(booked_pf) >= 1.0
+            )
+            else None
+        )
+        tiles.append(
+            _stat_tile(
+                "Marked PF (mark-to-market)",
+                _num(marked_pf, 2),
+                color=pf_color,
+                info_key="marked_pf",
+            )
+        )
+    if skew is not None:
+        skew_color = (
+            "#dc2626" if (_is_finite_number(skew) and float(skew) < -0.5) else None
+        )
+        tiles.append(
+            _stat_tile(
+                "PnL skewness", _num(skew, 2), color=skew_color, info_key="pnl_skew"
+            )
+        )
+    if kurt is not None:
+        tiles.append(_stat_tile("PnL kurtosis", _num(kurt, 2), info_key="pnl_kurtosis"))
+
+    deferred_notice = ""
+    if _is_finite_number(booked_pf) and _is_finite_number(marked_pf):
+        b_pf = float(booked_pf)
+        m_pf = float(marked_pf)
+        if b_pf >= 1.0 and m_pf < 1.0:
+            deferred_notice = (
+                '<div class="notice notice-danger">'
+                f"<strong>WARNING -- HIDDEN LOSS-HOLDING:</strong> The profit factor on the closed book is {_num(b_pf, 2)}, "
+                f"but once open positions are marked to market (Marked PF) it drops to {_num(m_pf, 2)}. "
+                "The bot shows signs of holding losing trades open instead of cutting them, to keep an artificial win rate."
+                "</div>"
+            )
+
+    hint = (
+        '<div class="card-hint">'
+        "<strong>Open-position audit:</strong> Detects the risk of holding losing trades open to preserve the win rate. "
+        "The Marked PF figure reflects the result if every open position were closed right now. "
+        "Skewness and kurtosis measure the shape of the return distribution and outlier risk."
+        "</div>"
+    )
+
+    body = f'<div class="stat-row">{"".join(tiles)}</div>{deferred_notice}{hint}'
+    # LƯU Ý: chỉ viết MỘT dấu `&` thô ở đây -- `_section()` tự đưa `title` qua
+    # `_esc()` một lần rồi mới in ra. Trước đây chỗ này viết sẵn "&amp;" nên
+    # bị escape hai lần (& -> &amp; -> &amp;amp;), hiển thị sai thành literal
+    # "&amp;" trên trang. Xem cách "Tăng trưởng & cơ cấu kết quả" đã làm đúng
+    # ngay từ đầu để đối chiếu.
+    return _section(
+        "Open-position audit & return distribution",
+        body,
+        tone="quiet",
+        pair=True,
+        anchor="vi-the-mo",
+    )
+
+
+def _render_closed_trades_table(result: Dict[str, Any], limit: int = 200) -> str:
+    evidence = result.get("evidence") or {}
+    series = evidence.get("closed_trade_series")
+    if not isinstance(series, list) or not series:
+        return ""
+
+    symbol = (
+        evidence.get("traded_symbol")
+        or (result.get("market_analysis") or {}).get("symbol")
+        or "BTC-USDT"
+    )
+
+    rows = []
+    running_pnl = 0.0
+    total_trades = len(series)
+    enriched = []
+    for item in series:
+        if not isinstance(item, dict):
+            continue
+        pnl = item.get("realized_pnl")
+        pnl_val = float(pnl) if _is_finite_number(pnl) else 0.0
+        running_pnl += pnl_val
+        enriched.append(
+            {
+                "close_time": item.get("close_time"),
+                "realized_pnl": pnl_val,
+                "running_pnl": running_pnl,
+            }
+        )
+
+    recent = list(reversed(enriched))[:limit]
+    for idx, t in enumerate(recent, 1):
+        ct = t.get("close_time")
+        time_str = _format_vn_timestamp(ct) if _is_finite_number(ct) else "—"
+        pnl_val = t["realized_pnl"]
+        run_val = t["running_pnl"]
+        is_win = pnl_val > 0
+        badge = (
+            '<span class="badge-win">WIN</span>'
+            if is_win
+            else (
+                '<span class="badge-loss">LOSS</span>'
+                if pnl_val < 0
+                else '<span class="badge">BREAK-EVEN</span>'
+            )
+        )
+        pnl_cls = "text-profit" if is_win else ("text-loss" if pnl_val < 0 else "")
+        run_cls = "text-profit" if run_val > 0 else ("text-loss" if run_val < 0 else "")
+        pnl_str = f"{'+' if pnl_val > 0 else ''}{pnl_val:,.2f} USDT"
+        run_str = f"{'+' if run_val > 0 else ''}{run_val:,.2f} USDT"
+
+        rows.append(
+            [
+                str(idx),
+                f'<span class="mono-symbol">{_esc(symbol)}</span>',
+                time_str,
+                f'<span class="{pnl_cls}">{_esc(pnl_str)}</span>',
+                f'<strong class="{run_cls}">{_esc(run_str)}</strong>',
+                badge,
+            ]
+        )
+
+    table = _table(
+        ["#", "Pair", "Close time", "Profit / Loss (USDT)", "Cumulative PnL", "Result"],
+        rows,
+        table_class="okx-trades-table paginated-table",
+        table_id="table-closed-trades",
+        page_size=10,
+    )
+    subtitle = (
+        f"<p style='color:var(--muted);font-size:0.85rem;margin-top:-0.2rem'>"
+        f"OKX closed trade ledger · Showing {len(recent)} trades out of {total_trades} recorded trades "
+        f"(10 trades per page with pagination controls below)."
+        f"</p>"
+    )
+
+    hint = (
+        '<div class="card-hint">'
+        "<strong>Closed trade log:</strong> Check how regular the cash flow is "
+        "and the time gaps between take-profit or stop-loss cycles."
+        "</div>"
+    )
+    return _section(
+        "Most recent closed trades",
+        subtitle + table + hint,
+        anchor="danh-sach-lenh",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LIMITED tab content -- one bot, same 14 section ids as a FULL result.
+#
+# Yêu cầu gốc của người dùng: "bot private phải tận dụng những gì có thể
+# public để phân tích đánh giá ... đảm bảo report đều giống nhau". Trước khi
+# có khối này, một bot LIMITED (`Agent/backend/analysis/limited.py`, sổ lệnh
+# bị OKX chặn ở lỗi 60004) chỉ tự nhiên khớp được BA trong số 14 mục FULL
+# có (ket-luan, diem-chieu, thi-truong-chinh -- ba hàm `_render_conclusion`/
+# `_render_dimensions_section`/`_render_dominant_market_card` phía trên đều
+# không có điều kiện tiên quyết nào chỉ FULL mới thoả), vì mọi hàm còn lại
+# chỉ đọc được đúng hình dạng `evidence` của FULL (`closed_trade_series`,
+# `performance`, `dimensions`, `primary_share_pct`, ...) mà một bot LIMITED
+# không có và không cần bịa ra.
+#
+# Ba hàm dưới đây (`_render_tab_report_limited`/`_market_limited`/
+# `_trades_limited`) là ĐÚNG MỘT điểm nối cho mỗi tab -- `_render_tab_report`/
+# `_render_tab_market`/`_render_tab_trades` bên dưới rẽ nhánh ngay dòng đầu
+# tiên khi `status == "LIMITED"`, không đổi gì trong nhánh FULL sẵn có. Mọi
+# phép tính (định dạng số, gom nhiều luồng `evidence` lại) nằm ở
+# `Agent/backend/web/limited_view.py`; các hàm `_render_limited_*` ở đây chỉ
+# format/escape/`_section()` hoá, đúng phong cách `loss_analysis.py` đã có.
+#
+# Mỗi mục KHÔNG đo được vẫn phải HIỆN, kèm lý do thật -- không ẩn mục, không
+# in "0"/"—" trơ trọi như thể đã đo. `_LIMITED_GAP_NOTICE` là khối giải
+# thích dùng chung cho mọi trường hợp đó.
+# --------------------------------------------------------------------------- #
+
+
+def _limited_gap_notice(reason_html: str) -> str:
+    return f'<div class="notice notice-warning">{reason_html}</div>'
+
+
+def _render_limited_narrative(result: Dict[str, Any]) -> str:
+    """ "nhan-dinh" cho LIMITED: một đoạn văn xuôi DUY NHẤT kết hợp nhiều
+    luồng public cùng lúc (hồ sơ xếp hạng + thống kê ngày + đường vốn tuần +
+    trạng thái Monte Carlo) -- xem `limited_view.narrative_paragraph`'s
+    docstring cho lý do đoạn này KHÔNG lặp lại nguyên văn `result["text"]`
+    (đã hiện đủ, theo từng dòng, ở mục "Kết luận và khuyến nghị").
+    """
+    text = limited_view.narrative_paragraph(result)
+    if not text:
+        return _section(
+            "Expert assessment",
+            _limited_gap_notice(
+                "Could not synthesise an assessment: besides having its trade "
+                "ledger hidden by OKX, this bot has no readable ranking profile "
+                "(public-lead-traders) or daily stats (public-stats) either."
+            ),
+            anchor="nhan-dinh",
+        )
+    body = (
+        '<div class="narrative-body-wrap">'
+        '<div class="narrative-meta-bar">'
+        '<span class="badge badge-info">SYNTHESISED FROM PUBLIC SOURCES</span>'
+        '<span class="meta-desc">An objective summary synthesised from the bot\'s verified public data</span>'
+        "</div>"
+        f'<div class="narrative-prose-content"><p class="narrative-paragraph">{_esc(text)}</p></div>'
+        "</div>"
+    )
+    return _section("Expert assessment", body, anchor="nhan-dinh")
+
+
+def _render_limited_growth(result: Dict[str, Any]) -> str:
+    """ "tang-truong" cho LIMITED: hai chuỗi công khai còn vẽ được --
+    đường vốn suy từ PnL tuần (`weekly_series`) và chuỗi `pnlRatio` của hồ
+    sơ xếp hạng (`pnl_ratio_series`) -- KHÔNG phải đường vốn tích luỹ theo
+    từng lệnh (bot này không công khai lệnh nào), nên dùng `_line_chart`
+    với `x_label_prefix`/`aria_label` riêng để không lẫn với chart của một
+    bot FULL. Không có chuỗi nào đọc được thì hiện khối giải thích, không
+    vẽ biểu đồ rỗng.
+    """
+    evidence = result.get("evidence") or {}
+    parts: List[str] = []
+
+    equity_pts = limited_view.weekly_equity_points(evidence)
+    if equity_pts:
+        coverage = limited_view.weekly_series_coverage(evidence) or {}
+        chart = _line_chart(
+            equity_pts,
+            y_unit=" USDT",
+            x_label_prefix="Week",
+            aria_label="Capital curve inferred from public weekly PnL",
+        )
+        caption = (
+            f"<p class='card-hint'>Inferred from {coverage.get('usable', len(equity_pts))}/"
+            f"{coverage.get('total', len(equity_pts))} weeks with a PnL/ratio precise "
+            "enough to convert into capital -- NOT a per-trade equity curve.</p>"
+        )
+        parts.append("<h3>Capital curve inferred from weekly PnL</h3>" + chart + caption)
+
+    ratio_pts = limited_view.pnl_ratio_points(evidence)
+    if ratio_pts:
+        chart = _line_chart(
+            ratio_pts,
+            y_unit="%",
+            x_label_prefix="Point",
+            aria_label="Published pnlRatio over time",
+        )
+        parts.append("<h3>Published return ratio over time (pnlRatio)</h3>" + chart)
+
+    if not parts:
+        return _section(
+            "Growth & outcome composition",
+            _limited_gap_notice(
+                "No weekly PnL or pnlRatio series is available to plot -- this bot "
+                "does not publicly expose its trade ledger, so there is no "
+                "per-trade cumulative equity curve like a FULL bot has."
+            ),
+            anchor="tang-truong",
+        )
+
+    theory = _theory(
+        "The two lines above measure GROWTH using two different public data"
+        " streams: the capital curve inferred from weekly PnL (accumulated across"
+        " each week OKX publishes) and the published return ratio (a snapshot on"
+        " the ranking profile's own separate timeline) -- the two time axes do NOT"
+        " line up, so they are not plotted on one chart, to avoid implying they are"
+        " the same series.",
+        "The weekly capital curve uses `Agent/backend/mcp/capital/equity_curve.py`'s"
+        " `EquityCurveBuilder` (equity = pnl / pnlRatio for each week); pnlRatio is"
+        " OKX's own `profile.pnlRatios` verbatim. There are no trades here, only"
+        " PnL/ratio aggregated by week or by snapshot point.",
+    )
+    return _section(
+        "Growth & outcome composition", "".join(parts) + theory, anchor="tang-truong"
+    )
+
+
+def _render_limited_monte_carlo(result: Dict[str, Any]) -> str:
+    """ "monte-carlo" cho LIMITED: dùng LẠI đúng `_render_monte_carlo` (đọc
+    `result["mc"]`, không quan tâm status) khi engine đã chạy được thật --
+    một bot LIMITED có đủ >= MIN_SAMPLE_SIZE điểm PnL tuần (thường mỏng,
+    xem cảnh báo `sample_is_thin` đã thêm ở `_render_monte_carlo`) vẫn có mô
+    phỏng thật, không phải bịa. Chỉ khi `mc` thật sự vắng (engine từ chối vì
+    quá ít điểm) mới hiện khối giải thích, lấy ĐÚNG lý do engine đã dùng để
+    chấm điểm (`components` -- không suy đoán lại).
+    """
+    rendered = _render_monte_carlo(result)
+    if rendered:
+        return rendered
+    evidence = result.get("evidence") or {}
+    reason = limited_view.monte_carlo_gap_reason(evidence) or (
+        "Not enough weekly PnL points to run a Monte Carlo simulation."
+    )
+    return _section(
+        "Monte Carlo simulation",
+        _limited_gap_notice(_esc(reason)),
+        anchor="monte-carlo",
+    )
+
+
+def _render_limited_market_scope(result: Dict[str, Any]) -> str:
+    """ "thi-truong" cho LIMITED: bot 60004 không có `primary_share_pct`
+    (cần sổ lệnh để tính tỉ trọng theo mã) nên không thể trả lời "thị
+    trường được chấm chiếm bao nhiêu % hoạt động". Nêu rõ lý do và, nếu đọc
+    được, số lượng hợp đồng bot đang chạy (`traderInsts`) như một tín hiệu
+    thay thế thô -- KHÔNG suy ra tỉ trọng từ đó.
+    """
+    evidence = result.get("evidence") or {}
+    instruments = limited_view.traded_instruments(evidence)
+    reason = (
+        "Could not compute what share of the bot's activity the scored market "
+        "accounts for: a per-symbol share requires the per-position trade "
+        "ledger, and OKX does not publicly expose this bot's trade ledger "
+        "(error 60004)."
+    )
+    if instruments:
+        # Chỉ nêu một mẫu nhỏ làm ví dụ -- một bot lưới/scalping có thể chạy
+        # tới vài trăm hợp đồng (đo được: 269 ở bot mẫu của việc này), liệt
+        # kê hết vào giữa một câu văn xuôi sẽ biến cả đoạn thành một khối
+        # ký tự không đọc được. Danh sách ĐẦY ĐỦ nằm ở mục "Tài sản đang
+        # giao dịch" (bảng, có phân trang bằng số lượng hiển thị).
+        _SAMPLE_N = 8
+        sample = ", ".join(instruments[:_SAMPLE_N])
+        remaining = len(instruments) - _SAMPLE_N
+        sample_text = sample + (f", and {remaining} other symbols" if remaining > 0 else "")
+        reason += (
+            f" The public profile shows the bot running {len(instruments)} "
+            f"instruments (for example: {_esc(sample_text)} -- the full list is in "
+            "the &quot;Traded assets&quot; section) -- this is a list only, with NO "
+            "trading-value share between these instruments."
+        )
+    return _section(
+        "Market being scored", _limited_gap_notice(reason), anchor="thi-truong"
+    )
+
+
+def _render_limited_playstyle(result: Dict[str, Any]) -> str:
+    """ "cach-choi" cho LIMITED: tái dựng cách bot chơi (`strategy_drift`,
+    `behavioral_risk` ở FULL) cần chuỗi lệnh với thời điểm mở/đóng, đòn bẩy,
+    hướng lệnh -- không có gì trong số đó công khai cho một bot 60004.
+    """
+    reason = (
+        "Could not reconstruct how this bot enters trades (direction, leverage, "
+        "hold time, allocation by market phase): all of that requires reading "
+        "individual trades directly from the trade ledger, and OKX does not "
+        "publicly expose this bot's trade ledger (error 60004). What is public "
+        "(ranking profile, daily stats) cannot say HOW THE BOT ENTERS TRADES, "
+        "only the AGGREGATE RESULT."
+    )
+    return _section(
+        "How this bot trades", _limited_gap_notice(reason), anchor="cach-choi"
+    )
+
+
+_LIMITED_PUBLIC_STATS_ROWS: Tuple[Tuple[str, str, str], ...] = (
+    ("win_ratio_pct", "Share of winning days (public-stats)", "pct"),
+    ("profit_days", "Winning days", "int"),
+    ("loss_days", "Losing days", "int"),
+    ("invest_amt", "Invested capital (investAmt)", "money"),
+    ("avg_sub_pos_notional", "Avg sub-position notional", "money"),
+    ("cur_copy_trader_pnl", "Current copier PnL", "money"),
+    ("aum", "AUM (ranking profile)", "money"),
+    ("pnl", "Total PnL (ranking profile)", "money"),
+    ("pnl_ratio_pct", "Published return ratio", "pct"),
+    ("lead_days", "Days as lead trader", "int"),
+    ("copy_trader_num", "Current copiers", "int"),
+    ("max_copy_trader_num", "Max copiers", "int"),
+    ("acc_copy_trader_num", "Total copiers ever", "int"),
+    ("rank", "Ranking position", "int"),
+)
+
+
+def _render_limited_public_stats(result: Dict[str, Any]) -> str:
+    """ "so-lieu" cho LIMITED: bảng số liệu CÔNG KHAI (public-lead-traders +
+    public-stats) -- KHÔNG phải bảng "Số liệu giao dịch" của FULL (đo trên
+    sổ lệnh: profit factor, Sharpe, ...), dù dùng chung tiêu đề để mục lục
+    hai bên khớp nhau. Chỉ những trường thật sự đọc được mới lên bảng.
+    """
+    evidence = result.get("evidence") or {}
+    snapshot = limited_view.public_stats_snapshot(evidence)
+    if not snapshot:
+        return _section(
+            "Trade metrics",
+            _limited_gap_notice(
+                "No public-lead-traders or public-stats data is readable for "
+                "this bot -- there is no public data to show."
+            ),
+            anchor="so-lieu",
+        )
+    rows = []
+    for key, label, kind in _LIMITED_PUBLIC_STATS_ROWS:
+        value = snapshot.get(key)
+        if value is None:
+            continue
+        text = {
+            "pct": lambda v: _pct(v, 1),
+            "int": _int_text,
+            "money": _money,
+        }[kind](value)
+        rows.append([label, text])
+    copy_state = snapshot.get("copy_state")
+    if copy_state:
+        rows.append(["Copy-trade status", _esc(copy_state)])
+    table = _table(["Metric (public source)", "Value"], rows)
+    notice = _limited_gap_notice(
+        "This is AGGREGATE data by day/ranking profile that OKX still makes "
+        "public, NOT a per-trade profit factor/Sharpe/expectancy (those metrics "
+        "require the trade ledger, which this bot does not make public)."
+    )
+    return _section("Trade metrics", table + notice, anchor="so-lieu")
+
+
+def _render_limited_drawdown(result: Dict[str, Any]) -> str:
+    """ "sut-giam-von" cho LIMITED: đúng con số `_drawdown_component` trong
+    `limited.py` đã CHẤM (không tính lại), tách khỏi chuỗi `findings` thành
+    trường có cấu trúc (`evidence.drawdown_summary`). Mẫu số ở đây là ĐƯỜNG
+    VỐN TUẦN (suy từ pnl/pnlRatio công khai), khác hẳn mẫu số "vốn tại đúng
+    thời điểm lệnh đóng" mà `_render_drawdown_vs_capital` dùng cho một bot
+    FULL (xem `Agent/backend/web/loss_analysis.py`'s docstring, cùng
+    nguyên tắc: hai mẫu số khác nhau không phải mâu thuẫn).
+    """
+    evidence = result.get("evidence") or {}
+    summary = limited_view.drawdown_summary(evidence)
+    if not summary:
+        return _section(
+            "Drawdown vs. capital",
+            _limited_gap_notice(
+                "Could not infer drawdown from the weekly capital curve: no week "
+                "has a PnL/ratio precise enough to convert into capital (see the "
+                '"Score by risk dimension" section -- this bot\'s drawdown '
+                "dimension is in a missing-data state, not a low-risk one)."
+            ),
+            anchor="sut-giam-von",
+        )
+    tiles = [
+        _stat_tile(
+            "Max drawdown (weekly capital curve)",
+            _pct(summary["max_dd_pct"], 1),
+            color=_risk_color(summary["max_dd_pct"]),
+        ),
+        _stat_tile(
+            "Usable weeks",
+            f"{_int_text(summary.get('usable_weeks'))}/{_int_text(summary.get('total_weeks'))}",
+        ),
+    ]
+    body = f'<div class="stat-row">{"".join(tiles)}</div>'
+    if summary.get("wiped_out"):
+        body += _limited_gap_notice(
+            "The weekly capital curve fell to zero during the observed period: "
+            "the account was wiped out at least once by this measure."
+        )
+    theory = _theory(
+        "The max drawdown here is inferred from the WEEKLY capital curve "
+        "(equity = pnl / pnlRatio for each week OKX publishes), NOT from the "
+        "per-position trade ledger (this bot does not publish its trade "
+        "ledger). A FULL bot measures drawdown on capital at the exact moment "
+        "each trade closes -- a much finer-grained series -- so these two "
+        "figures should NOT be placed side by side as if they measured the "
+        "same thing.",
+        "Computed with `Agent/backend/mcp/capital/equity_curve.py`'s "
+        "`EquityCurveBuilder` (running peak minus the next trough on the "
+        "weekly equity series), taking the exact figure "
+        "`Agent/backend/analysis/limited.py`'s `_drawdown_component` already "
+        "used for scoring -- not recomputed.",
+    )
+    return _section("Drawdown vs. capital", body + theory, anchor="sut-giam-von")
+
+
+def _render_limited_open_positions(result: Dict[str, Any]) -> str:
+    """ "vi-the-mo" cho LIMITED: kiểm toán vị thế mở (PF tất toán sổ, độ
+    lệch/độ nhọn PnL, ...) cần biết TỪNG vị thế đang mở lỗ/lãi bao nhiêu --
+    không đọc được từ bất kỳ endpoint public nào còn sống ở một bot 60004.
+    """
+    reason = (
+        "Could not audit open positions (unrealised loss, marked-to-market PF "
+        "versus closed-book PF, PnL distribution skew/kurtosis): these metrics "
+        "require knowing each of the bot's open positions individually, and "
+        "OKX does not make that public for this bot. This does not mean the "
+        "bot is not holding losers -- only that it cannot be observed."
+    )
+    return _section(
+        "Open-position audit & return distribution",
+        _limited_gap_notice(reason),
+        tone="quiet",
+        pair=True,
+        anchor="vi-the-mo",
+    )
+
+
+def _render_limited_inference(result: Dict[str, Any]) -> str:
+    """ "suy-luan" cho LIMITED: PSR/DSR (Bailey &amp; López de Prado) cần
+    chuỗi lợi nhuận TỪNG LỆNH để tính skew/kurtosis/Sharpe mỗi lệnh -- một
+    chuỗi PnL tuần chỉ có 12 điểm không đứng vào vai trò đó, kể cả khi
+    Monte Carlo ở mục trên vẫn chạy được (chạy trên PnL tuần, không phải
+    trên PnL từng lệnh).
+    """
+    reason = (
+        "Could not infer the Probabilistic/Deflated Sharpe Ratio (PSR/DSR): "
+        "both metrics require a PER-TRADE return series to estimate skew, "
+        "kurtosis, and Sharpe per trade, while this bot's public data only has "
+        "PnL AGGREGATED by week -- weekly aggregation cannot substitute for "
+        "per-trade data, even though it is enough to run the rougher Monte "
+        "Carlo simulation in the section above."
+    )
+    return _section(
+        "Statistical inference",
+        _limited_gap_notice(reason),
+        tone="quiet",
+        pair=True,
+        anchor="suy-luan",
+    )
+
+
+def _render_limited_assets(result: Dict[str, Any]) -> str:
+    """ "tai-san" cho LIMITED: danh sách hợp đồng bot đang chạy
+    (`profile.traderInsts`) khi đọc được -- KHÔNG có tỉ trọng vốn/PnL theo
+    từng tài sản (cần sổ lệnh để tính) như bảng "Tài sản đang giao dịch"
+    của một bot FULL.
+    """
+    evidence = result.get("evidence") or {}
+    instruments = limited_view.traded_instruments(evidence)
+    if not instruments:
+        return _section(
+            "Traded assets",
+            _limited_gap_notice(
+                "Could not read the list of assets this bot trades from the "
+                "remaining public data for this bot."
+            ),
+            anchor="tai-san",
+        )
+    # Chặn số dòng hiển thị -- một bot lưới/scalping có thể chạy tới vài
+    # trăm hợp đồng (đo được: 269 ở bot mẫu của việc này); một bảng dài như
+    # vậy với cột "Tỉ trọng" mà MỌI dòng đều "—" (không có tỉ trọng nào tính
+    # được, xem docstring) không thêm thông tin gì so với một danh sách tên
+    # thuần -- nên bỏ hẳn cột đó, chỉ liệt kê tên, và cắt ở
+    # `_ASSET_LIST_LIMIT` dòng kèm chú thích tổng số, cùng kiểu với
+    # `_render_closed_trades_table`'s "hiển thị N trong tổng số M" phía trên.
+    _ASSET_LIST_LIMIT = 40
+    shown = instruments[:_ASSET_LIST_LIMIT]
+    rows = [[_esc(name)] for name in shown]
+    table = _table(["Running instruments (traderInsts)"], rows)
+    subtitle = ""
+    if len(instruments) > _ASSET_LIST_LIMIT:
+        subtitle = (
+            "<p class='card-hint'>Showing "
+            f"{_ASSET_LIST_LIMIT}/{len(instruments)} instruments.</p>"
+        )
+    notice = _limited_gap_notice(
+        "This is only a LIST of instruments from the public ranking profile, "
+        "with no capital/PnL share per asset -- that share requires the trade "
+        "ledger, which this bot does not make public."
+    )
+    return _section(
+        "Traded assets", table + subtitle + notice, anchor="tai-san"
+    )
+
+
+def _render_limited_trades_table(result: Dict[str, Any]) -> str:
+    """ "danh-sach-lenh" cho LIMITED: không có gì để liệt kê -- đây CHÍNH LÀ
+    dữ liệu OKX trả lỗi 60004, không phải một khoảng trống tình cờ.
+    """
+    reason = (
+        "OKX does not publicly expose this bot's trade ledger (the trade-ledger "
+        'endpoint returns error 60004 -- "Trader doesn\'t exist"): there are no '
+        "trades to list here, even though the bot is still active and still "
+        "publishes its ranking profile/daily stats in other sections of this page."
+    )
+    return _section(
+        "Most recent closed trades",
+        _limited_gap_notice(reason),
+        anchor="danh-sach-lenh",
+    )
+
+
+def _render_limited_measured_evidence(result: Dict[str, Any]) -> str:
+    """Bằng chứng thô của từng chiều ĐÃ ĐO ĐƯỢC, dạng KHỐI RỜI để nhúng vào
+    trong chính mục "Điểm từng chiều rủi ro".
+
+    Biểu đồ cho con số; phần này cho CĂN CỨ của con số đó. Với một bot giấu
+    sổ lệnh thì đây chính là chỗ thể hiện việc kết hợp nhiều luồng public:
+    mỗi chiều ghi rõ nó dựng trên bao nhiêu quan sát, từ endpoint nào.
+
+    CỐ Ý KHÔNG dựng một `<section>` riêng: trang LIMITED phải có ĐÚNG cùng
+    tập id mục với trang đầy đủ (yêu cầu "report đều giống nhau", đã khoá
+    bằng `test_limited_result_has_the_same_section_ids_as_a_full_result`).
+    Bản đầu của hàm này thêm mục `bang-chung-chieu` và lập tức phá vỡ đúng
+    bất biến đó.
+    """
+    rows = limited_view.measured_component_evidence(result)
+    if not rows:
+        return ""
+    blocks = []
+    for row in rows:
+        score = row.get("score")
+        head = _esc(str(row.get("label") or "—"))
+        score_html = (
+            f'<span class="badge" style="--badge-color:{_risk_color(score)}">'
+            f"{_num(score, 0)}</span>"
+            if score is not None
+            else ""
+        )
+        blocks.append(
+            f'<div class="limited-evidence-row"><h3>{head} {score_html}</h3>'
+            f"{_findings_list(row.get('findings'), limit=4)}</div>"
+        )
+    return (
+        '<h3 class="limited-evidence-head">Evidence for each measured dimension</h3>'
+        + "".join(blocks)
+    )
+
+
+def _render_limited_dimensions(result: Dict[str, Any]) -> str:
+    """Mục "Điểm từng chiều rủi ro" của trang LIMITED: y hệt bản đầy đủ,
+    kèm thêm bằng chứng thô của từng chiều đo được ngay bên dưới biểu đồ.
+
+    Nhúng VÀO TRONG mục sẵn có chứ không tách mục mới -- xem
+    `_render_limited_measured_evidence` cho lý do (bất biến "cùng tập id
+    mục" giữa trang LIMITED và trang đầy đủ).
+    """
+    section = _render_dimensions_section(result)
+    evidence = _render_limited_measured_evidence(result)
+    if not section or not evidence:
+        return section
+    closing = "</section>"
+    if not section.endswith(closing):
+        return section
+    return section[: -len(closing)] + evidence + closing
+
+
+def _render_tab_report_limited(result: Dict[str, Any]) -> str:
+    sections = [
+        _render_conclusion(result),
+        _render_limited_narrative(result),
+        _render_limited_dimensions(result),
+        _render_limited_growth(result),
+        _render_limited_monte_carlo(result),
+    ]
+    return "".join(s for s in sections if s)
+
+
+def _render_tab_market_limited(result: Dict[str, Any]) -> str:
+    sections = [
+        _render_dominant_market_card(result),
+        _render_limited_market_scope(result),
+        _render_limited_playstyle(result),
+    ]
+    return "".join(s for s in sections if s)
+
+
+def _render_tab_trades_limited(result: Dict[str, Any]) -> str:
+    sections = [
+        _render_limited_public_stats(result),
+        _render_limited_drawdown(result),
+        _render_limited_open_positions(result),
+        _render_limited_inference(result),
+        _render_limited_assets(result),
+        _render_limited_trades_table(result),
+    ]
+    return "".join(s for s in sections if s)
+
+
+def _render_tab_report(result: Dict[str, Any]) -> str:
+    if result.get("status") == "LIMITED":
+        return _render_tab_report_limited(result)
+    sections = [
+        _render_conclusion(result),
+        _render_narrative(result),
+        _render_dimensions_section(result),
+        _render_growth_section(result),
+        _render_monte_carlo(result),
+    ]
+    return "".join(s for s in sections if s)
+
+
+def _render_tab_market(result: Dict[str, Any]) -> str:
+    if result.get("status") == "LIMITED":
+        return _render_tab_market_limited(result)
+    sections = [
+        _render_dominant_market_card(result),
+        _render_market_coverage(result),
+        _render_strategy_section(result),
+    ]
+    return "".join(s for s in sections if s)
+
+
+def _render_drawdown_vs_capital(result: Dict[str, Any]) -> str:
+    """Mục "Sụt giảm so với vốn" -- tính lại từ chính sổ lệnh đã chốt.
+
+    Trả lời ba câu mà một con số "sụt vốn tối đa" đơn lẻ KHÔNG trả lời được:
+    một lệnh tệ nhất mất bao nhiêu so với vốn, đợt sụt sâu nhất diễn ra
+    trong mấy lệnh và đã hồi chưa, và chuỗi thua liên tiếp tốn kém nhất mất
+    bao nhiêu TIỀN (`max_loss_streak` cũ chỉ đếm số lệnh).
+
+    Toàn bộ phép tính nằm ở `Agent/backend/web/loss_analysis.py`; ở đây chỉ
+    trình bày. Mục tự ẩn khi không đọc được lệnh đã chốt nào.
+    """
+    profile = compute_loss_profile(result.get("evidence"))
+    if not profile:
+        return ""
+
+    capital = profile.get("capital")
+    has_capital = _is_finite_number(capital)
+
+    def _loss_pct(value: Any) -> str:
+        return _pct(value, 1) if _is_finite_number(value) else "—"
+
+    worst = profile.get("worst_trade")
+    episode = profile.get("deepest_episode")
+    streak = profile.get("worst_losing_streak")
+    gross = profile.get("gross_loss") or {}
+
+    tiles = [
+        _stat_tile(
+            "Worst single loss",
+            _loss_pct((worst or {}).get("pct_of_capital"))
+            if has_capital
+            else _money((worst or {}).get("pnl")),
+            color=_risk_color(None),
+        )
+        if worst
+        else _stat_tile("Worst single loss", "No losing trades yet"),
+        _stat_tile(
+            "Deepest drawdown episode",
+            _loss_pct((episode or {}).get("depth_pct"))
+            if has_capital
+            else _money(-(episode or {}).get("depth_abs", 0.0)),
+        )
+        if episode
+        else _stat_tile("Deepest drawdown episode", "No drawdown yet"),
+        _stat_tile(
+            "Most costly losing streak",
+            _loss_pct((streak or {}).get("pct_of_capital"))
+            if has_capital
+            else _money((streak or {}).get("total_loss")),
+        )
+        if streak
+        else _stat_tile("Most costly losing streak", "None"),
+        _stat_tile(
+            "Total gross loss",
+            _loss_pct(gross.get("pct_of_capital"))
+            if has_capital
+            else _money(gross.get("total")),
+        ),
+    ]
+    body = f'<div class="stat-row">{"".join(tiles)}</div>'
+
+    if not has_capital:
+        body += (
+            '<div class="notice notice-warning">Could not infer reference capital from'
+            " this bot's public capital curve, so every loss figure below is shown as"
+            " an absolute amount -- NOT converted to a percentage of capital (no"
+            " denominator means no percentage; this is missing data, not low risk).</div>"
+        )
+
+    worst_list = profile.get("worst_trades") or []
+    if worst_list:
+        rows = []
+        for item in worst_list:
+            pct = item.get("pct_of_capital")
+            measured = _is_finite_number(pct)
+            rows.append(
+                _BarRow(
+                    _format_vn_timestamp(item["close_time"])
+                    if _is_finite_number(item.get("close_time"))
+                    else "—",
+                    float(pct) if measured else None,
+                    _verdict_color("HIDDEN RISK") if False else "#dc2626",
+                    f"{_money(item.get('pnl'))}"
+                    + (f" · {_pct(pct, 1)} of capital" if measured else ""),
+                    measured=measured,
+                )
+            )
+        largest = max(
+            (float(r.value) for r in rows if r.value is not None), default=0.0
+        )
+        body += "<h3>Five worst losing trades</h3>" + _horizontal_bars(
+            rows, max_value=max(largest, 1.0)
+        )
+
+    if episode:
+        recovered = episode.get("recovered")
+        episode_rows = [
+            ["Capital peak before the fall", _money(episode.get("peak_cum"))],
+            ["Trough of the drawdown", _money(episode.get("trough_cum"))],
+            [
+                "Depth",
+                _money(-float(episode.get("depth_abs", 0.0)))
+                + (
+                    f" &middot; {_pct(episode.get('depth_pct'), 1)} of reference capital"
+                    if _is_finite_number(episode.get("depth_pct"))
+                    else ""
+                ),
+            ],
+            ["Trades from peak to trough", _int_text(episode.get("trade_count"))],
+            [
+                "Duration",
+                f"{_num(episode.get('duration_hours'), 1)} hours"
+                if _is_finite_number(episode.get("duration_hours"))
+                else "—",
+            ],
+            [
+                "Recovered to the previous peak?",
+                '<span class="badge-win">RECOVERED</span>'
+                if recovered
+                else '<span class="badge-loss">NOT RECOVERED</span>',
+            ],
+        ]
+        body += "<h3>Deepest drawdown episode</h3>" + _table(
+            ["Metric", "Value"], episode_rows
+        )
+
+    if streak:
+        body += (
+            '<p class="card-hint">Most costly consecutive losing streak: '
+            f"<strong>{_int_text(streak.get('count'))} trades</strong> losing "
+            f"<strong>{_money(streak.get('total_loss'))}</strong>"
+            + (
+                f" ({_pct(streak.get('pct_of_capital'), 1)} of reference capital)"
+                if _is_finite_number(streak.get("pct_of_capital"))
+                else ""
+            )
+            + ". Selected by TOTAL MONEY LOST rather than trade count: a short"
+            " streak that loses a lot is more dangerous than a long streak that"
+            " loses little.</p>"
+        )
+
+    theory = _theory(
+        "The four figures above measure the SIZE of losses, something the win"
+        " rate and profit factor do not say: a bot that wins 70% of its trades"
+        " can still wipe out an account if a single losing trade eats all its"
+        " capital. The worst single loss reflects stop-loss discipline and"
+        " position sizing; the deepest drawdown episode shows how long and how"
+        " many trades a copier had to endure before capital recovered; the most"
+        " costly losing streak shows the damage when the strategy hits an"
+        " unfavourable market phase.",
+        "Computed directly from the closed trade ledger (`close_time`,"
+        " `realized_pnl`), ordered by close time; the drawdown is measured as"
+        " the distance from the running peak of the cumulative profit/loss line"
+        " down to the next trough. The denominator for every percentage in this"
+        " section is a SINGLE reference-capital figure inferred from the actual"
+        " capital curve. Note the distinction: the &quot;Max drawdown&quot;"
+        " figure in the Trade metrics section uses a DIFFERENT denominator --"
+        " capital at the exact moment each trade closes (the weekly capital"
+        " curve), capped at 100% -- so the two ratios can differ without either"
+        " one being wrong.",
+    )
+    return _section("Drawdown vs. capital", body + theory, anchor="sut-giam-von")
+
+
+def _render_tab_trades(result: Dict[str, Any]) -> str:
+    if result.get("status") == "LIMITED":
+        return _render_tab_trades_limited(result)
+    sections = [
+        _render_trade_metrics(result),
+        _render_drawdown_vs_capital(result),
+        _render_open_positions_audit(result),
+        _render_statistical_inference(result),
+        _render_assets(result),
+        _render_closed_trades_table(result),
+    ]
+    return "".join(s for s in sections if s)
+
+
+def _render_tabs_wrapper(
+    tab1_content: str,
+    tab2_content: str,
+    tab3_content: str,
+) -> str:
+    return (
+        '<div class="tabs-control-wrapper">'
+        '<input type="radio" name="main_tabs" id="tab-nav-report" class="tab-nav-radio" checked style="display:none!important;position:absolute!important;opacity:0!important;pointer-events:none!important;">'
+        '<input type="radio" name="main_tabs" id="tab-nav-market" class="tab-nav-radio" style="display:none!important;position:absolute!important;opacity:0!important;pointer-events:none!important;">'
+        '<input type="radio" name="main_tabs" id="tab-nav-trades" class="tab-nav-radio" style="display:none!important;position:absolute!important;opacity:0!important;pointer-events:none!important;">'
+        '<div class="tabs-header-container">'
+        '<div class="tabs-nav-bar" role="tablist">'
+        '<label class="tab-label label-report" for="tab-nav-report" id="label-tab-report" tabindex="0">'
+        '<span class="tab-icon">📊</span> <span class="tab-title">Analysis results</span>'
+        "</label>"
+        '<label class="tab-label label-market" for="tab-nav-market" id="label-tab-market" tabindex="0">'
+        '<span class="tab-icon">🌐</span> <span class="tab-title">Primary market</span>'
+        "</label>"
+        '<label class="tab-label label-trades" for="tab-nav-trades" id="label-tab-trades" tabindex="0">'
+        '<span class="tab-icon">📑</span> <span class="tab-title">Orders &amp; positions</span>'
+        "</label>"
+        "</div>"
+        "</div>"
+        '<div class="tab-panels">'
+        f'<div class="tab-panel panel-report" id="panel-report" role="tabpanel">{tab1_content}</div>'
+        f'<div class="tab-panel panel-market" id="panel-market" role="tabpanel">{tab2_content}</div>'
+        f'<div class="tab-panel panel-trades" id="panel-trades" role="tabpanel">{tab3_content}</div>'
+        "</div>"
+        "</div>"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Left rail (mục lục + danh tính + điểm số) -- xem `_render_header`'s comment
+# for why the identity/score blocks live here rather than at the top of the
+# scrolling column.
+# --------------------------------------------------------------------------- #
+
+
+_SECTION_HEADING_RE = re.compile(
+    r'<section class="card[^"]*" id="([^"]+)">.*?<h2>(.*?)</h2>', re.S
+)
+
+
+def _nav_items(tab_html: str) -> List[Tuple[str, str]]:
+    """Mục lục tự sinh từ chính HTML vừa render -- không có một danh sách
+    tiêu đề thứ hai phải nhớ cập nhật mỗi khi thêm/bớt/đổi tên một mục, và
+    một mục bị ẩn (body rỗng -> `_section` trả chuỗi rỗng) tự động biến mất
+    khỏi mục lục thay vì để lại một anchor chết.
+    """
+    return [
+        (anchor, html.unescape(title))
+        for anchor, title in _SECTION_HEADING_RE.findall(tab_html)
+    ]
+
+
+def _render_nav(tab1_content: str, tab2_content: str, tab3_content: str) -> str:
+    groups = (
+        ("report", "Analysis results", tab1_content),
+        ("market", "Primary market", tab2_content),
+        ("trades", "Orders & positions", tab3_content),
+    )
+    out: List[str] = []
+    for tab_key, label, content in groups:
+        items = _nav_items(content)
+        if not items:
+            continue
+        links = "".join(
+            f'<a href="#{_esc(anchor)}" data-tab="{tab_key}">{_esc(title)}</a>'
+            for anchor, title in items
+        )
+        out.append(
+            f'<div class="nav-group" data-group="{tab_key}">'
+            f'<div class="nav-group-label">{_esc(label)}</div>'
+            f"{links}</div>"
+        )
+    if not out:
+        return ""
+    return f'<nav class="nav" aria-label="Report table of contents">{"".join(out)}</nav>'
+
+
+def _render_sidebar(side_blocks: str, nav_html: str) -> str:
+    return (
+        '<aside class="side">'
+        '<div class="brand"><b>OKX bot risk</b>'
+        "<span>AI-powered risk monitoring</span></div>"
+        f'<div class="side-identity">{side_blocks}</div>'
+        f"{nav_html}"
+        '<div class="side-foot">'
+        '<button type="button" class="theme-toggle-btn" id="theme-toggle-btn-sidebar"'
+        ' aria-label="Switch Light/Dark mode" title="Switch Light/Dark theme">'
+        '<span class="theme-icon theme-icon-light">☀️ Light</span>'
+        '<span class="theme-icon theme-icon-dark">🌙 Dark</span>'
+        "</button>"
+        "</div>"
+        "</aside>"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1865,12 +4880,12 @@ def _render_not_found_body(result: Dict[str, Any]) -> str:
     message = (
         text_lines[0]
         if text_lines and isinstance(text_lines[0], str)
-        else (f"Không tìm thấy bot với mã {code!r} trên OKX.")
+        else (f"No bot found with code {code!r} on OKX.")
     )
     return (
         '<div class="card not-found">'
-        "<h1>Không tìm thấy bot</h1>"
-        f"<p>Mã tra cứu: <code>{_esc(code)}</code></p>"
+        "<h1>Bot not found</h1>"
+        f"<p>Lookup code: <code>{_esc(code)}</code></p>"
         f"<p>{_esc(message)}</p>"
         "</div>"
     )
@@ -1891,73 +4906,2102 @@ _CSS = """
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  padding: 0 16px 3rem;
+  padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--sans);
+  font-size: var(--font-size-md);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- Khung trang: bảng điều khiển 2 cột -----------------------------------
+   Mobile-first: một cột, cột trái (`aside.side`) trở thành khối tóm tắt nằm
+   trên cùng. Từ 1100px trở lên mới tách thành lưới [rail cố định | nội dung]
+   và rail dính lại khi cuộn -- danh tính bot + 3 điểm số + mục lục là thứ
+   luôn đúng bất kể đang đọc tới đâu, nên không được trôi mất theo trang. */
+.page { width: 100%; margin: 0; }
+.main { min-width: 0; max-width: 1560px; margin: 0 auto; padding: 20px 20px 3rem; overflow-x: hidden; }
+
+.side {
+  display: none !important;
+}
+
+/* --- Institutional Color Tokens Fallback --- */
+/* --- Institutional Color Tokens Fallback --- */
+/* MẶC ĐỊNH LÀ SÁNG, TỐI CHỈ KHI ĐƯỢC YÊU CẦU.
+   Bản trước đặt bảng màu TỐI vào `:root` VÔ ĐIỀU KIỆN như "fallback", trong
+   khi `Agent/web/tokens.css` (nạp trước file này) lấy SÁNG làm nền. Hai bảng
+   màu đá nhau, và bên tối thắng vì nạp sau.
+   Hệ quả đo được trên trang thật: script đặt `data-theme` nằm CUỐI <body> và
+   chỉ chạy khi localStorage đã có lựa chọn sẵn -- nên khách vào LẦN ĐẦU không
+   bao giờ có thuộc tính đó, trang kẹt ở nền sáng của tokens.css trộn với
+   `--panel/--panel-2/--ink` tối của khối này: tiêu đề mục và chữ trong <code>
+   thành tối trên nền tối, gần như không đọc được.
+   Sửa theo đúng quy ước sẵn có của `tokens.css`: SÁNG là nền không điều kiện,
+   TỐI áp dụng khi hệ điều hành ưa tối (và người dùng chưa chọn sáng) hoặc khi
+   chọn tối tường minh. Không biến nào bị mất -- hai khối vốn khai báo đúng
+   cùng 23 biến. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --s1: #3b82f6; --s2: #f97316; --s3: #10b981;
+    --s4: #f59e0b; --s5: #ec4899; --s6: #14b8a6;
+    --ground: #0B0F19;
+    --panel: #111726;
+    --panel-2: #161F32;
+    --panel-3: #1A243B;
+    --ink: #FFFFFF;
+    --ink-2: #CBD5E1;
+    --ink-3: #94A3B8;
+    --line: #1E293B;
+    --line-2: #2B3954;
+    --amber: #F59E0B;
+    --amber-bg: rgba(245, 158, 11, 0.12);
+    --up: #10B981;
+    --down: #F43F5E;
+    --info: #38BDF8;
+    --track: #161F32;
+    --header-bg: rgba(11, 15, 25, 0.85);
+    --header-border: #1E293B;
+    --text: var(--ink);
+    --muted: var(--ink-2);
+    --axis: #64748b;
+}
+}
+:root[data-theme="dark"] {
+  --s1: #3b82f6; --s2: #f97316; --s3: #10b981;
+  --s4: #f59e0b; --s5: #ec4899; --s6: #14b8a6;
+  --ground: #0B0F19;
+  --panel: #111726;
+  --panel-2: #161F32;
+  --panel-3: #1A243B;
+  --ink: #FFFFFF;
+  --ink-2: #CBD5E1;
+  --ink-3: #94A3B8;
+  --line: #1E293B;
+  --line-2: #2B3954;
+  --amber: #F59E0B;
+  --amber-bg: rgba(245, 158, 11, 0.12);
+  --up: #10B981;
+  --down: #F43F5E;
+  --info: #38BDF8;
+  --track: #161F32;
+  --header-bg: rgba(11, 15, 25, 0.85);
+  --header-border: #1E293B;
+  --text: var(--ink);
+  --muted: var(--ink-2);
+  --axis: #64748b;
+}
+:root {
+  --s1: #2563eb; --s2: #ea580c; --s3: #10b981;
+  --s4: #d97706; --s5: #db2777; --s6: #059669;
+  --ground: #F8FAFC;
+  --panel: #FFFFFF;
+  --panel-2: #F1F5F9;
+  --panel-3: #E2E8F0;
+  --ink: #0F172A;
+  --ink-2: #475569;
+  --ink-3: #64748B;
+  --line: #E2E8F0;
+  --line-2: #CBD5E1;
+  --amber: #D97706;
+  --amber-bg: #FEF3C7;
+  --up: #059669;
+  --down: #DC2626;
+  --info: #0284C7;
+  --track: #F1F5F9;
+  --header-bg: rgba(255, 255, 255, 0.88);
+  --header-border: #E2E8F0;
+}
+
+/* --- Top Header (Shared Institutional OKX AI Design System) --- */
+.top-header {
+  height: 56px;
+  width: 100%;
+  background: rgba(9, 13, 22, 0.9);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 28px;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+:root[data-theme="light"] .top-header {
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.header-divider {
+  width: 1px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.1);
+}
+:root[data-theme="light"] .header-divider {
+  background: rgba(15, 23, 42, 0.1);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  cursor: pointer;
+  user-select: none;
+  text-decoration: none;
+}
+.brand-logo-box {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #1E293B 0%, #0F172A 100%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #F8FAFC;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+:root[data-theme="light"] .brand-logo-box {
+  background: #0F172A;
+  border: 1px solid #0F172A;
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2);
+}
+.brand:hover .brand-logo-box {
+  transform: scale(1.05);
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.3);
+}
+.brand-logo-grid {
+  display: grid;
+  grid-template-columns: 8px 8px;
+  grid-template-rows: 8px 8px;
+  gap: 2.5px;
+  width: 18.5px;
+  height: 18.5px;
+  align-items: center;
+  justify-content: center;
+}
+.grid-sq {
+  width: 8px;
+  height: 8px;
+  border-radius: 1.5px;
+  box-sizing: border-box;
+}
+.grid-sq.sq-1 { background: currentColor; opacity: 0.95; }
+.grid-sq.sq-2 { border: 1.8px solid currentColor; background: transparent; }
+.grid-sq.sq-3 { border: 1.8px solid currentColor; background: transparent; }
+.grid-sq.sq-4 { background: #38BDF8; }
+
+.brand-title-wrap {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.brand-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.brand-name {
+  font-family: var(--display, var(--sans));
+  font-size: 15.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+.brand-badge-fintech {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: #38BDF8;
+}
+:root[data-theme="light"] .brand-badge-fintech {
+  background: rgba(2, 132, 199, 0.08);
+  border-color: rgba(2, 132, 199, 0.25);
+  color: #0284C7;
+}
+.brand-sub {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.header-nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 3px;
+  border-radius: 9px;
+}
+:root[data-theme="light"] .header-nav-tabs {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+.header-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  text-decoration: none;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  height: 30px;
+}
+.header-tab:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.04);
+}
+:root[data-theme="light"] .header-tab:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+.header-tab.on {
+  background: linear-gradient(180deg, #1E293B 0%, #0F172A 100%);
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.16);
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+:root[data-theme="light"] .header-tab.on {
+  background: #FFFFFF;
+  color: #0F172A;
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+.tab-glyph {
+  width: 12px;
+  height: 12px;
+  display: inline-block;
+  opacity: 0.7;
+  vertical-align: middle;
+}
+.glyph-overview {
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  position: relative;
+}
+.glyph-overview::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
+  background: currentColor;
+  opacity: 0.4;
+}
+.glyph-bots {
+  box-shadow: 0 -3.5px 0 0.8px currentColor, 0 0 0 0.8px currentColor, 0 3.5px 0 0.8px currentColor;
+  height: 1.5px;
+  margin-top: 4px;
+}
+.glyph-analyze {
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  position: relative;
+}
+.glyph-analyze::after {
+  content: '';
+  position: absolute;
+  width: 3.5px;
+  height: 1.5px;
+  background: currentColor;
+  bottom: -2px;
+  right: -2px;
+  transform: rotate(45deg);
+}
+
+.top-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-header-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  background: linear-gradient(180deg, #1E293B 0%, #0F172A 100%);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38BDF8;
+  box-shadow: 0 1px 8px rgba(56, 189, 248, 0.12);
+}
+:root[data-theme="light"] .btn-header-cta {
+  background: #0F172A;
+  border-color: #0F172A;
+  color: #FFFFFF;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.15);
+}
+.btn-header-cta:hover {
+  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 2px 12px rgba(56, 189, 248, 0.25);
+}
+.btn-cta-plus {
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 700;
+}
+.user-badge-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="light"] .user-badge-capsule {
+  background: rgba(15, 23, 42, 0.035);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+.user-badge-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10B981;
+  box-shadow: 0 0 8px #10B981;
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+@keyframes pulseGlow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+.user-badge-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--ink-2);
+}
+.theme-btn {
+  height: 30px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--ink-2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  font-size: 11.5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+:root[data-theme="light"] .theme-btn {
+  background: rgba(15, 23, 42, 0.035);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+.theme-btn:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+
+/* Subnav Bar below Header */
+.report-subnav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0 14px 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+:root[data-theme="light"] .report-subnav-bar {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+.btn-subnav-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+:root[data-theme="light"] .btn-subnav-back {
+  background: rgba(15, 23, 42, 0.035);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+.btn-subnav-back:hover {
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38BDF8;
+  transform: translateX(-2px);
+}
+.btn-subnav-back .back-arrow {
+  font-size: 14px;
+  color: #38BDF8;
+  transition: transform 0.2s ease;
+}
+.btn-subnav-back:hover .back-arrow {
+  transform: translateX(-2px);
+}
+.subnav-crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+}
+.subnav-crumb .crumb-sep {
+  color: rgba(255, 255, 255, 0.15);
+}
+:root[data-theme="light"] .subnav-crumb .crumb-sep {
+  color: rgba(15, 23, 42, 0.2);
+}
+.subnav-crumb .crumb-link {
+  color: var(--ink-2);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+.subnav-crumb .crumb-link:hover {
+  color: #38BDF8;
+  text-decoration: underline;
+}
+.subnav-crumb .crumb-active {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Report Hero Card - Đồng bộ 100% với ngôn ngữ thiết kế NoraBT & OKX AI */
+.report-hero-card {
+  background: var(--panel) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius-lg, 16px) !important;
+  padding: 30px 34px !important;
+  margin: 16px 0 28px 0 !important;
+  box-shadow: var(--card-shadow, 0 4px 20px -2px rgba(0, 0, 0, 0.3)) !important;
+}
+.report-hero-top {
+  border-bottom: 1px solid var(--line) !important;
+  padding-bottom: 22px !important;
+  margin-bottom: 26px !important;
+}
+.report-hero-identity {
+  width: 100% !important;
+}
+.report-hero-identity .crumb {
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+  color: var(--ink-3) !important;
+  font-family: var(--mono) !important;
+  margin-bottom: 8px !important;
+}
+.head-title {
+  font-size: 32px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+  color: var(--ink) !important;
+  margin: 0 0 12px 0 !important;
+  line-height: 1.2 !important;
+  font-family: var(--display, var(--sans)) !important;
+}
+.report-hero-meta {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  flex-wrap: wrap !important;
+}
+.bot-code-pill {
+  font-size: 12px !important;
+  color: var(--ink-2) !important;
+  font-family: var(--mono) !important;
+  background: var(--panel-2) !important;
+  padding: 4px 12px !important;
+  border-radius: var(--radius-xs, 4px) !important;
+  border: 1px solid var(--line) !important;
+}
+.venue-symbol-badge {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  font-family: var(--mono) !important;
+  background: rgba(59, 130, 246, 0.12) !important;
+  color: var(--s1, #3b82f6) !important;
+  padding: 4px 12px !important;
+  border-radius: var(--radius-xs, 4px) !important;
+  border: 1px solid rgba(59, 130, 246, 0.25) !important;
+}
+.verdict-badge {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  padding: 5px 14px !important;
+  border-radius: var(--radius-xs, 4px) !important;
+  color: #ffffff !important;
+  background: var(--badge-color, #6b7280) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+}
+.report-hero-scores {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 20px !important;
+  margin-bottom: 26px !important;
+  background: transparent !important;
+  border: none !important;
+}
+@media (max-width: 800px) {
+  .report-hero-scores {
+    grid-template-columns: 1fr !important;
+  }
+}
+.report-hero-scores .stat-tile-hero {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--line) !important;
+  border-top: 3px solid var(--tile-accent, var(--line)) !important;
+  border-radius: var(--radius-md, 12px) !important;
+  padding: 22px 26px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  box-shadow: var(--card-shadow, 0 4px 16px -2px rgba(0, 0, 0, 0.25)) !important;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+.report-hero-scores .stat-tile-hero:hover {
+  border-color: var(--tile-accent, var(--line)) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 24px -2px rgba(0, 0, 0, 0.4), 0 0 15px rgba(59, 130, 246, 0.15) !important;
+}
+.report-hero-scores .stat-tile-hero .stat-value {
+  font-size: 42px !important;
+  font-weight: 800 !important;
+  line-height: 1.15 !important;
+  font-family: var(--mono) !important;
+  font-variant-numeric: tabular-nums !important;
+  letter-spacing: -0.02em !important;
+  color: var(--tile-accent, var(--ink)) !important;
+}
+.report-hero-scores .stat-tile-hero .stat-label {
+  font-family: var(--mono) !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+  color: var(--ink-2) !important;
+  margin-top: 8px !important;
+}
+
+/* Header notices container */
+.header-notices {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 22px !important;
+  margin-top: 26px !important;
+}
+
+/* Veto notice */
+.notice-danger {
+  background: rgba(244, 63, 94, 0.08) !important;
+  border: 1px solid rgba(244, 63, 94, 0.28) !important;
+  border-left: 4px solid var(--down, #F43F5E) !important;
+  border-radius: var(--radius-md, 12px) !important;
+  padding: 18px 24px !important;
+  color: var(--ink) !important;
+  font-size: 14px !important;
+  line-height: 1.65 !important;
+  margin: 0 !important;
+  box-shadow: var(--card-shadow, 0 4px 16px -2px rgba(0, 0, 0, 0.2)) !important;
+}
+.notice-danger strong {
+  color: var(--down, #F43F5E) !important;
+  font-weight: 700 !important;
+}
+:root[data-theme="light"] .notice-danger {
+  background: #FFF1F2 !important;
+  border: 1px solid #FDA4AF !important;
+  border-left: 5px solid #E11D48 !important;
+  color: #4C0519 !important;
+  font-size: 14.5px !important;
+  line-height: 1.65 !important;
+  font-weight: 500 !important;
+}
+:root[data-theme="light"] .notice-danger strong {
+  color: #881337 !important;
+  font-weight: 800 !important;
+}
+:root[data-theme="light"] .notice-warning {
+  background: #FFFBEB !important;
+  border: 1px solid #FDE68A !important;
+  border-left: 4px solid #D97706 !important;
+  color: #78350F !important;
+}
+:root[data-theme="light"] .notice-warning strong {
+  color: #B45309 !important;
+}
+
+/* Methodology Framework (Cơ sở phương pháp luận định lượng) */
+.verdict-basis {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--line) !important;
+  border-left: 3px solid var(--s1, #3b82f6) !important;
+  border-radius: var(--radius-md, 12px) !important;
+  padding: 12px 18px !important;
+  margin: 0 !important;
+  display: block !important;
+  box-shadow: var(--card-shadow, 0 4px 20px -2px rgba(0, 0, 0, 0.25)) !important;
+  -webkit-line-clamp: unset !important;
+  overflow: visible !important;
+  max-width: none !important;
+  transition: all 0.25s ease !important;
+}
+.verdict-basis:hover {
+  border-color: rgba(59, 130, 246, 0.4) !important;
+}
+.verdict-basis .basis-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: wrap !important;
+  gap: 12px !important;
+  cursor: pointer !important;
+  user-select: none !important;
+}
+.collapsible-basis .basis-collapsible-body {
+  display: none !important;
+}
+.collapsible-basis.expanded .basis-collapsible-body {
+  display: block !important;
+  margin-top: 18px !important;
+}
+.collapsible-basis.expanded .basis-header {
+  margin-bottom: 16px !important;
+  padding-bottom: 14px !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+.basis-toggle-action {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+.basis-toggle-pill {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.04em !important;
+  background: rgba(59, 130, 246, 0.1) !important;
+  color: var(--s1, #3b82f6) !important;
+  border: 1px solid rgba(59, 130, 246, 0.25) !important;
+  padding: 4px 10px !important;
+  border-radius: 6px !important;
+  transition: all 0.2s ease !important;
+  white-space: nowrap !important;
+}
+.verdict-basis:hover .basis-toggle-pill {
+  background: var(--s1, #3b82f6) !important;
+  color: #ffffff !important;
+}
+.collapsible-basis.expanded .basis-toggle-pill {
+  background: var(--panel) !important;
+  color: var(--ink-2) !important;
+  border-color: var(--line) !important;
+}
+.verdict-basis .basis-title-group {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+}
+.verdict-basis .basis-icon-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 36px !important;
+  height: 36px !important;
+  background: rgba(59, 130, 246, 0.12) !important;
+  color: var(--s1, #3b82f6) !important;
+  border: 1px solid rgba(59, 130, 246, 0.25) !important;
+  border-radius: var(--radius-sm, 8px) !important;
+  font-size: 18px !important;
+  flex-shrink: 0 !important;
+}
+.verdict-basis .basis-main-title {
+  font-family: var(--mono) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+  color: var(--ink) !important;
+  line-height: 1.3 !important;
+}
+.verdict-basis .basis-subtitle {
+  font-size: 12px !important;
+  color: var(--ink-3) !important;
+  margin-top: 3px !important;
+}
+.verdict-basis .basis-academic-tag {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  background: var(--panel) !important;
+  color: var(--s1, #3b82f6) !important;
+  border: 1px solid var(--line) !important;
+  padding: 4px 10px !important;
+  border-radius: var(--radius-xs, 4px) !important;
+}
+.verdict-basis .basis-pillars-grid {
+  display: grid !important;
+  grid-template-columns: repeat(4, 1fr) !important;
+  gap: 16px !important;
+  margin-bottom: 20px !important;
+}
+@media (max-width: 1024px) {
+  .verdict-basis .basis-pillars-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+@media (max-width: 640px) {
+  .verdict-basis .basis-pillars-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+.basis-pillar-card {
+  background: var(--panel) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius-md, 12px) !important;
+  padding: 16px 16px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.basis-pillar-card:hover {
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  background: rgba(59, 130, 246, 0.04) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3), 0 0 12px rgba(59, 130, 246, 0.12) !important;
+}
+.basis-pillar-card .pillar-top {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 6px !important;
+  margin-bottom: 10px !important;
+}
+.basis-pillar-card .pillar-badge {
+  font-family: var(--mono) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  padding: 2px 7px !important;
+  border-radius: var(--radius-xs, 4px) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+}
+.pillar-blue {
+  background: rgba(57, 135, 229, 0.15) !important;
+  color: var(--s1, #3987e5) !important;
+}
+.pillar-amber {
+  background: rgba(245, 158, 11, 0.15) !important;
+  color: #f59e0b !important;
+}
+.pillar-purple {
+  background: rgba(139, 92, 246, 0.15) !important;
+  color: #a78bfa !important;
+}
+.pillar-green {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #10b981 !important;
+}
+.basis-pillar-card .pillar-tag {
+  font-size: 10.5px !important;
+  color: var(--ink-3) !important;
+}
+.basis-pillar-card .pillar-name {
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+  color: var(--ink) !important;
+  margin-bottom: 8px !important;
+}
+.basis-pillar-card .pillar-desc {
+  font-size: 12px !important;
+  line-height: 1.6 !important;
+  color: var(--ink-2) !important;
+  flex-grow: 1 !important;
+}
+.basis-verbatim-card {
+  background: var(--panel) !important;
+  border: 1px dashed var(--line) !important;
+  border-radius: 3px !important;
+  padding: 14px 18px !important;
+}
+.basis-verbatim-card .verbatim-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  margin-bottom: 8px !important;
+}
+.basis-verbatim-card .verbatim-dot {
+  width: 6px !important;
+  height: 6px !important;
+  background: var(--s1, #3987e5) !important;
+  border-radius: 50% !important;
+}
+.basis-verbatim-card .verbatim-label {
+  font-family: var(--mono) !important;
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  color: var(--ink-3) !important;
+}
+.verdict-basis .basis-text {
+  font-size: 12.5px !important;
+  line-height: 1.7 !important;
+  color: var(--ink-2) !important;
+}
+
+/* AI Quant Narrative Card */
+.narrative-card {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--line) !important;
+/* ==========================================================================
+   Conclusion & Narrative Unified Styles (System Consistent)
+   ========================================================================== */
+.conclusion-body-wrap,
+.narrative-body-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Verdict Banner */
+.conclusion-verdict-box {
+  border-radius: var(--radius-md, 12px);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 4px solid var(--amber, #f59e0b);
+  background: var(--panel-2, #161f32);
+  border-top: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+:root[data-theme="light"] .conclusion-verdict-box {
+  background: #ffffff !important;
+  border-top-color: #e2e8f0 !important;
+  border-right-color: #e2e8f0 !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+.conclusion-verdict-box.tone-danger {
+  border-left-color: #e11d48 !important;
+}
+.conclusion-verdict-box.tone-warning {
+  border-left-color: #f59e0b !important;
+}
+.conclusion-verdict-box.tone-success {
+  border-left-color: #10b981 !important;
+}
+
+.verdict-header-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.verdict-chip {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tone-danger .verdict-chip {
+  color: #f43f5e;
+}
+:root[data-theme="light"] .tone-danger .verdict-chip {
+  color: #e11d48;
+}
+.tone-warning .verdict-chip {
+  color: #f59e0b;
+}
+:root[data-theme="light"] .tone-warning .verdict-chip {
+  color: #d97706;
+}
+.tone-success .verdict-chip {
+  color: #10b981;
+}
+
+.verdict-detail {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--ink);
+}
+
+/* Overview block inside conclusion */
+.conclusion-overview-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(148, 163, 184, 0.05);
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--line);
+}
+:root[data-theme="light"] .conclusion-overview-block {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+.conclusion-identity-row {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.conclusion-metric-row {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.conclusion-summary-text {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+/* Sub-sections & Takeaways */
+.conclusion-section-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.conclusion-sub-title,
+.narrative-sub-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+}
+.conclusion-extra-line {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+/* Limitations Accordion */
+.conclusion-limitation-accordion {
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+:root[data-theme="light"] .conclusion-limitation-accordion {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+.limitation-accordion-summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  font-size: 13.5px;
+}
+.limitation-accordion-summary strong {
+  color: var(--ink);
+}
+.limitation-toggle-hint {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.limitation-toggle-checkbox {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.limitation-accordion-body {
+  display: none;
+  padding: 4px 16px 16px 16px;
+  border-top: 1px solid var(--line);
+}
+.limitation-toggle-checkbox:checked ~ .limitation-accordion-body {
+  display: block;
+}
+
+/* Narrative Unified Box */
+.narrative-meta-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.narrative-meta-bar .meta-desc {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.narrative-prose-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.narrative-paragraph {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.8;
+  color: var(--ink);
+  font-family: var(--sans);
+}
+:root[data-theme="light"] .narrative-paragraph {
+  color: #0f172a !important;
+}
+:root[data-theme="light"] .verdict-detail {
+  color: #0f172a !important;
+}
+:root[data-theme="light"] .conclusion-identity-row {
+  color: #0f172a !important;
+}
+:root[data-theme="light"] .conclusion-metric-row {
+  color: #0f172a !important;
+}
+
+/* Hover on SVG bar label with pointer */
+.bar-chart text.bar-label[style*="cursor:pointer"]:hover {
+  fill: var(--s1, #3b82f6) !important;
+  font-weight: 700;
+}
+
+/* Dimensions table & stars */
+#diem-chieu .table-scroll {
+  overflow: visible !important;
+  max-height: none !important;
+}
+.dim-score-badge {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dim-score-badge.unmeasured {
+  background: rgba(156, 163, 175, 0.15) !important;
+  color: #9CA3AF !important;
+  border: 1px solid rgba(156, 163, 175, 0.3) !important;
+}
+.dim-meta-tag {
+  font-size: 12px;
+  color: var(--muted, #64748B);
+  font-weight: 500;
+}
+
+/* Narrative Structured Styles */
+.narrative-overview-box {
+  margin-top: 14px;
+}
+.narrative-subheading {
+  font-size: 12.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--amber, #F59E0B);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.narrative-keypoints-box {
+  margin-top: 16px;
+}
+.narrative-keypoint-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.narrative-keypoint-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 14px;
   line-height: 1.55;
 }
-.page { max-width: 880px; margin: 0 auto; }
-.report-header {
-  padding: 1.5rem 0 1rem;
+.narrative-pending-notice {
+  font-style: italic;
+  font-size: 14px;
 }
-.bot-name { font-size: 1.5rem; font-weight: 700; overflow-wrap: anywhere; }
-.bot-code { color: var(--muted); font-size: 0.9rem; margin-top: 0.15rem; }
-.bot-code code { background: var(--track); padding: 0.1rem 0.4rem; border-radius: 4px; }
-.verdict-badge {
-  display: inline-block;
-  margin-top: 0.6rem;
-  padding: 0.3rem 0.8rem;
-  border-radius: 999px;
+
+/* ==========================================================================
+   Theme: DARK MODE (Default when dark or data-theme="dark")
+   ========================================================================== */
+:root[data-theme="dark"] .conclusion-overview-card,
+:root:not([data-theme="light"]) .conclusion-overview-card {
+  background: var(--panel, #111726);
+  border: 1px solid var(--line, #1E293B);
+}
+:root[data-theme="dark"] .conclusion-overview-card .conclusion-eyebrow,
+:root:not([data-theme="light"]) .conclusion-overview-card .conclusion-eyebrow {
+  color: var(--ink-3, #94A3B8);
+}
+:root[data-theme="dark"] .overview-bot-title,
+:root:not([data-theme="light"]) .overview-bot-title {
+  color: #F8FAFC !important;
+}
+:root[data-theme="dark"] .overview-meta-chip,
+:root:not([data-theme="light"]) .overview-meta-chip {
+  color: #CBD5E1 !important;
+}
+:root[data-theme="dark"] .overview-scores-row,
+:root:not([data-theme="light"]) .overview-scores-row {
+  color: #F1F5F9 !important;
+}
+:root[data-theme="dark"] .overview-line,
+:root:not([data-theme="light"]) .overview-line {
+  color: var(--ink, #FFFFFF);
+}
+
+:root[data-theme="dark"] .conclusion-verdict-block,
+:root:not([data-theme="light"]) .conclusion-verdict-block {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-left: 4px solid var(--amber, #F59E0B);
+}
+:root[data-theme="dark"] .conclusion-verdict-block .conclusion-eyebrow,
+:root:not([data-theme="light"]) .conclusion-verdict-block .conclusion-eyebrow {
+  color: #FBBF24;
+}
+:root[data-theme="dark"] .verdict-headline,
+:root:not([data-theme="light"]) .verdict-headline {
+  color: #FDE68A;
+}
+:root[data-theme="dark"] .verdict-desc,
+:root[data-theme="dark"] .conclusion-verdict-block .conclusion-line,
+:root:not([data-theme="light"]) .verdict-desc,
+:root:not([data-theme="light"]) .conclusion-verdict-block .conclusion-line {
+  color: var(--ink, #F8FAFC);
+}
+
+:root[data-theme="dark"] .conclusion-why,
+:root:not([data-theme="light"]) .conclusion-why {
+  background: rgba(244, 63, 94, 0.08);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  border-left: 4px solid var(--down, #F43F5E);
+}
+:root[data-theme="dark"] .conclusion-why .conclusion-eyebrow,
+:root:not([data-theme="light"]) .conclusion-why .conclusion-eyebrow {
+  color: #FB7185;
+}
+:root[data-theme="dark"] .conclusion-why .bullet-item,
+:root:not([data-theme="light"]) .conclusion-why .bullet-item {
+  background: var(--panel, #111726);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+}
+:root[data-theme="dark"] .conclusion-why .bullet-icon,
+:root:not([data-theme="light"]) .conclusion-why .bullet-icon {
+  color: var(--down, #F43F5E);
+}
+:root[data-theme="dark"] .conclusion-why .bullet-text,
+:root[data-theme="dark"] .conclusion-why .conclusion-line,
+:root:not([data-theme="light"]) .conclusion-why .bullet-text,
+:root:not([data-theme="light"]) .conclusion-why .conclusion-line {
+  color: var(--ink, #F8FAFC);
+}
+
+:root[data-theme="dark"] .conclusion-proof,
+:root:not([data-theme="light"]) .conclusion-proof {
+  background: var(--panel, #111726);
+  border: 1px solid var(--line, #1E293B);
+  border-left: 4px solid var(--info, #38BDF8);
+}
+:root[data-theme="dark"] .conclusion-proof .conclusion-eyebrow,
+:root:not([data-theme="light"]) .conclusion-proof .conclusion-eyebrow {
+  color: var(--info, #38BDF8);
+}
+:root[data-theme="dark"] .conclusion-proof-list li.proof-card,
+:root:not([data-theme="light"]) .conclusion-proof-list li.proof-card {
+  background: var(--panel, #111726);
+  border: 1px solid var(--line, #1E293B);
+  border-left: 3px solid var(--info, #38BDF8);
+  color: var(--ink, #F8FAFC);
+}
+:root[data-theme="dark"] .proof-dot,
+:root:not([data-theme="light"]) .proof-dot {
+  color: var(--info, #38BDF8);
+}
+
+:root[data-theme="dark"] .conclusion-warning-block,
+:root:not([data-theme="light"]) .conclusion-warning-block {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-left: 4px solid var(--amber, #F59E0B);
+}
+:root[data-theme="dark"] .warning-eyebrow,
+:root:not([data-theme="light"]) .warning-eyebrow {
+  color: #FBBF24;
+}
+:root[data-theme="dark"] .badge-warning,
+:root:not([data-theme="light"]) .badge-warning {
+  background: rgba(245, 158, 11, 0.2);
+  color: #FBBF24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+:root[data-theme="dark"] .warning-bullet-item,
+:root:not([data-theme="light"]) .warning-bullet-item {
+  background: var(--panel, #111726);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+:root[data-theme="dark"] .warning-bullet-text,
+:root:not([data-theme="light"]) .warning-bullet-text {
+  color: var(--ink, #F8FAFC);
+}
+
+:root[data-theme="dark"] .conclusion-limitation-accordion,
+:root:not([data-theme="light"]) .conclusion-limitation-accordion {
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+:root[data-theme="dark"] .limitation-title,
+:root:not([data-theme="light"]) .limitation-title {
+  color: #38BDF8;
+}
+:root[data-theme="dark"] .limitation-toggle-hint,
+:root:not([data-theme="light"]) .limitation-toggle-hint {
+  color: #94A3B8;
+}
+:root[data-theme="dark"] .conclusion-limitation-accordion .badge-info,
+:root:not([data-theme="light"]) .conclusion-limitation-accordion .badge-info {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38BDF8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+:root[data-theme="dark"] .limitation-bullet-item,
+:root:not([data-theme="light"]) .limitation-bullet-item {
+  background: var(--panel, #111726);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+}
+:root[data-theme="dark"] .limitation-bullet-dot,
+:root:not([data-theme="light"]) .limitation-bullet-dot {
+  color: #38BDF8;
+}
+:root[data-theme="dark"] .limitation-bullet-text,
+:root:not([data-theme="light"]) .limitation-bullet-text {
+  color: var(--ink, #F8FAFC);
+}
+
+:root[data-theme="dark"] .conclusion-summary-box,
+:root:not([data-theme="light"]) .conclusion-summary-box {
+  background: var(--panel-2, #161F32);
+  border: 1px solid var(--line, #1E293B);
+}
+:root[data-theme="dark"] .conclusion-summary-box .conclusion-line,
+:root:not([data-theme="light"]) .conclusion-summary-box .conclusion-line {
+  color: var(--ink, #F8FAFC);
+}
+
+:root[data-theme="dark"] .narrative-keypoint-item,
+:root:not([data-theme="light"]) .narrative-keypoint-item {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: #E2E8F0 !important;
+}
+:root[data-theme="dark"] .narrative-pending-notice,
+:root:not([data-theme="light"]) .narrative-pending-notice {
+  color: #94A3B8 !important;
+}
+
+/* ==========================================================================
+   Theme: LIGHT MODE (:root[data-theme="light"])
+   CRITICAL CONTRAST: Every text element MUST be dark (#0F172A / #1E293B)
+   ========================================================================== */
+:root[data-theme="light"] .conclusion-overview-card {
+  background: #F8FAFC !important;
+  border: 1px solid #E2E8F0 !important;
+}
+:root[data-theme="light"] .conclusion-overview-card .conclusion-eyebrow {
+  color: #475569 !important;
+}
+:root[data-theme="light"] .overview-bot-title {
+  color: #0F172A !important;
+}
+:root[data-theme="light"] .overview-meta-chip {
+  color: #334155 !important;
+}
+:root[data-theme="light"] .overview-scores-row {
+  color: #0F172A !important;
+}
+:root[data-theme="light"] .overview-line {
+  color: #0F172A !important;
+}
+
+:root[data-theme="light"] .conclusion-verdict-block {
+  background: #FFFBEB !important;
+  border: 1px solid #FDE68A !important;
+  border-left: 4px solid #D97706 !important;
+}
+:root[data-theme="light"] .conclusion-verdict-block .conclusion-eyebrow {
+  color: #B45309 !important;
+}
+:root[data-theme="light"] .verdict-headline {
+  color: #78350F !important;
+}
+:root[data-theme="light"] .verdict-desc,
+:root[data-theme="light"] .conclusion-verdict-block .conclusion-line {
+  color: #1E293B !important;
+}
+
+:root[data-theme="light"] .conclusion-why {
+  background: #FFF1F2 !important;
+  border: 1px solid #FECDD3 !important;
+  border-left: 4px solid #E11D48 !important;
+}
+:root[data-theme="light"] .conclusion-why .conclusion-eyebrow {
+  color: #BE123C !important;
+}
+:root[data-theme="light"] .conclusion-why .bullet-item {
+  background: #FFFFFF !important;
+  border: 1px solid #FFE4E6 !important;
+}
+:root[data-theme="light"] .conclusion-why .bullet-icon {
+  color: #E11D48 !important;
+}
+:root[data-theme="light"] .conclusion-why .bullet-text,
+:root[data-theme="light"] .conclusion-why .conclusion-line {
+  color: #1E293B !important;
+}
+
+:root[data-theme="light"] .conclusion-proof {
+  background: #F8FAFC !important;
+  border: 1px solid #E2E8F0 !important;
+  border-left: 4px solid #2563EB !important;
+}
+:root[data-theme="light"] .conclusion-proof .conclusion-eyebrow {
+  color: #1D4ED8 !important;
+}
+:root[data-theme="light"] .conclusion-proof-list li.proof-card {
+  background: #FFFFFF !important;
+  border: 1px solid #E2E8F0 !important;
+  border-left: 3px solid #2563EB !important;
+  color: #1E293B !important;
+}
+:root[data-theme="light"] .proof-dot {
+  color: #2563EB !important;
+}
+
+:root[data-theme="light"] .conclusion-warning-block {
+  background: #FFFBEB !important;
+  border: 1px solid #FDE68A !important;
+  border-left: 4px solid #D97706 !important;
+}
+:root[data-theme="light"] .warning-eyebrow {
+  color: #B45309 !important;
+}
+:root[data-theme="light"] .badge-warning {
+  background: #FEF3C7 !important;
+  color: #B45309 !important;
+  border: 1px solid #FDE68A !important;
+}
+:root[data-theme="light"] .warning-bullet-item {
+  background: #FFFFFF !important;
+  border: 1px solid #FEF3C7 !important;
+}
+:root[data-theme="light"] .warning-bullet-text {
+  color: #1E293B !important;
+}
+
+:root[data-theme="light"] .conclusion-limitation-accordion {
+  background: #F0F9FF !important;
+  border: 1px solid #BAE6FD !important;
+}
+:root[data-theme="light"] .limitation-title {
+  color: #0369A1 !important;
+}
+:root[data-theme="light"] .limitation-toggle-hint {
+  color: #0284C7 !important;
+}
+:root[data-theme="light"] .conclusion-limitation-accordion .badge-info {
+  background: #E0F2FE !important;
+  color: #0369A1 !important;
+  border: 1px solid #BAE6FD !important;
+}
+:root[data-theme="light"] .limitation-bullet-item {
+  background: #FFFFFF !important;
+  border: 1px solid #E0F2FE !important;
+}
+:root[data-theme="light"] .limitation-bullet-dot {
+  color: #0284C7 !important;
+}
+:root[data-theme="light"] .limitation-bullet-text {
+  color: #1E293B !important;
+}
+
+:root[data-theme="light"] .conclusion-summary-box {
+  background: #F8FAFC !important;
+  border: 1px solid #E2E8F0 !important;
+}
+:root[data-theme="light"] .conclusion-summary-box .conclusion-line {
+  color: #1E293B !important;
+}
+
+:root[data-theme="light"] .narrative-keypoint-item {
+  background: #F8FAFC !important;
+  border: 1px solid #E2E8F0 !important;
+  color: #1E293B !important;
+}
+:root[data-theme="light"] .narrative-pending-notice {
+  color: #475569 !important;
+}
+
+/* Formula Tooltips & Asterisk */
+#so-lieu .table-scroll,
+#suy-luan .table-scroll {
+  overflow: visible !important;
+  max-height: none !important;
+}
+table tr:hover {
+  position: relative;
+  z-index: 20;
+}
+/* Formula Modal & Dialog */
+.formula-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 99999;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.formula-modal-backdrop.is-open {
+  display: flex;
+}
+.formula-modal-card {
+  background: var(--panel, #111726);
+  border: 1px solid var(--line, #1E293B);
+  border-radius: var(--radius, 12px);
+  width: 100%;
+  max-width: 520px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: modalFadeIn 0.18s ease-out;
+}
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+:root[data-theme="light"] .formula-modal-card {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.15) !important;
+}
+.formula-modal-header {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line, #1E293B);
+}
+:root[data-theme="light"] .formula-modal-header {
+  border-bottom-color: #e2e8f0 !important;
+}
+.formula-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
   font-weight: 700;
-  font-size: 0.85rem;
-  letter-spacing: 0.02em;
+  color: var(--ink, #F8FAFC);
+}
+:root[data-theme="light"] .formula-modal-header h3 {
+  color: #0F172A !important;
+}
+.formula-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--ink-2, #94A3B8);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.formula-modal-close:hover {
+  color: var(--ink, #FFFFFF);
+  background: rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="light"] .formula-modal-close:hover {
+  color: #0F172A !important;
+  background: #f1f5f9 !important;
+}
+.formula-modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.formula-field label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2, #94A3B8);
+  display: block;
+  margin-bottom: 6px;
+}
+:root[data-theme="light"] .formula-field label {
+  color: #475569 !important;
+}
+.formula-field pre {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--line, #1E293B);
+  color: var(--s1, #38BDF8);
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+:root[data-theme="light"] .formula-field pre {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0284c7 !important;
+}
+.formula-field p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink, #F8FAFC);
+}
+:root[data-theme="light"] .formula-field p {
+  color: #1e293b !important;
+}
+
+/* Formula Star Button */
+.formula-star-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.12);
+  color: #38BDF8;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  vertical-align: middle;
+  transition: all 0.15s ease;
+  margin-left: 4px;
+}
+.formula-star-btn:hover {
+  background: #38BDF8;
+  color: #0F172A;
+  border-color: #38BDF8;
+  transform: scale(1.15);
+}
+:root[data-theme="light"] .formula-star-btn {
+  border-color: rgba(2, 132, 199, 0.35);
+  background: rgba(2, 132, 199, 0.1);
+  color: #0284c7;
+}
+:root[data-theme="light"] .formula-star-btn:hover {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+}
+
+.param-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.formula-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--amber, #f59e0b);
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+  position: relative;
+  padding: 0 4px;
+  line-height: 1;
+  transition: transform 0.15s ease, color 0.15s ease;
+  vertical-align: middle;
+}
+.formula-star:hover,
+.formula-star:focus-within {
+  color: #fbbf24;
+  transform: scale(1.3);
+  z-index: 99999;
+}
+.formula-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 330px;
+  max-width: 85vw;
+  background: var(--card-bg, #1e2430);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.22));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text, #e5e7eb);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 999999;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  text-align: left;
+  white-space: normal;
+  font-weight: 400;
+}
+[data-theme="light"] .formula-tooltip {
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+  color: #1f2937;
+}
+.param-label:hover .formula-tooltip,
+.formula-star:hover .formula-tooltip,
+.formula-star:focus-within .formula-tooltip {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto;
+}
+.formula-tooltip::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 10px;
+  border-width: 6px;
+  border-style: solid;
+  border-color: transparent transparent var(--card-bg, #1e2430) transparent;
+}
+[data-theme="light"] .formula-tooltip::before {
+  border-color: transparent transparent #ffffff transparent;
+}
+.ft-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--amber, #f59e0b);
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  padding-bottom: 4px;
+}
+.ft-formula {
+  display: block;
+  font-size: 11.5px;
+  font-family: var(--mono);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px dashed rgba(245, 158, 11, 0.35);
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+.ft-formula code {
+  font-size: 11.5px;
+  color: var(--amber, #f59e0b);
+  font-weight: 600;
+}
+.ft-desc {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted, #9ca3af);
+  line-height: 1.45;
+}
+[data-theme="light"] .ft-desc {
+  color: #4b5563;
+}
+.brand { min-width: 0; }
+.brand b { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
+.brand span {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: var(--eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.side-identity { min-width: 0; }
+/* Dưới 1100px rail KHÔNG dính (nó nằm ngay trên header cột phải), nên tên bot
+   + mã ở đây lặp lại đúng cái `<h1>`/vụn đường dẫn cách đó vài dòng. Ẩn bản
+   trong rail, giữ nhãn phán quyết + 3 ô điểm (những thứ header mỏng không
+   có). Từ 1100px rail dính lại khi cuộn nên bản này mới có việc để làm. */
+.side-identity .bot-name, .side-identity .bot-code { display: none; }
+.side-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
+
+/* Mục lục: một cột danh sách phẳng, viền trái mảnh làm chỉ dấu hover --
+   giống `.nav` của bảng điều khiển Nora, không nút bo tròn, không bóng. */
+.nav { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.nav-group { display: flex; flex-direction: column; gap: 1px; margin-bottom: 0.6rem; min-width: 0; max-width: 100%; }
+.nav-group-label {
+  font-family: var(--mono);
+  font-size: var(--eyebrow-size);
+  letter-spacing: var(--eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 4px 0 5px;
+}
+.nav a {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 10px;
+  color: var(--muted);
+  font-size: 13.5px;
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav a:hover {
+  background: var(--panel-2);
+  color: var(--text);
+  border-left-color: var(--primary-accent);
+}
+
+/* --- Đầu cột nội dung: một header MỎNG ------------------------------------
+   Danh tính + điểm số đã nằm ở rail trái, nên chỗ này chỉ còn vụn đường dẫn
+   mono, tên bot và các cảnh báo. */
+.report-header {
+  padding: 1.25rem 0 1rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+}
+.crumb {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: var(--eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+.head-title {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+.header-notices { display: flex; flex-direction: column; gap: 22px; margin-top: 26px; }
+.bot-name {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.bot-code {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  margin-top: 0.3rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.bot-code code {
+  background: var(--track);
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-xs);
+  font-family: var(--mono);
+  font-size: 0.88em;
+  border: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.verdict-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0.6rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-xs);
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: #fff;
   background: var(--badge-color, #6b7280);
 }
-.stat-row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1rem; }
-.stat-tile {
-  flex: 1 1 140px;
+/* Hiển thị trọn vẹn văn bản phương pháp luận, không cắt chữ */
+.verdict-basis {
+  display: block !important;
+  -webkit-line-clamp: unset !important;
+  overflow: visible !important;
+  max-width: none !important;
+  font-style: normal !important;
+}
+
+/* --- Ô số liệu: lưới hairline kiểu bảng điều khiển ------------------------
+   Không bo góc, không bóng đổ, không khe hở: các ô dính liền nhau, ngăn cách
+   bằng đúng 1px nền `--border` lộ ra qua `gap` -- đọc như một dải số liệu
+   liền mạch chứ không phải một đống thẻ trắng rời rạc. */
+.stat-row, .cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  gap: 1px;
+  /* Nền là MÀU THẺ, không phải màu viền: khi số ô không chia hết cho số cột,
+     ô trống cuối hàng trước đây lộ ra một mảng xám đặc (ảnh chụp tab "Lệnh &
+     vị thế": 6 ô trên lưới 4 cột). Đường kẻ 1px giờ do chính mỗi ô vẽ bằng
+     `box-shadow` trải ra ngoài, nên chỗ KHÔNG có ô thì cũng không có kẻ. */
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.75rem 1rem;
+  margin-top: 1rem;
 }
-.stat-value { font-size: 1.6rem; font-weight: 700; }
-.stat-label { color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; }
+.stat-tile {
+  background: var(--card-bg);
+  box-shadow: 0 0 0 1px var(--border);
+  padding: 13px 15px;
+  min-width: 0;
+}
+.stat-value {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.stat-label {
+  font-family: var(--mono);
+  color: var(--muted);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-top: 0.4rem;
+}
+/* Dấu `*` bấm được trên mỗi ô điểm số hero, dẫn tới khối giải thích công
+   thức bên dưới mục dimension-bar (xem `_stat_tile`'s `basis_anchor`).
+   Không hoa/không gạch chân như link thường (đây là một chú thích, không
+   phải điều hướng chính của trang), nhưng đủ tương phản để thấy là bấm
+   được. */
+.score-basis-star {
+  color: var(--accent, #3b82f6);
+  text-decoration: none;
+  font-weight: 700;
+  margin-left: 0.15rem;
+  cursor: pointer;
+}
+.score-basis-star:hover, .score-basis-star:focus-visible {
+  text-decoration: underline;
+}
+details.theory.score-basis h3 {
+  font-size: var(--font-size-sm);
+  margin: 0.9rem 0 0.3rem;
+}
+details.theory.score-basis h3:first-child { margin-top: 0; }
+
+/* Biến thể "hero" -- 3 ô điểm số ở rail trái, thứ duy nhất yêu cầu thiết kế
+   nói phải nổi bật NHẤT. Dải màu mảnh bên trái thay cho viền trên: ở rail
+   dọc, ba ô xếp chồng nên dải dọc mới phân biệt được chúng bằng mắt. */
+.stat-tile-hero {
+  padding: 13px 15px;
+  border-left: 3px solid var(--tile-accent, var(--border));
+}
+.stat-tile-hero .stat-value { font-size: 34px; font-weight: 600; line-height: 1.05; }
+.stat-tile-hero .stat-label { font-size: 10.5px; margin-top: 0.35rem; }
+.side-identity .cards { grid-template-columns: 1fr; margin-top: 0.85rem; }
+
+/* --- Khối nội dung: `.block-h` + `.block-b` -------------------------------
+   Bỏ hẳn bo góc lớn + bóng đổ (thứ làm cả trang trông như một chồng thẻ nổi
+   giống hệt nhau): mỗi mục giờ là một khối viền 1px, có thanh tiêu đề nền
+   `--panel-2` ngăn cách rõ với phần thân. */
 .card {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.1rem 1.2rem 1.3rem;
-  margin-top: 1rem;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  margin-top: 1.15rem;
+  min-width: 0;
 }
-.card h2 { margin: 0 0 0.75rem; font-size: 1.15rem; }
-.card h3 { margin: 1.1rem 0 0.4rem; font-size: 1rem; }
+.block-h {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.block-h .eyebrow {
+  flex: 1 0 100%;
+  font-family: var(--mono);
+  font-size: var(--eyebrow-size);
+  letter-spacing: var(--eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.block-h .note {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+}
+.block-b { padding: 14px 16px 16px; min-width: 0; }
+.card h2 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.card h3 { margin: 1.1rem 0 0.4rem; font-size: var(--font-size-sm); font-weight: 600; color: var(--text); }
+.block-b > *:first-child { margin-top: 0; }
+
+/* --- Phân cấp thị giác giữa các mục ---------------------------------------
+   CHÚ Ý: comment trong `_CSS` này bị nhúng vào MỌI trang render ra -- một
+   vài test dò "tiêu đề mục X không được xuất hiện ở đâu cả trong HTML" bằng
+   cách tìm nguyên văn tiêu đề đó trên TOÀN BỘ output, nên comment ở đây
+   tuyệt đối không được gõ lại nguyên văn một tiêu đề mục nào, chỉ nhắc bằng
+   id neo (id="..." -- xem `_section`'s `anchor=`).
+
+   `.card-primary` (id="ket-luan", id="diem-chieu") nổi bật bằng một vạch màu
+   verdict ở mép trái + thanh tiêu đề ánh accent, KHÔNG bằng bóng đổ.
+   `.card-quiet` (id="suy-luan", id="vi-the-mo") lùi xuống: tiêu đề nhỏ, mờ. */
+.card-primary {
+  border-color: var(--card-border-emphasis);
+  border-left: 3px solid var(--primary-accent);
+}
+.card-primary > .block-h { background: var(--card-bg-emphasis); }
+.card-primary > .block-h h2 { font-size: 17px; }
+.card-quiet > .block-h h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .notice {
   border-left: 4px solid;
   border-radius: 6px;
   padding: 0.6rem 0.85rem;
   margin-top: 0.75rem;
-  font-size: 0.92rem;
+  font-size: var(--font-size-sm);
 }
 .notice-warning { background: var(--notice-warning-bg); border-color: var(--notice-warning-border); }
 .notice-danger { background: var(--notice-danger-bg); border-color: var(--notice-danger-border); }
-.conclusion-line { margin: 0.5rem 0; }
-.conclusion-strong { font-weight: 600; }
-.table-scroll { overflow-x: auto; margin-top: 0.5rem; }
-table { border-collapse: collapse; width: 100%; min-width: 320px; font-size: 0.92rem; }
-th, td { text-align: left; padding: 0.4rem 0.7rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
-th { color: var(--muted); font-weight: 600; }
+.header-notices .notice { margin-top: 0; }
+.narrative-disclaimer { color: var(--muted); font-size: var(--font-size-xs); margin: 0 0 0.6rem; font-style: italic; }
+.narrative-body { margin: 0; white-space: pre-wrap; line-height: 1.55; }
+.table-scroll { overflow-x: auto; margin-top: 0.5rem; max-height: 560px; }
+#so-lieu .table-scroll, #suy-luan .table-scroll { overflow: visible !important; max-height: none !important; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 320px;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+th, td {
+  text-align: left;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+/* Hàng tiêu đề dính khi cuộn bảng dài (`.table-scroll` có max-height) -- đọc
+   tới hàng thứ 40 vẫn biết cột nào là cột nào. */
+thead th {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 400;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: var(--panel-2);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+tbody tr:last-child td { border-bottom: none; }
 td:first-child, th:first-child { white-space: normal; }
+/* Căn phải mọi cột trừ cột đầu (luôn là nhãn/tên) -- dễ quét mắt theo cột
+   số dọc thay vì chữ lởm chởm hai bên, đúng quy ước bảng số liệu tài
+   chính (Bloomberg/Stripe). */
+td:not(:first-child), th:not(:first-child) { text-align: right; }
+tbody tr:hover { background: var(--table-hover); }
 .badge {
   display: inline-block;
-  padding: 0.1rem 0.55rem;
+  padding: 0.15rem 0.55rem;
   border-radius: 999px;
-  font-size: 0.78rem;
+  font-family: var(--mono);
+  font-size: 10.5px;
   font-weight: 600;
   color: #fff;
   background: var(--badge-color, #6b7280);
+  white-space: nowrap;
 }
 details.theory {
   margin-top: 0.9rem;
@@ -1968,53 +7012,118 @@ details.theory {
 details.theory summary {
   cursor: pointer;
   font-weight: 600;
-  font-size: 0.88rem;
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
-.theory-body { font-size: 0.88rem; margin-top: 0.5rem; color: var(--text); }
+.theory-body { font-size: var(--font-size-sm); margin-top: 0.5rem; color: var(--text); }
 .theory-body p { margin: 0.4rem 0; }
 .theory-body code { background: var(--track); padding: 0.05rem 0.3rem; border-radius: 4px; }
-.findings { margin: 0.5rem 0 0; padding-left: 1.2rem; font-size: 0.88rem; color: var(--muted); }
-.findings li { margin: 0.2rem 0; }
-svg.bar-chart { display: block; margin-top: 0.4rem; }
-svg text { fill: var(--text); font-size: 12px; }
-svg .bar-label, svg .bar-label-sm { fill: var(--muted); font-size: 11.5px; }
-svg .bar-value, svg .bar-value-sm { font-weight: 600; font-size: 11.5px; }
-.horizon-row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; }
-.horizon-card {
-  flex: 1 1 150px;
+.findings { margin: 0.5rem 0 0; padding-left: 1.2rem; font-size: var(--font-size-sm); color: var(--ink-2, #cbd5e1); line-height: 1.6; }
+.findings li { margin: 0.25rem 0; }
+.findings li strong { color: var(--ink, #ffffff); font-weight: 600; }
+svg { height: auto; }
+svg.bar-chart { display: block; margin-top: 0.6rem; max-width: 860px; }
+svg text { fill: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
+svg .bar-label, svg .bar-label-sm { fill: var(--ink-2, #cbd5e1); font-size: 12.5px; font-weight: 500; }
+svg .bar-value, svg .bar-value-sm { font-weight: 700; font-size: 12px; fill: var(--ink, #ffffff); }
+.horizon-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  gap: 1px;
+  background: var(--border);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.7rem 0.85rem;
+  margin-top: 0.5rem;
 }
-.horizon-title { font-weight: 700; font-size: 0.85rem; letter-spacing: 0.03em; color: var(--muted); }
-.horizon-trades { font-size: 0.8rem; color: var(--muted); margin-top: 0.15rem; }
-.horizon-pop { font-size: 1.25rem; font-weight: 700; margin-top: 0.3rem; }
-.horizon-sub { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
-.horizon-label { margin-top: 0.5rem; font-size: 0.85rem; font-weight: 600; }
-.not-found { text-align: center; padding: 2.5rem 1.2rem; }
-.not-found h1 { font-size: 1.3rem; }
-svg.line-chart { display: block; margin-top: 0.4rem; }
-svg .line-axis-label { fill: var(--muted); font-size: 10.5px; }
-svg .line-marker { font-weight: 600; font-size: 10.5px; }
-svg .line-end-label { font-weight: 700; font-size: 12.5px; }
-svg.pie-chart { display: block; }
-svg .pie-label { font-weight: 600; font-size: 11.5px; }
-svg .pie-value { fill: var(--muted); font-size: 11px; }
-svg .pie-empty { fill: var(--muted); font-size: 12px; }
-.pie-grid { display: flex; flex-wrap: wrap; gap: 1.5rem; margin-top: 0.5rem; }
-.pie-cell { flex: 1 1 220px; min-width: 0; }
-.pie-cell h4 { margin: 0 0 0.3rem; font-size: 0.9rem; color: var(--muted); }
-.admin-banner {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  margin-top: 1rem;
-  padding: 0.5rem 0.85rem;
+.horizon-card {
   background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 0.85rem;
+  padding: 13px 15px;
+  min-width: 0;
+}
+.horizon-title { font-weight: 700; font-size: var(--font-size-sm); letter-spacing: 0.03em; color: var(--ink-3, #94a3b8); }
+.horizon-trades { font-size: var(--font-size-xs); color: var(--ink-3, #94a3b8); margin-top: 0.15rem; }
+.horizon-pop { font-size: var(--font-size-lg); font-weight: 700; margin-top: 0.3rem; font-variant-numeric: tabular-nums; }
+.horizon-sub { font-size: var(--font-size-xs); color: var(--ink-3, #94a3b8); margin-top: 0.25rem; }
+.horizon-label { margin-top: 0.5rem; font-size: var(--font-size-sm); font-weight: 600; }
+.not-found { text-align: center; padding: 2.5rem 1.2rem; }
+.not-found h1 { font-size: var(--font-size-lg); }
+svg.line-chart { display: block; margin-top: 0.6rem; max-width: 1000px; }
+svg .line-axis-label { fill: var(--ink-3, #94a3b8); font-size: 11px; }
+svg .line-marker { font-weight: 600; font-size: 10.5px; }
+svg.line-chart { display: block; width: 100%; height: auto; overflow: visible; }
+svg .line-end-label { font-weight: 700; font-size: 13px; fill: var(--ink, #ffffff); }
+svg.pie-chart { display: block; margin-top: 0.4rem; max-width: 460px; margin-inline: auto; }
+svg .pie-label { font-weight: 600; font-size: 11.5px; fill: var(--ink, #ffffff); }
+svg .pie-value { fill: var(--ink-2, #cbd5e1); font-size: 11px; }
+svg .pie-empty { fill: var(--ink-3, #94a3b8); font-size: 12px; }
+.growth-dashboard-grid {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 1.5rem;
+  align-items: stretch;
+}
+@media (max-width: 960px) {
+  .growth-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.growth-dashboard-left {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.growth-curve-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.growth-chart-wrapper {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.growth-dashboard-right {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 1rem;
+}
+.win-loss-composition-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.pie-stack-vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  flex: 1 0 auto;
+}
+.growth-curve-panel > .theory,
+.win-loss-composition-panel > .theory {
+  margin-top: auto !important;
+  padding-top: 14px;
+}
+.pie-card-stacked {
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 10px;
+  padding: 1rem;
+}
+.pie-card-stacked h4 { margin: 0 0 0.4rem; font-size: var(--font-size-md); color: var(--muted); }
+.pie-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+}
+.pie-cell { min-width: 0; }
+.pie-cell h4 { margin: 0 0 0.3rem; font-size: var(--font-size-md); color: var(--muted); }
+.admin-banner {
+  display: none !important;
 }
 .admin-badge {
   background: #111827;
@@ -2026,17 +7135,609 @@ svg .pie-empty { fill: var(--muted); font-size: 12px; }
   border-radius: 4px;
 }
 .admin-banner a { color: var(--muted); }
+/* Banner thông báo trạng thái phân tích lưu trữ (đặt ở đầu trang, ngay dưới header/admin-banner) */
+.snapshot-banner {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  padding: 9px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary-accent);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+.snapshot-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--primary-accent);
+  white-space: nowrap;
+}
+.snapshot-text {
+  flex: 1 1 320px;
+  min-width: 240px;
+}
+.snapshot-text strong {
+  color: var(--text-primary);
+}
+.snapshot-actions {
+  display: inline-flex;
+  align-items: center;
+}
+.snapshot-banner a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  background: var(--primary-accent);
+  color: #ffffff !important;
+  font-weight: 600;
+  font-size: 0.82rem;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.snapshot-banner a:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  text-decoration: none;
+}
+.snapshot-stale {
+  color: #d97706;
+  font-weight: 600;
+  display: inline-block;
+}
 footer.report-footer {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   text-align: center;
   margin-top: 1.5rem;
 }
+.venue-symbol-badge {
+  display: inline-block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.15rem 0.55rem;
+  border-radius: 6px;
+  background: var(--track);
+  color: var(--primary-accent);
+  border: 1px solid var(--border);
+  vertical-align: middle;
+}
+.tabs-control-wrapper {
+  margin-top: 1.25rem;
+}
+.tab-nav-radio {
+  display: none !important;
+}
+/* Thanh tab dính đầu cột nội dung -- cuộn sâu 3000px vẫn đổi được tab.
+   Accent dùng kiệm: tab đang mở chỉ gạch chân 2px, không nền, không bóng. */
+.tabs-header-container {
+  position: sticky;
+  top: 56px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  padding: 10px 0;
+  background: var(--bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+:root[data-theme="light"] .tabs-header-container {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+.tabs-nav-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 4px;
+  border-radius: 10px;
+}
+:root[data-theme="light"] .tabs-nav-bar {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+.tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tab-label:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.04);
+}
+:root[data-theme="light"] .tab-label:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+.theme-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.7rem;
+  background: var(--card-bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  font-family: var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.theme-toggle-btn:hover {
+  border-color: var(--primary-accent);
+  color: var(--primary-accent);
+}
+[data-theme="dark"] .theme-icon-dark,
+:root:not([data-theme="light"]) .theme-icon-dark {
+  display: none;
+}
+[data-theme="dark"] .theme-icon-light,
+:root:not([data-theme="light"]) .theme-icon-light {
+  display: inline;
+}
+:root[data-theme="light"] .theme-icon-light {
+  display: none;
+}
+:root[data-theme="light"] .theme-icon-dark {
+  display: inline;
+}
+#tab-nav-report:checked ~ .tabs-header-container .label-report,
+#tab-nav-market:checked ~ .tabs-header-container .label-market,
+#tab-nav-trades:checked ~ .tabs-header-container .label-trades {
+  background: linear-gradient(180deg, #1E293B 0%, #0F172A 100%);
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.16);
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+:root[data-theme="light"] #tab-nav-report:checked ~ .tabs-header-container .label-report,
+:root[data-theme="light"] #tab-nav-market:checked ~ .tabs-header-container .label-market,
+:root[data-theme="light"] #tab-nav-trades:checked ~ .tabs-header-container .label-trades {
+  background: #FFFFFF;
+  color: #0F172A;
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+/* Không animation khi đổi tab: thừa, và làm ảnh chụp/kiểm thử thị giác bắt
+   được trạng thái mờ dở dang. */
+.tab-panel {
+  display: none !important;
+}
+.tab-panel.active-tab-panel {
+  display: block !important;
+}
+#tab-nav-report:checked ~ .tab-panels > .panel-report {
+  display: block !important;
+}
+#tab-nav-market:checked ~ .tab-panels > .panel-market {
+  display: block !important;
+}
+#tab-nav-trades:checked ~ .tab-panels > .panel-trades {
+  display: block !important;
+}
+.market-hero-card {
+  margin-top: 0.5rem;
+}
+.market-hero-title {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+/* "Bằng chứng trạng thái" và "So sánh hiệu suất" trả lời hai câu khác nhau
+   nhưng cùng cấp -- xếp NGANG HÀNG bằng CSS Grid trên tablet+ thay vì luôn
+   xếp chồng dọc như trước (mục "so sánh" vốn có thể vắng mặt, `auto-fit`
+   tự co về 1 cột khi chỉ có 1 khối, không cần CSS riêng cho trường hợp
+   đó). */
+.market-boxes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.market-evidence-box, .market-comparison-box {
+  padding: 0.75rem 1rem;
+  background: var(--track);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.market-evidence-box h4, .market-comparison-box h4 {
+  margin: 0 0 0.4rem;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.badge-win {
+  display: inline-block;
+  background: rgba(16, 185, 129, 0.14);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+}
+.badge-loss {
+  display: inline-block;
+  background: rgba(239, 68, 68, 0.14);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+}
+.text-profit {
+  color: #10b981;
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.text-loss {
+  color: #ef4444;
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.mono-symbol {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+}
+.okx-trades-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 12.5px;
+  font-family: var(--font, system-ui, sans-serif);
+}
+.okx-trades-table thead th {
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  color: var(--muted, #94a3b8);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.okx-trades-table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.05));
+  font-variant-numeric: tabular-nums;
+}
+.okx-trades-table tbody tr {
+  transition: background 0.15s ease;
+}
+.okx-trades-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--muted, #94a3b8);
+}
+.pagination-info {
+  font-variant-numeric: tabular-nums;
+}
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pagination-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  color: var(--text, #e2e8f0);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.pagination-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.35);
+  color: #60a5fa;
+}
+.pagination-btn.active {
+  background: #2563eb;
+  border-color: #3b82f6;
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+}
+.pagination-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+#rich-formula-tooltip {
+  position: fixed;
+  z-index: 99999;
+  pointer-events: none;
+  max-width: 380px;
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 12px 16px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45), 0 0 1px rgba(255, 255, 255, 0.2);
+  color: #f1f5f9;
+  font-size: 12.5px;
+  line-height: 1.5;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+#rich-formula-tooltip.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.rich-tip-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 13.5px;
+  color: #38bdf8;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.rich-tip-formula-box {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--mono, monospace);
+  font-size: 11.5px;
+  color: #34d399;
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+.rich-tip-desc {
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.rich-tip-footer {
+  margin-top: 8px;
+  font-size: 10.5px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.card-hint {
+  margin-top: 0.85rem;
+  padding: 0.75rem 1rem;
+  background: var(--track);
+  border-left: 3px solid var(--primary-accent);
+  border-radius: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+/* --- Điểm ngắt bố cục -----------------------------------------------------
+   Chữ đã co giãn liên tục bằng clamp() (xem tokens.css) nên các mốc dưới đây
+   chỉ đổi BỐ CỤC thật sự: số cột, rail trái nằm trên hay nằm bên. */
+
+/* Điện thoại nhỏ: bớt đệm để không lãng phí bề ngang ít ỏi cho khoảng trắng. */
+/* Điện thoại: mục lục 13 dòng đứng trước nội dung là 13 dòng phải cuộn qua
+   trước khi đọc được chữ đầu tiên -- trên một cột hẹp nó tốn nhiều hơn nó
+   giúp, nên ẩn hẳn (từ 640px trở lên nó xếp 3 cột ngang, rẻ chỗ, nên giữ). */
+@media (max-width: 639px) {
+  .nav { display: none; }
+}
+
 @media (max-width: 480px) {
-  .bot-name { font-size: 1.25rem; }
-  .stat-value { font-size: 1.35rem; }
+  .block-b { padding: 12px 12px 14px; }
+  .block-h { padding: 10px 12px; }
+  .stat-tile, .horizon-card { padding: 11px 12px; }
+  .stat-tile-hero .stat-value { font-size: 28px; }
+}
+
+/* Tablet: rail trái vẫn nằm trên cùng nhưng xếp ngang (danh tính | điểm số |
+   mục lục) thay vì chồng dọc lãng phí chiều cao; hai khối trong tab thị
+   trường nằm cạnh nhau. */
+@media (min-width: 640px) {
+  .side { padding: 20px 16px; }
+  .side-identity {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr);
+    gap: 1.5rem;
+    align-items: center;
+  }
+  .side-foot { margin-top: 0; }
+  .side-identity .cards { margin-top: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .side-identity .stat-tile-hero { border-left: none; border-top: 3px solid var(--tile-accent, var(--border)); }
+  .nav { flex-direction: row; flex-wrap: wrap; gap: 1.5rem; }
+  .nav-group { flex: 1 1 200px; margin-bottom: 0; }
+  .market-boxes {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+}
+
+/* Màn hình rộng: bố cục toàn màn hình gọn đẹp */
+@media (min-width: 1100px) {
+  .page {
+    display: block;
+    width: 100%;
+    min-height: 100vh;
+  }
+  .side {
+    display: none !important;
+  }
+  .main { max-width: 1560px; margin: 0 auto; padding: 24px 30px 60px; }
+  .stat-row, .horizon-row { gap: 1px; }
+
+  /* Phản hồi thị giác thật: "toàn trang là các thẻ xếp dọc liên tục, không
+     nhịp điệu, cuộn rất dài". Mỗi tab vẫn giữ NGUYÊN số mục và thứ tự mục
+     (comment này tránh gõ lại nguyên văn một tiêu đề mục nào -- xem lý do ở
+     comment phía trên `.card-primary`), chỉ đổi CÁCH XẾP trên màn rộng:
+     mặc định MỌI mục vẫn chiếm TRỌN bề ngang, chỉ những mục đã được xác
+     nhận đủ ngắn mới ghép đôi qua `.card-pair` (`_section(..., pair=True)`). */
+  .tab-panel.active-tab-panel {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.25rem;
+    align-items: start;
+  }
+  #tab-nav-report:checked ~ .tab-panels > .panel-report,
+  #tab-nav-market:checked ~ .tab-panels > .panel-market,
+  #tab-nav-trades:checked ~ .tab-panels > .panel-trades {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.25rem;
+    align-items: start;
+  }
+  .tab-panel > .card { margin-top: 0; grid-column: 1 / -1; }
+  /* Ghép đôi theo id (không đổi markup -- test khoá đúng chuỗi
+     `class="card" id="thi-truong"`): mục văn bản/biểu đồ gọn đứng cạnh nhau,
+     bảng rộng (danh sách lệnh, cách chơi theo pha, Monte Carlo) vẫn trọn hàng. */
+  .tab-panel > .card.card-pair,
+  .tab-panel > #nhan-dinh, .tab-panel > #diem-chieu,
+  .tab-panel > #thi-truong-chinh, .tab-panel > #thi-truong,
+  .tab-panel > #so-lieu, .tab-panel > #vi-the-mo,
+  .tab-panel > #suy-luan, .tab-panel > #tai-san,
+  .tab-panel > #tang-truong, .tab-panel > #monte-carlo { grid-column: auto; }
+}
+
+/* Màn rất rộng: ô số và mục ghép có thêm chỗ, tăng khoảng thở như nora. */
+@media (min-width: 1600px) {
+  .main { padding: 24px 40px 72px; }
+  #tab-nav-report:checked ~ .tab-panels > .panel-report,
+  #tab-nav-market:checked ~ .tab-panels > .panel-market,
+  #tab-nav-trades:checked ~ .tab-panels > .panel-trades { gap: 1.5rem; }
 }
 """
+
+
+# --------------------------------------------------------------------------- #
+# Snapshot timestamp banner -- see Agent/backend/web/snapshot.py's module
+# docstring for the caching feature this displays. Vietnam runs UTC+7 with no
+# DST, so a fixed offset is all this ever needs (no zoneinfo/tz database
+# dependency, matching this module's own "no new dependency" constraint).
+# --------------------------------------------------------------------------- #
+
+_VN_TZ = timezone(timedelta(hours=7))
+
+
+def _format_vn_timestamp(snapshot_at_ms: int) -> str:
+    dt = datetime.fromtimestamp(snapshot_at_ms / 1000, tz=_VN_TZ)
+    return dt.strftime("%H:%M:%S %d/%m/%Y")
+
+
+def _render_snapshot_banner(
+    snapshot_at_ms: Optional[int],
+    refresh_url: Optional[str],
+    *,
+    is_stale: bool = False,
+) -> str:
+    """One line at the very top of the page telling a reader EXACTLY when
+    this analysis was captured -- not a decorative detail (see the task this
+    was written for): `GET /bot/<code>`/`GET /<userref>_<code>` can now be
+    served from a Redis snapshot up to 24h old
+    (Agent/backend/web/snapshot.py) OR from this bot's own already-scored
+    `assessment.json` on disk (no built-in expiry -- see `app.py`'s
+    `_bot_report_response`/`data.py`'s `find_scored_report`), so a reader
+    must never be left guessing whether they are looking at a fresh view or
+    an old one. The "Phân tích lại" link (when `refresh_url` is given)
+    always points back at THIS SAME page with `?refresh=1` appended, forcing
+    a fresh analysis -- see app.py's `_bot_report_response` for why that
+    link still costs the same rate-limit quota an ordinary analysis would.
+
+    `is_stale` (default `False`, same backward-compatible pattern as every
+    other parameter here) adds one extra clause to the same line rather than
+    a whole separate notice -- a days-old on-disk assessment is still the
+    real, current verdict for that bot (nothing here claims otherwise), it
+    is simply worth telling a reader exactly how old the picture is so they
+    can decide for themselves whether to click "Phân tích lại".
+
+    Omitted entirely when the caller passes no timestamp at all (`None`,
+    the default) -- every pre-existing direct call to
+    `render_bot_report_html` in this module's own test suite keeps getting
+    byte-for-byte the same page as before this parameter existed, same
+    backward-compatible default pattern as `is_admin` above.
+    """
+    if snapshot_at_ms is None:
+        return ""
+    when = _esc(_format_vn_timestamp(snapshot_at_ms))
+    refresh_link = (
+        f'<a href="{_esc(refresh_url)}">Re-analyze</a>' if refresh_url else ""
+    )
+    stale_clause = (
+        ' · <span class="snapshot-stale">snapshot is stale (over 24 hours old)</span>'
+        if is_stale
+        else ""
+    )
+    return (
+        '<div class="snapshot-banner">'
+        '<span class="snapshot-badge">CACHED SNAPSHOT</span>'
+        '<span class="snapshot-text">'
+        f"Snapshot taken at <strong>{when}</strong> (Vietnam time, GMT+7){stale_clause}."
+        "</span>"
+        f'<span class="snapshot-actions">{refresh_link}</span>'
+        "</div>"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -2048,7 +7749,10 @@ def render_bot_report_html(
     result: Dict[str, Any],
     *,
     is_admin: bool = False,
-    admin_back_url: str = "/admin",
+    admin_back_url: str = "/#/admin",
+    snapshot_at_ms: Optional[int] = None,
+    refresh_url: Optional[str] = None,
+    is_stale: bool = False,
 ) -> str:
     """Render the full standalone HTML page for one `/api/analyze`-shaped
     result dict (see `WebDataService.analyze`'s contract). Never raises on a
@@ -2063,61 +7767,420 @@ def render_bot_report_html(
     never a single word of the analysis itself. Callers that never pass
     `is_admin` keep getting byte-for-byte the same page as before this
     parameter existed.
+
+    `snapshot_at_ms`/`refresh_url`/`is_stale` (default `None`/`None`/`False`,
+    same backward-compatible pattern) add a second strip -- see
+    `_render_snapshot_banner` -- showing when this particular render was
+    captured, whether it is now considered stale (>24h old), and, when
+    `refresh_url` is given, a "Phân tích lại" link. Also navigation-only:
+    none of the three touches the analysis sections below.
     """
     if not isinstance(result, dict):
         result = {}
     status = result.get("status")
     name = result.get("name") or result.get("code") or "Bot"
 
+    sidebar_html = ""
     if status == "NOT_FOUND":
         body = _render_not_found_body(result)
-        title = f"Không tìm thấy · {name}"
+        title = f"Not found · {name}"
     else:
-        sections = [
-            _render_header(result),
-            _render_conclusion(result),
-            _render_dimensions_section(result),
-            _render_growth_section(result),
-            _render_monte_carlo(result),
-            _render_statistical_inference(result),
-            _render_trade_metrics(result),
-            _render_assets(result),
-        ]
-        body = "".join(s for s in sections if s)
-        if not body:
+        header_html, side_blocks = _render_header(result)
+        tab1_content = _render_tab_report(result)
+        tab2_content = _render_tab_market(result)
+        tab3_content = _render_tab_trades(result)
+        tabs_html = _render_tabs_wrapper(tab1_content, tab2_content, tab3_content)
+        body = f"{header_html}{tabs_html}"
+        if not (tab1_content or tab2_content or tab3_content):
+            # Nuốt lặng lẽ: một `result` HỢP LỆ mà cả ba tab ra rỗng thì
+            # người đọc nhận về trang "không tìm thấy" y hệt trường hợp mã
+            # bot sai, và không còn dấu vết nào để lần. Đã cắn thật: ngày
+            # 19/09 ba test render đỏ đúng kiểu này trong MỘT lượt chạy suite
+            # rồi không tái hiện được ở hai lượt sau -- không có dòng log nào
+            # để biết tab nào rỗng hay vì sao. Ghi lại đủ để lần sau chẩn
+            # đoán được ngay, không đổi thứ người dùng nhìn thấy.
+            logger.warning(
+                "Bot report degraded to the not-found body although the result "
+                "was usable: code=%r status=%r has_evidence=%s tabs=(%d,%d,%d)",
+                result.get("code"),
+                status,
+                isinstance(result.get("evidence"), dict)
+                and bool(result.get("evidence")),
+                len(tab1_content or ""),
+                len(tab2_content or ""),
+                len(tab3_content or ""),
+            )
             body = _render_not_found_body(result)
-        title = f"Báo cáo bot: {name}"
+        else:
+            nav_html = _render_nav(tab1_content, tab2_content, tab3_content)
+            sidebar_html = _render_sidebar(side_blocks, nav_html)
+        title = f"Bot report: {name}"
 
     footer = (
-        '<footer class="report-footer">Đánh giá tự động dựa trên dữ liệu công khai'
-        " OKX copy-trading, KHÔNG PHẢI lời khuyên đầu tư. Người đọc tự chịu trách"
-        " nhiệm với quyết định của mình.</footer>"
+        '<footer class="report-footer">Automated assessment based on public'
+        " OKX copy-trading data. THIS IS NOT investment advice. Readers are"
+        " solely responsible for their own decisions.</footer>"
     )
 
-    admin_banner = ""
-    if is_admin:
-        admin_banner = (
+    role_capsule = (
+        '<div class="user-badge-capsule">'
+        '<span class="user-badge-pulse"></span>'
+        '<span class="user-badge-label">USER</span>'
+        '</div>'
+    )
+
+    top_header = (
+        '<header class="top-header">'
+        '<div class="header-left">'
+        '<a href="/#/admin?tab=overview" class="brand">'
+        '<div class="brand-logo-box">'
+        '<div class="brand-logo-grid">'
+        '<span class="grid-sq sq-1"></span>'
+        '<span class="grid-sq sq-2"></span>'
+        '<span class="grid-sq sq-3"></span>'
+        '<span class="grid-sq sq-4"></span>'
+        '</div>'
+        '</div>'
+        '<div class="brand-title-wrap">'
+        '<div class="brand-name-row">'
+        '<span class="brand-name">NORABT</span>'
+        '<span class="brand-badge-fintech">AI ENGINE</span>'
+        '</div>'
+        '<span class="brand-sub">OKX QUANT RISK PROTOCOL</span>'
+        '</div>'
+        '</a>'
+        '<div class="header-divider"></div>'
+        '<nav class="header-nav-tabs">'
+        '<a href="/#/admin?tab=overview" class="header-tab">'
+        '<span class="tab-glyph glyph-overview"></span>'
+        '<span>Overview</span>'
+        '</a>'
+        '<a href="/#/admin?tab=bots" class="header-tab on">'
+        '<span class="tab-glyph glyph-bots"></span>'
+        '<span>Bot list</span>'
+        '</a>'
+        '<a href="/#/admin?tab=analyze" class="header-tab">'
+        '<span class="tab-glyph glyph-analyze"></span>'
+        '<span>Assess bot</span>'
+        '</a>'
+        '</nav>'
+        '</div>'
+        '<div class="top-bar-actions">'
+        '<a href="/#/admin?tab=analyze" class="btn-header-cta" title="Assess a new bot">'
+        '<span class="btn-cta-plus">+</span>'
+        '<span class="btn-header-cta-text">Assess bot</span>'
+        '</a>'
+        f'{role_capsule}'
+        '<button type="button" class="theme-btn theme-toggle-btn" id="theme-toggle-btn" aria-label="Switch Light/Dark mode" title="Switch Light/Dark theme">'
+        '<span class="theme-icon theme-icon-light">☀️ Light</span>'
+        '<span class="theme-icon theme-icon-dark">🌙 Dark</span>'
+        '</button>'
+        '</div>'
+        '</header>'
+    )
+
+    admin_banner = (
+        (
             '<div class="admin-banner">'
+            f'<a href="{_esc(admin_back_url)}" class="back-link">← Back to bot list</a>'
             '<span class="admin-badge">ADMIN</span>'
-            f'<a href="{_esc(admin_back_url)}">← Quay lại danh sách admin</a>'
             "</div>"
         )
+        if is_admin
+        else ""
+    )
+    snapshot_banner = _render_snapshot_banner(
+        snapshot_at_ms, refresh_url, is_stale=is_stale
+    )
 
     return (
         "<!doctype html>\n"
-        '<html lang="vi">\n<head>\n'
+        '<html lang="en">\n<head>\n'
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
+        '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
+        '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">\n'
         f"<title>{_esc(title)}</title>\n"
-        # Việc 3: tokens.css's raw text embedded FIRST, so the `:root`
-        # custom-property definitions it declares are already in scope for
-        # every `var(...)` reference `_CSS` below makes to them -- CSS custom
-        # properties are read at USE time, not declaration-order-sensitive
-        # the way a Sass variable would be, but keeping the token
-        # declarations first still matches how a human reads the stylesheet
-        # top to bottom (tokens, then the rules that consume them).
         f"<style>{_design_tokens_css_text()}\n{_CSS}</style>\n"
         "</head>\n<body>\n"
-        f'<div class="page">{admin_banner}{body}{footer}</div>\n'
+        f"{top_header}"
+        f'<div class="page">{sidebar_html}'
+        f'<div class="main">{admin_banner}{snapshot_banner}{body}{footer}{_FORMULA_MODAL_HTML}</div>'
+        "</div>\n"
+        f"{_RUNTIME_SCRIPT}\n"
         "</body>\n</html>\n"
     )
+
+
+_FORMULA_MODAL_HTML = """<div id="formula-modal" class="formula-modal-backdrop" onclick="if(event.target===this)closeFormulaModal()">
+  <div class="formula-modal-card" role="dialog" aria-modal="true" aria-labelledby="formula-modal-title">
+    <div class="formula-modal-header">
+      <h3 id="formula-modal-title">Formula details</h3>
+      <button type="button" class="formula-modal-close" onclick="closeFormulaModal()" aria-label="Close">&times;</button>
+    </div>
+    <div class="formula-modal-body">
+      <div class="formula-field">
+        <label>Formula:</label>
+        <pre id="formula-modal-formula"></pre>
+      </div>
+      <div class="formula-field">
+        <label>Criteria &amp; scale:</label>
+        <p id="formula-modal-desc"></p>
+      </div>
+    </div>
+  </div>
+</div>"""
+
+
+_RUNTIME_SCRIPT = (
+    '<script id="report-runtime">\n'
+    f'window.METRIC_INFO = {json.dumps(METRIC_FORMULA_INFO, ensure_ascii=False)};\n'
+    """window.openFormulaModal = function(key) {
+  var item = (window.METRIC_INFO || {})[key];
+  if (!item) return;
+  var titleEl = document.getElementById('formula-modal-title');
+  var formulaEl = document.getElementById('formula-modal-formula');
+  var descEl = document.getElementById('formula-modal-desc');
+  var modal = document.getElementById('formula-modal');
+  if (titleEl) titleEl.textContent = item.title || key;
+  if (formulaEl) formulaEl.textContent = item.formula || 'Not available yet';
+  if (descEl) descEl.textContent = item.desc || '';
+  if (modal) modal.classList.add('is-open');
+};
+window.closeFormulaModal = function() {
+  var modal = document.getElementById('formula-modal');
+  if (modal) modal.classList.remove('is-open');
+};
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') window.closeFormulaModal();
+});
+(function() {
+  try {
+    // Chuyển tiếp mượt mà vào SPA để giữ header cố định, không load lại trang
+    if (window.location.pathname.startsWith('/bot/') || /^\\/[a-zA-Z0-9]+_[a-zA-Z0-9]+$/.test(window.location.pathname)) {
+      var seg = window.location.pathname.replace(/^\\/bot\\//, '').replace(/^\\/[^_]+_/, '');
+      if (seg && !window.location.hash) {
+        window.location.replace('/#/admin?tab=bot&code=' + seg);
+        return;
+      }
+    }
+    var root = document.documentElement;
+    var themeKey = 'norabt_theme';
+    var saved = localStorage.getItem(themeKey);
+    if (saved === 'dark' || saved === 'light') {
+      root.setAttribute('data-theme', saved);
+    }
+    var btn = document.getElementById('theme-toggle-btn');
+    if (btn) {
+      btn.addEventListener('click', function() {
+        var current = root.getAttribute('data-theme');
+        var isDark = current === 'dark' || (!current && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        var next = isDark ? 'light' : 'dark';
+        root.setAttribute('data-theme', next);
+        try { localStorage.setItem(themeKey, next); } catch (e) {}
+      });
+    }
+    var hash = (window.location.hash || '').toLowerCase();
+    if (hash === '#market' || hash === '#thitruong' || hash === '#thi-truong') {
+      var r = document.getElementById('tab-nav-market');
+      if (r) r.checked = true;
+    } else if (hash === '#trades' || hash === '#lenh' || hash === '#tradelist' || hash === '#vi-the') {
+      var r = document.getElementById('tab-nav-trades');
+      if (r) r.checked = true;
+    } else if (hash === '#report' || hash === '#baocao' || hash === '#bao-cao') {
+      var r = document.getElementById('tab-nav-report');
+      if (r) r.checked = true;
+    }
+    // Mục lục cột trái trỏ tới các mục nằm trong CẢ BA tab; một anchor thuộc
+    // tab đang đóng thì cuộn tới cũng vô nghĩa (panel đang display:none), nên
+    // mỗi link tự bật đúng tab của nó trước rồi mới cuộn.
+    var navLinks = document.querySelectorAll('.nav a[data-tab]');
+    Array.prototype.forEach.call(navLinks, function(a) {
+      a.addEventListener('click', function(ev) {
+        var tab = a.getAttribute('data-tab');
+        var radio = document.getElementById('tab-nav-' + tab);
+        if (radio && !radio.checked) { radio.checked = true; }
+        var id = (a.getAttribute('href') || '').slice(1);
+        var target = id ? document.getElementById(id) : null;
+        if (target) {
+          ev.preventDefault();
+          target.scrollIntoView({ block: 'start' });
+        }
+      });
+    });
+    var radios = ['tab-nav-report', 'tab-nav-market', 'tab-nav-trades'];
+    radios.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('change', function() {
+          if (el.checked && window.history && window.history.replaceState) {
+            var h = id === 'tab-nav-market' ? '#market' : (id === 'tab-nav-trades' ? '#trades' : '#report');
+            window.history.replaceState(null, '', h);
+          }
+        });
+      }
+    });
+    document.querySelectorAll('.formula-star').forEach(function(star) {
+      star.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var tip = star.querySelector('.formula-tooltip');
+        if (tip) {
+          var isVisible = tip.style.visibility === 'visible' && tip.style.opacity === '1';
+          tip.style.visibility = isVisible ? 'hidden' : 'visible';
+          tip.style.opacity = isVisible ? '0' : '1';
+        }
+      });
+    });
+
+    // OKX-Style Table Pagination
+    function initTablePagination() {
+      var tables = document.querySelectorAll('.paginated-table');
+      tables.forEach(function(table) {
+        if (table.dataset.paginationInitialized) return;
+        table.dataset.paginationInitialized = 'true';
+        var tbody = table.querySelector('tbody');
+        if (!tbody) return;
+        var allRows = Array.from(tbody.querySelectorAll('tr'));
+        var totalRows = allRows.length;
+        var pageSize = parseInt(table.dataset.pageSize || '10', 10);
+        if (totalRows <= pageSize) return;
+
+        var totalPages = Math.ceil(totalRows / pageSize);
+        var currentPage = 1;
+
+        var pagEl = document.createElement('div');
+        pagEl.className = 'table-pagination';
+
+        function renderPage(page) {
+          currentPage = page;
+          var start = (page - 1) * pageSize;
+          var end = Math.min(start + pageSize, totalRows);
+
+          allRows.forEach(function(row, idx) {
+            row.style.display = (idx >= start && idx < end) ? '' : 'none';
+          });
+
+          pagEl.innerHTML = '';
+
+          var infoEl = document.createElement('div');
+          infoEl.className = 'pagination-info';
+          infoEl.textContent = 'Showing ' + (start + 1) + ' – ' + end + ' of ' + totalRows + ' trades';
+
+          var controlsEl = document.createElement('div');
+          controlsEl.className = 'pagination-controls';
+
+          function createBtn(text, pageNum, disabled, isActive) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'pagination-btn' + (isActive ? ' active' : '');
+            btn.textContent = text;
+            btn.disabled = !!disabled;
+            if (!disabled && !isActive) {
+              btn.onclick = function() { renderPage(pageNum); };
+            }
+            return btn;
+          }
+
+          controlsEl.appendChild(createBtn('«', 1, currentPage === 1));
+          controlsEl.appendChild(createBtn('‹', currentPage - 1, currentPage === 1));
+
+          var startP = Math.max(1, currentPage - 2);
+          var endP = Math.min(totalPages, startP + 4);
+          if (endP - startP < 4) {
+            startP = Math.max(1, endP - 4);
+          }
+
+          for (var p = startP; p <= endP; p++) {
+            controlsEl.appendChild(createBtn(String(p), p, false, p === currentPage));
+          }
+
+          controlsEl.appendChild(createBtn('›', currentPage + 1, currentPage === totalPages));
+          controlsEl.appendChild(createBtn('»', totalPages, currentPage === totalPages));
+
+          pagEl.appendChild(infoEl);
+          pagEl.appendChild(controlsEl);
+        }
+
+        var parent = table.closest('.table-scroll') || table;
+        parent.parentNode.insertBefore(pagEl, parent.nextSibling);
+        renderPage(1);
+      });
+    }
+    initTablePagination();
+
+    // Rich Formula Hover Tooltips
+    function initRichTooltips() {
+      var tip = document.getElementById('rich-formula-tooltip');
+      if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'rich-formula-tooltip';
+        document.body.appendChild(tip);
+      }
+
+      function getTooltipData(target) {
+        var el = target.closest('[data-formula], [data-metric-key], .param-label, .bar-label, .formula-star-btn');
+        if (!el) return null;
+        var formula = el.getAttribute('data-formula');
+        var key = el.getAttribute('data-metric-key');
+        var title = el.getAttribute('data-title');
+        var desc = el.getAttribute('data-desc');
+
+        if (!formula && key && window.METRIC_INFO && window.METRIC_INFO[key]) {
+          var info = window.METRIC_INFO[key];
+          formula = info.formula;
+          title = title || info.title || key;
+          desc = desc || info.desc;
+        }
+        if (!formula && !desc) return null;
+        return { title: title || 'Calculation Methodology', formula: formula, desc: desc };
+      }
+
+      function positionTip(e) {
+        var pad = 14;
+        var tipW = tip.offsetWidth || 340;
+        var tipH = tip.offsetHeight || 120;
+        var x = e.clientX + pad;
+        var y = e.clientY + pad;
+
+        if (x + tipW > window.innerWidth - 10) {
+          x = e.clientX - tipW - pad;
+        }
+        if (y + tipH > window.innerHeight - 10) {
+          y = e.clientY - tipH - pad;
+        }
+        tip.style.left = Math.max(10, x) + 'px';
+        tip.style.top = Math.max(10, y) + 'px';
+      }
+
+      document.addEventListener('mouseover', function(e) {
+        var data = getTooltipData(e.target);
+        if (!data) return;
+
+        tip.innerHTML = 
+          '<div class="rich-tip-header"><span>📐</span><span>' + (data.title || 'Formula') + '</span></div>' +
+          (data.formula ? '<div class="rich-tip-formula-box"><strong>Formula:</strong> ' + data.formula + '</div>' : '') +
+          (data.desc ? '<div class="rich-tip-desc">' + data.desc + '</div>' : '');
+
+        tip.classList.add('is-visible');
+        positionTip(e);
+      });
+
+      document.addEventListener('mousemove', function(e) {
+        if (tip.classList.contains('is-visible')) {
+          positionTip(e);
+        }
+      });
+
+      document.addEventListener('mouseout', function(e) {
+        var data = getTooltipData(e.target);
+        if (data) {
+          tip.classList.remove('is-visible');
+        }
+      });
+    }
+    initRichTooltips();
+  } catch (err) {}
+})();
+</script>"""
+)

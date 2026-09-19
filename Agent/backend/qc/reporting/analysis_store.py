@@ -144,7 +144,7 @@ def persist(report: Any, data_dir: Path) -> List[str]:
     for block in report.blocks:
         asset_dir = root / block.venue_type.lower() / block.symbol
         market = {
-            "step": "2.1_PHAN_TICH_THI_TRUONG",
+            "step": "2.1_MARKET_ANALYSIS",
             "generated_at_ms": report.generated_at_ms,
             "venue_type": block.venue_type,
             "symbol": block.symbol,
@@ -168,7 +168,7 @@ def persist(report: Any, data_dir: Path) -> List[str]:
                 continue
             bot_dir = asset_dir / "bot" / folder_name(bot.nick_name, bot.unique_code)
             performance = {
-                "step": "2.2_HIEU_SUAT",
+                "step": "2.2_PERFORMANCE",
                 "generated_at_ms": report.generated_at_ms,
                 "slot": f"{block.venue_type}/{block.symbol}",
                 "underlying": block.underlying,
@@ -192,7 +192,7 @@ def persist(report: Any, data_dir: Path) -> List[str]:
                 written.append(str(path))
 
     index = {
-        "step": "2_PHAN_TICH_MO_PHONG",
+        "step": "2_ANALYSIS_AND_SIMULATION",
         "generated_at_ms": report.generated_at_ms,
         "slots": report.slots,
         "bots_evaluated": report.bots_evaluated,

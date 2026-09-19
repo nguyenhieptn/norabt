@@ -44,11 +44,6 @@ TRENDING = (
     MarketPhase.DOWNTREND_VOLATILE,
 )
 DOWN_PHASES = (MarketPhase.DOWNTREND_CALM, MarketPhase.DOWNTREND_VOLATILE)
-VOLATILE_PHASES = (
-    MarketPhase.UPTREND_VOLATILE,
-    MarketPhase.DOWNTREND_VOLATILE,
-    MarketPhase.RANGE_VOLATILE,
-)
 
 
 @dataclass(frozen=True)

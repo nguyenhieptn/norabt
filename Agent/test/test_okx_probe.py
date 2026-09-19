@@ -166,7 +166,7 @@ def test_public_access_survives_endpoint_errors_without_crashing(
     assert len(result["checks"]) == 3
     for check in result["checks"]:
         assert check["ok"] is False
-        assert "Không gọi được" in check["detail"]
+        assert "Call failed" in check["detail"]
     assert result["clock_skew_ms"] is None
     assert len(calls) == 3
 
@@ -281,7 +281,7 @@ def test_private_access_reports_live_environment(
 @pytest.mark.parametrize(
     "code,expected_keyword",
     [
-        ("50102", "30 giây"),
+        ("50102", "30 seconds"),
         ("50103", "OK-ACCESS-KEY"),
         ("50104", "OK-ACCESS-PASSPHRASE"),
         ("50111", "OKX_API_KEY"),
@@ -298,12 +298,12 @@ def test_explain_error_vi_translates_known_codes(code: str, expected_keyword: st
 def test_explain_error_vi_never_invents_meaning_for_unknown_code():
     message = explain_error_vi("99999")
     assert "99999" in message
-    assert "chưa có trong bảng tra cứu" in message
+    assert "not in the probe's internal lookup table" in message
 
 
 def test_explain_error_vi_handles_missing_code():
     message = explain_error_vi(None)
-    assert "Không có mã lỗi" in message
+    assert "No specific error code" in message
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +420,7 @@ def test_execute_code_50038_means_demo_does_not_support_copy_trading(
 
     assert result["status"] == "DEMO_KHONG_HO_TRO"
     assert result["code"] == "50038"
-    assert "không hỗ trợ" in result["message_vi"].lower()
+    assert "does not support" in result["message_vi"].lower()
 
 
 def test_execute_code_zero_means_demo_supports_copy_trading_and_warns_to_clean_up(
@@ -437,7 +437,7 @@ def test_execute_code_zero_means_demo_supports_copy_trading_and_warns_to_clean_u
     result = probe_copy_trading(dry_run=False)
 
     assert result["status"] == "DEMO_CO_HO_TRO"
-    assert "hỗ trợ" in result["message_vi"].lower()
+    assert "does support" in result["message_vi"].lower()
     assert "canh_bao" in result
     assert "stop-copy-trading" in result["canh_bao"]
     assert "SAMPLECODE123456" in result["canh_bao"]

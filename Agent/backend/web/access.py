@@ -231,9 +231,9 @@ def verify_token(token: Optional[str]) -> Optional[str]:
         return None
     for candidate, label in load_tokens().items():
         if hmac.compare_digest(candidate, token):
-            logger.debug("Access token hợp lệ (nhãn=%s)", label)
+            logger.debug("Access token valid (label=%s)", label)
             return label
-    logger.warning("Access token bị từ chối (%s)", _token_repr(token))
+    logger.warning("Access token rejected (%s)", _token_repr(token))
     return None
 
 
@@ -386,7 +386,7 @@ def verify_admin_token(token: Optional[str]) -> bool:
         return False
     candidate = hashlib.sha256(token.encode("utf-8")).hexdigest()
     if hmac.compare_digest(candidate, configured):
-        logger.debug("Admin access token hợp lệ")
+        logger.debug("Admin access token valid")
         return True
     return False
 

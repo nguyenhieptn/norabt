@@ -14,12 +14,14 @@ class LeverageExposureLens:
     def evaluate(market: Optional[MarketResult], bot: BotResult):
         state = bot.current_state
         if state.open_positions_count == 0:
-            return available("Leverage / Exposure Risk", 5.0, 1.1, ["No open exposure"])
+            return available(
+                "Leverage / exposure", 5.0, 1.1, ["No open exposure"]
+            )
         if state.current_leverage is None and state.gross_exposure is None:
             return unknown(
-                "Leverage / Exposure Risk",
+                "Leverage / exposure",
                 1.1,
-                "Open-position leverage and exposure are unavailable",
+                "No leverage or exposure data for the open position",
             )
 
         score = 15.0
@@ -27,14 +29,14 @@ class LeverageExposureLens:
         confidence = 1.0
 
         if state.current_leverage is not None:
-            findings.append(f"Maximum position leverage {state.current_leverage:.0f}x")
+            findings.append(f"Highest position leverage {state.current_leverage:.0f}x")
             if state.current_leverage > 20:
                 score += 45
             elif state.current_leverage > 10:
                 score += 25
         else:
             confidence = 0.7
-            findings.append("Per-position leverage is unavailable")
+            findings.append("No per-position leverage available")
 
         if state.gross_exposure is not None:
             detail = f"Gross exposure {state.gross_exposure:,.0f} USDT"
@@ -46,9 +48,10 @@ class LeverageExposureLens:
             score += 35
             confidence = min(confidence, 0.5)
             findings.append(
-                f"Committed margin {state.used_margin:,.0f} USDT exceeds reported capital "
-                f"{state.reference_capital:,.0f} USDT — either the capital figure is wrong "
-                f"or the account is beyond its margin capacity; both need resolving"
+                f"Margin used {state.used_margin:,.0f} USDT exceeds the declared capital "
+                f"{state.reference_capital:,.0f} USDT — either the declared capital is "
+                f"wrong, or the account has exceeded its margin capacity; either way "
+                f"this needs clarifying"
             )
         elif (
             state.margin_ratio is not None or state.margin_to_reference_pct is not None
@@ -59,9 +62,9 @@ class LeverageExposureLens:
                 else state.margin_to_reference_pct
             )
             label = (
-                "margin/current-equity"
+                "margin/current capital"
                 if state.margin_ratio is not None
-                else "margin/capital-reference"
+                else "margin/reference capital"
             )
             findings.append(f"Observed {label} ratio {ratio:.1f}%")
             if ratio > 50:
@@ -70,11 +73,11 @@ class LeverageExposureLens:
                 score += 15
         else:
             confidence = min(confidence, 0.7)
-            findings.append("Margin utilization is unavailable")
+            findings.append("No margin usage available")
 
         if state.unrealized_pnl is not None and state.unrealized_pnl < 0:
             findings.append(
-                f"Unrealized loss carried on open positions: {state.unrealized_pnl:,.0f} USDT"
+                f"Unrealised loss on the open position: {state.unrealized_pnl:,.0f} USDT"
             )
             if (
                 state.gross_exposure
@@ -88,11 +91,11 @@ class LeverageExposureLens:
         ):
             score += 40
             findings.append(
-                f"Liquidation distance is only {state.liquidation_distance_pct:.1f}%"
+                f"Distance to liquidation price is only {state.liquidation_distance_pct:.1f}%"
             )
         if state.unknown_positions_count:
             confidence = min(confidence, 0.6)
             findings.append(
-                f"{state.unknown_positions_count} position(s) lack an instrument id"
+                f"{state.unknown_positions_count} positions carry no instrument code"
             )
-        return available("Leverage / Exposure Risk", score, 1.1, findings, confidence)
+        return available("Leverage / exposure", score, 1.1, findings, confidence)

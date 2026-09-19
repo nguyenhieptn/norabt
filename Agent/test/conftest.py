@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from Agent.backend.market.service import MarketService
+from Agent.backend.market.service import MarketService, clear_market_result_cache
 from Agent.backend.mcp.service import BotObservationService
 
 FIXED_AS_OF_MS = 1789230000000
@@ -61,6 +61,24 @@ _ISOLATED_ENV_PREFIX = "NORABT_"
 def _isolate_norabt_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in [k for k in os.environ if k.startswith(_ISOLATED_ENV_PREFIX)]:
         monkeypatch.delenv(key, raising=False)
+
+
+# Việc 2 (Agent/backend/market/service.py's module-level `MarketResult`
+# TTL cache): a real production process only ever has one DATA_DIR, so
+# keying that cache on (symbol, venue_type) alone is safe there -- but this
+# test suite builds dozens of `MarketService(tmp_path, ...)` instances, each
+# with its OWN symbol data under its OWN tmp_path, all inside the SAME
+# process. The cache is scoped to `LiveMarketDataSource` only (see that
+# module's own comment for why `FileMarketDataSource` -- what these
+# `tmp_path`-based tests use -- is excluded), so this fixture is a second,
+# belt-and-suspenders layer of isolation for any current or future test that
+# DOES exercise the live/cached path with a symbol another test also
+# happens to use within the same 45s TTL window.
+@pytest.fixture(autouse=True)
+def _clear_market_result_cache() -> None:
+    clear_market_result_cache()
+    yield
+    clear_market_result_cache()
 
 
 def _bot(asset: str, folder: str, venue: str = "CEX"):

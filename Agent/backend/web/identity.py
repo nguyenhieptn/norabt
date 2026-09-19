@@ -62,8 +62,8 @@ from Agent.backend.web.access import report_url_secret_bytes
 # shared constant, not re-typed at each call site, so the wording can never
 # drift between the places that show it.
 WALLET_DISCLAIMER_VI = (
-    "Địa chỉ ví là định danh do bạn tự khai báo -- hệ thống CHƯA xác minh "
-    "quyền sở hữu ví này (không có chữ ký, không có bằng chứng sở hữu)."
+    "The wallet address is a self-declared identifier -- the system has NOT "
+    "verified ownership of this wallet (no signature, no proof of ownership)."
 )
 
 # --------------------------------------------------------------------------- #
@@ -105,15 +105,15 @@ def normalize_wallet_address(raw: Any) -> str:
     """
     if not isinstance(raw, str):
         raise InvalidWalletAddressError(
-            "Địa chỉ ví phải là một chuỗi văn bản dạng '0x' + 40 ký tự hex"
+            "The wallet address must be a text string: '0x' followed by 40 hex characters"
         )
     candidate = raw.strip()
     if not _WALLET_ADDRESS_RE.match(candidate):
         raise InvalidWalletAddressError(
-            "Địa chỉ ví không đúng định dạng -- cần đúng '0x' theo sau bởi "
-            "40 ký tự hex (0-9, a-f), ví dụ "
-            "'0x1234567890abcdef1234567890abcdef12345678'. Hệ thống KHÔNG tự "
-            "đoán hay tự sửa địa chỉ -- vui lòng dán lại chính xác."
+            "The wallet address is not in the right format -- it must be "
+            "exactly '0x' followed by 40 hex characters (0-9, a-f), e.g. "
+            "'0x1234567890abcdef1234567890abcdef12345678'. The system does "
+            "NOT guess or auto-correct the address -- please paste it again exactly."
         )
     return candidate.lower()
 
@@ -204,8 +204,8 @@ class InvalidUserRefError(ValueError):
 def _validate_user_ref(raw: Any) -> str:
     if not isinstance(raw, str) or not USER_REF_RE.match(raw):
         raise InvalidUserRefError(
-            f"user_ref không hợp lệ: phải là đúng {USER_REF_LENGTH} ký tự "
-            "chữ thường/số base32 (a-z, 2-7)"
+            f"Invalid user_ref: it must be exactly {USER_REF_LENGTH} lowercase "
+            "base32 characters (a-z, 2-7)"
         )
     return raw
 
@@ -426,8 +426,8 @@ def get_or_create_profile(
         _write_json_atomic(_profile_path(ref, users_root=users_root), profile)
     except OSError as exc:
         raise ProfileStoreError(
-            "không thể ghi hồ sơ người dùng xuống đĩa (users_root có thể "
-            "chỉ-đọc, đầy dung lượng, hoặc sai quyền)"
+            "could not write the user profile to disk (users_root may be "
+            "read-only, full, or have the wrong permissions)"
         ) from exc
     return profile
 
@@ -487,8 +487,8 @@ def record_analysis(
         )
     except OSError as exc:
         raise ProfileStoreError(
-            "không thể ghi lịch sử phân tích của người dùng xuống đĩa "
-            "(users_root có thể chỉ-đọc, đầy dung lượng, hoặc sai quyền)"
+            "could not write the user's analysis history to disk "
+            "(users_root may be read-only, full, or have the wrong permissions)"
         ) from exc
     return profile
 

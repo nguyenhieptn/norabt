@@ -9,7 +9,9 @@ class PerformanceQualityLens:
     def evaluate(bot: BotResult):
         perf = bot.performance
         if perf.trade_count == 0 or perf.expectancy is None:
-            return unknown("Performance Quality", 1.0, "No valid closed-trade sample")
+            return unknown(
+                "Performance quality", 1.0, "No valid closed trades"
+            )
         score = 20.0
         findings = []
         deferred = bot.deferred_loss
@@ -19,9 +21,9 @@ class PerformanceQualityLens:
             score += 40.0
             if deferred.never_realized_a_loss:
                 findings.append(
-                    f"Never realised a loss in {perf.trade_count} closed trades while "
-                    f"{deferred.losing_open_positions} open position(s) hold "
-                    f"{deferred.open_loss:,.0f} USDT of loss"
+                    f"No loss has ever been booked across {perf.trade_count} closed "
+                    f"trades, while {deferred.losing_open_positions} open positions are "
+                    f"carrying {deferred.open_loss:,.0f} USDT of unrealised loss"
                 )
             elif (
                 deferred.booked_profit_factor is not None
@@ -29,27 +31,28 @@ class PerformanceQualityLens:
             ):
                 findings.append(
                     f"Profit factor {deferred.booked_profit_factor:.2f} → "
-                    f"{deferred.marked_profit_factor:.2f} once the "
-                    f"{deferred.open_loss:,.0f} USDT open loss is booked"
+                    f"{deferred.marked_profit_factor:.2f} once "
+                    f"{deferred.open_loss:,.0f} USDT of open loss is closed"
                 )
             else:
                 findings.append(
-                    f"Open loss {deferred.open_loss:,.0f} USDT is not reflected in the "
-                    f"closed-trade metrics"
+                    f"Unrealised loss of {deferred.open_loss:,.0f} USDT is not "
+                    f"reflected in the closed-trade metrics"
                 )
             if deferred.turns_unprofitable_when_marked:
                 score += 20.0
                 findings.append(
-                    "Marking the open book turns a profitable record into a losing one"
+                    "Closing the whole open book turns an apparent profit into a loss"
                 )
             if deferred.open_loss_to_capital_pct:
                 score += min(25.0, deferred.open_loss_to_capital_pct)
                 findings.append(
-                    f"Open loss is {deferred.open_loss_to_capital_pct:.1f}% of capital at risk"
+                    f"Unrealised loss equals {deferred.open_loss_to_capital_pct:.1f}% "
+                    f"of reference capital"
                 )
             findings.append(
-                "Closed-trade win rate, profit factor and drawdown are not "
-                "representative and are discounted accordingly"
+                "Win rate, profit factor and drawdown measured on closed trades are "
+                "not representative of reality, and have been discounted accordingly"
             )
         if perf.trade_count < 20:
             score += 35.0
@@ -59,22 +62,20 @@ class PerformanceQualityLens:
             findings.append(f"Moderate sample: {perf.trade_count} trades")
         else:
             score -= 5.0
-            findings.append(f"Established sample: {perf.trade_count} trades")
+            findings.append(f"Sample size is large enough: {perf.trade_count} trades")
 
         if distorted:
             findings.append(
                 f"For reference only: win rate {perf.win_rate:.0f}%, profit factor "
-                + (f"{perf.profit_factor:.2f}" if perf.profit_factor else "undefined")
+                + (f"{perf.profit_factor:.2f}" if perf.profit_factor else "meaningless")
             )
         elif perf.profit_factor is None:
-            findings.append(
-                "Profit factor is undefined because the sample has no gross loss"
-            )
+            findings.append("Profit factor is meaningless because the sample has no gross loss")
         elif distorted:
             pass
         elif perf.profit_factor < 1.0:
             score += 40.0
-            findings.append(f"Profit factor below one ({perf.profit_factor:.2f})")
+            findings.append(f"Profit factor below 1 ({perf.profit_factor:.2f})")
         elif perf.profit_factor < 1.3:
             score += 15.0
             findings.append(f"Fragile profit factor ({perf.profit_factor:.2f})")
@@ -86,7 +87,7 @@ class PerformanceQualityLens:
             pass
         elif perf.expectancy <= 0:
             score += 25.0
-            findings.append(f"Non-positive expectancy ({perf.expectancy:.2f})")
+            findings.append(f"Expectancy is not positive ({perf.expectancy:.2f})")
         else:
             score -= 5.0
             findings.append(f"Positive expectancy ({perf.expectancy:.2f} per trade)")
@@ -96,8 +97,8 @@ class PerformanceQualityLens:
             and perf.payoff_ratio < 0.2
         ):
             score += 30.0
-            findings.append("High win rate is paired with severe payoff asymmetry")
+            findings.append("High win rate paired with a heavily skewed payoff ratio")
         confidence = min(1.0, perf.trade_count / 50.0)
         if deferred.representativeness == "UNKNOWN":
             confidence *= 0.7
-        return available("Performance Quality", score, 1.0, findings, confidence)
+        return available("Performance quality", score, 1.0, findings, confidence)

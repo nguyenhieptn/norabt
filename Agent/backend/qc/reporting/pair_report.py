@@ -31,12 +31,18 @@ from Agent.backend.mcp.service import BotDataUnavailableError, BotObservationSer
 # except clause. No circular import: bot_source.py only imports from live/,
 # mcp/inference/ and okx/, never from qc/reporting/.
 from Agent.backend.sources.bot_source import BotSourceError
-from Agent.backend.qc.reporting.market_posture import assess as assess_posture
+from Agent.backend.qc.reporting.market_posture import (
+    POSTURE_GROWTH,
+    POSTURE_RISK,
+    POSTURE_STABLE,
+    POSTURE_UNCLEAR,
+    assess as assess_posture,
+)
 from Agent.backend.qc.reporting.reasons import phase_vi
 
 SELECTION = Path(config.DATA_DIR) / "universe" / "bot_selection.json"
-ROLE_LEAD = "CHẠY NGON"
-ROLE_LAGGARD = "YẾU HƠN"
+ROLE_LEAD = "LEAD"
+ROLE_LAGGARD = "LAGGARD"
 
 
 class PairedBotRow(BaseModel):
@@ -148,7 +154,7 @@ class AssetPairBlock(BaseModel):
     symbol: str
     underlying: str
     market_available: bool = False
-    market_posture: str = "CHƯA ĐỦ CƠ SỞ"
+    market_posture: str = POSTURE_UNCLEAR
     market_evidence: List[str] = Field(default_factory=list)
     market_trend: Optional[str] = None
     market_volatility: Optional[str] = None
@@ -232,7 +238,7 @@ class PairedBotReportService:
         )
         venue, asset = self._locate(code)
         if venue is None or asset is None:
-            return base.model_copy(update={"error": "chưa có dữ liệu đã crawl"})
+            return base.model_copy(update={"error": "no crawled data available"})
 
         try:
             bot = self.bots.get_bot_result(
@@ -350,14 +356,14 @@ class PairedBotReportService:
         """State what the pair actually shows, or why it cannot be compared."""
         usable = [b for b in block.bots if b.error is None and b.trade_count]
         if len(usable) < 2:
-            return ["Chưa đủ hai bot có dữ liệu để so sánh."]
+            return ["Not enough bots with data to compare (need at least two)."]
         lead, lag = usable[0], usable[1]
         notes: List[str] = []
 
         if lead.profit_factor is not None and lag.profit_factor is not None:
             notes.append(
                 f"Profit factor {lead.nick_name} {lead.profit_factor:.2f} "
-                f"so với {lag.nick_name} {lag.profit_factor:.2f}."
+                f"vs {lag.nick_name} {lag.profit_factor:.2f}."
             )
         for bot in usable:
             if (
@@ -367,31 +373,32 @@ class PairedBotReportService:
                 and bot.marked_profit_factor < 1.0
             ):
                 notes.append(
-                    f"{bot.nick_name} chỉ lãi trên sổ đã chốt: tính cả vị thế mở thì "
-                    f"profit factor rơi xuống {bot.marked_profit_factor:.2f}."
+                    f"{bot.nick_name} is only profitable on the closed book: including "
+                    f"open positions, profit factor drops to {bot.marked_profit_factor:.2f}."
                 )
             if (
                 bot.regime_dependence_pct is not None
                 and bot.regime_dependence_pct >= 70
             ):
                 notes.append(
-                    f"{bot.nick_name} lấy {bot.regime_dependence_pct:.0f}% lợi nhuận từ "
-                    f"riêng pha {phase_vi(bot.best_phase)}; đổi chế độ là mất lợi thế."
+                    f"{bot.nick_name} draws {bot.regime_dependence_pct:.0f}% of its profit "
+                    f"from the single phase {phase_vi(bot.best_phase)}; a regime change "
+                    "would cost it its edge."
                 )
             if bot.trade_count >= 20 and not bot.tested_in_downtrend:
                 notes.append(
-                    f"{bot.nick_name} chưa có đủ lệnh nào trong pha giảm — "
-                    "chiến lược chưa được thử ở chiều xuống."
+                    f"{bot.nick_name} has not had enough trades in a downtrend phase — "
+                    "the strategy has not been tested on the downside."
                 )
             if len(bot.losing_phases) >= 4:
                 notes.append(
-                    f"{bot.nick_name} lỗ ở {len(bot.losing_phases)}/6 pha thị trường, "
-                    "không chỉ riêng một chế độ."
+                    f"{bot.nick_name} loses money in {len(bot.losing_phases)}/6 market "
+                    "phases, not just one regime."
                 )
             if bot.max_drawdown_capped:
                 notes.append(
-                    f"{bot.nick_name}: mức sụt vốn vượt vốn ghi nhận tại thời điểm đó "
-                    "nên con số phần trăm là sàn, không phải đo được."
+                    f"{bot.nick_name}: drawdown exceeds the capital recorded at that time, "
+                    "so the percentage figure is a floor, not a measured value."
                 )
         return notes
 
@@ -429,9 +436,9 @@ class PairedBotReportService:
             else:
                 posture = assess_posture(market)
                 evidence = {
-                    "RỦI RO": posture.risk_flags,
-                    "ĐANG PHÁT TRIỂN": posture.growth_flags,
-                    "ỔN ĐỊNH": posture.stability_flags,
+                    POSTURE_RISK: posture.risk_flags,
+                    POSTURE_GROWTH: posture.growth_flags,
+                    POSTURE_STABLE: posture.stability_flags,
                 }.get(posture.posture, [])
                 block.market_available = True
                 block.market_posture = posture.posture
@@ -475,14 +482,16 @@ class PairedBotReportService:
             bots_failed=failed,
             blocks=blocks,
             notes=[
-                "Mỗi asset gồm 1 bot chạy ngon và 1 bot cũng chạy nhưng kém hơn, "
-                "chọn theo lợi nhuận thực hiện tại thời điểm quét.",
-                "Pha thị trường lấy tại thời điểm MỞ lệnh; lệnh trên instrument "
-                "không có nến được tính là chưa rõ pha, không gộp vào pha nào.",
-                "Monte Carlo stationary bootstrap (Politis-Romano 1994), 10.000 kịch bản, mỗi kịch bản "
-                "replay đúng số lệnh của chính bot. Mẫu CHỈ gồm lệnh đã chốt — "
-                "vị thế đang mở cố ý không đưa vào, nên phần lỗ treo (nếu có) "
-                "được nêu riêng chứ không trộn vào phân vị lợi nhuận.",
-                "Đây là quan sát, chưa phải phán quyết rủi ro — phán quyết ở bước 3.",
+                "Each asset has 1 bot that runs well and 1 bot that also runs but "
+                "underperforms, chosen by realized profit at scan time.",
+                "Market phase is taken at the time the trade was OPENED; trades on an "
+                "instrument with no candle data are counted as phase unknown, not folded "
+                "into any phase.",
+                "Monte Carlo stationary bootstrap (Politis-Romano 1994), 10,000 scenarios, "
+                "each scenario replays the bot's own exact trade count. The sample includes "
+                "ONLY closed trades — open positions are deliberately excluded, so any "
+                "hanging loss is reported separately rather than mixed into the profit "
+                "percentiles.",
+                "This is an observation, not a risk verdict — the verdict happens in step 3.",
             ],
         )

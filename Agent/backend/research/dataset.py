@@ -97,11 +97,3 @@ def load_bot_ledger(
     )
 
 
-def load_all_bot_ledgers(data_dir: Path) -> List[BotLedgerRecord]:
-    """Convenience wrapper: discover + load every bot, skipping unreadable ones."""
-    records: List[BotLedgerRecord] = []
-    for venue_type, asset, bot_dir in discover_bot_dirs(data_dir):
-        record = load_bot_ledger(venue_type, asset, bot_dir)
-        if record is not None:
-            records.append(record)
-    return records

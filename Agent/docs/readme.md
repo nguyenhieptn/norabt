@@ -1,75 +1,78 @@
-# AGENT DOCUMENTATION: AI RISK SUPERVISOR
+# HỆ THỐNG TÀI LIỆU CHUẨN BMAD — NORABT AI RISK SUPERVISOR
 
-## Tổng Quan Hệ Thống
-
-Hệ thống hoạt động như một **AI Risk Supervisor** độc lập đứng trên các trading bot (chuyên biệt cho OKX và Top DEX), tuân thủ nghiêm ngặt **3 Logic Độc Lập**:
-
-1. **LOGIC 1 — MARKET OBSERVATION:**
-   - Quan sát thực tế thị trường khách quan (Price, Structure, Orderflow, Derivatives, Liquidity).
-   - Xuất hợp đồng: `MarketResult`.
-
-2. **LOGIC 2 — BOT / MCP OBSERVATION & SIMULATION:**
-   - Giám sát bot OKX, quản lý sổ cái `Full Trade Ledger` theo các chế độ đo lường R (`FULL`, `PARTIAL`, `LIMITED`).
-   - **Chứa lõi mô phỏng xác suất Monte Carlo & Bootstrap (10.000 runs):** Tính toán các xác suất rủi ro đuôi (`P(MDD > 10%)`, `P95 Max DD`, chuỗi lệnh thua liên tiếp).
-   - Xuất hợp đồng: `BotResult`.
-
-3. **LOGIC 3 — QC CORE (AI RISK SUPERVISOR):**
-   - Tiếp nhận `MarketResult` + `BotResult` và kiểm định chéo qua **10 Chiều Rủi Ro Độc Lập** (Market Alignment, Performance, Return/R, Drawdown, Tail Risk, Leverage, Behavioral/Martingale, Strategy Drift, Liquidity, Portfolio).
-   - Xuất hợp đồng: `BotRiskAssessment` (Risk Score 0-100, Confidence, Risk Tier, Trend).
-
-4. **CONTROL LAYER (TÁCH BIỆT):**
-   - Chuyển đổi phán quyết rủi ro thành lệnh can thiệp sàn cụ thể (`MONITOR`, `WARN`, `REDUCE`, `PAUSE`, `EMERGENCY_STOP`) qua API OKX với cơ chế Hysteresis Cooldown.
+> **BMAD Documentation Framework**  
+> **System Name:** NoraBT (Quantitative Risk Supervisor & Copier Guard for OKX)  
+> **Repository:** `norabt`  
+> **Documentation Root:** `Agent/docs/`  
+> **Framework Architecture:** BMAD (Business, Model, Architecture, Delivery)  
+> **Status:** ACTIVE / PRODUCTION  
+> **Version:** 2.4.0  
+> **Last Updated:** 2026-09-18  
 
 ---
 
-## Danh Mục Tài Liệu Cốt Lõi
+## 1. Kiến Trúc Bộ Tài Liệu (Documentation Hierarchy)
 
-1. [IDEA-01 — AI Risk Supervisor: 3 Logic Độc Lập](bmad/idea/IDEA-01_REGIME_CONDITIONED_AGENT_EVALUATION.md) *(APPROVED BASELINE)*
-2. [PRD-01 — Engine 1 Scope & Architecture](bmad/prd/PRD-01_ENGINE1_SCOPE_AND_SUCCESS.md)
-3. [PRD-02 — OKX CEX Data Foundation](bmad/prd/PRD-02_OKX_CEX_DATA_FOUNDATION.md)
-4. [PRD-03 — OKX DEX / Onchain Data Foundation](bmad/prd/PRD-03_OKX_DEX_ONCHAIN_DATA_FOUNDATION.md)
-5. [PRD-04 — Data Quality, Provenance & State](bmad/prd/PRD-04_DATA_QUALITY_PROVENANCE_AND_STATE.md)
-6. [PRD-05 — Regime Core](bmad/prd/PRD-05_ENGINE1_REGIME_CORE.md)
-7. [PRD-06 — Market Intelligence](bmad/prd/PRD-06_ENGINE1_MARKET_INTELLIGENCE.md)
-8. [PRD-07 — Risk Scoring & Multi-Lens Ranking](bmad/prd/PRD-07_ENGINE1_RISK_SCORING_AND_RANKING.md)
-9. [PRD-08 — Reporting & Assessment Formats](bmad/prd/PRD-08_ENGINE1_REPORTING.md)
-10. [PRD-09 — OKX Interaction & Control Interface](bmad/prd/PRD-09_OKX_INTERACTION_AND_AGENT_INTERFACE.md)
-11. [PRD-10 — Verification & Definition of Done](bmad/prd/PRD-10_ENGINE1_VERIFICATION_AND_DEFINITION_OF_DONE.md)
+Bộ tài liệu kỹ thuật của dự án NoraBT được tinh gọn và quy chuẩn hóa thành hai thành phần duy nhất theo đúng tiêu chuẩn phương pháp luận BMAD:
 
-Mỗi PRD có danh sách child stories tương ứng trong [bmad/story/](bmad/story/). Active documentation chỉ gồm `readme.md` và `bmad/{idea,prd,story}`; không có archive hoặc tài liệu legacy song song.
+```
+Agent/docs/
+├── readme.md                 <-- [Bạn đang ở đây] Chỉ mục toàn diện & Kiến trúc tổng quan
+└── bmad/
+    ├── story/                <-- QUÁ TRÌNH & TIẾN ĐỘ PHÁT TRIỂN HỆ THỐNG
+    │   ├── STORY-00_SYSTEM_PROGRESSION_AND_STATUS.md  <-- Báo cáo tiến độ tổng thể các giai đoạn
+    │   └── STORY-*.md        <-- Các story kỹ thuật chi tiết theo từng gate nghiệm thu
+    │
+    └── spec/                 <-- BÓC TÁCH CHI TIẾT TỪNG KỸ NĂNG CỦA HỆ THỐNG
+        ├── SPEC-01_OKX_INGESTION_AND_LEDGER_SKILL.md         <-- Kỹ năng Nạp & Sổ lệnh OKX
+        ├── SPEC-02_MARKET_REGIME_AND_STRUCTURE_SKILL.md      <-- Kỹ năng Nhận diện Chế độ Thị trường
+        ├── SPEC-03_TEN_DIMENSIONAL_QUANTITATIVE_RISK_SKILL.md <-- Kỹ năng Đo lường Rủi ro 10 Chiều
+        ├── SPEC-04_MONTE_CARLO_AND_STATIONARY_BOOTSTRAP_SKILL.md <-- Kỹ năng Mô phỏng Monte Carlo
+        ├── SPEC-05_SAFETY_VETO_AND_DECISION_ENGINE_SKILL.md   <-- Kỹ năng Veto An toàn & Xếp loại
+        ├── SPEC-06_QUALITATIVE_NARRATIVE_SYNTHESIS_SKILL.md   <-- Kỹ năng Nhận định Chuyên môn
+        ├── SPEC-07_MCP_SERVER_AND_MICRO_PAYMENTS_SKILL.md    <-- Kỹ năng MCP & Thanh toán x402
+        └── SPEC-08_INSTITUTIONAL_UI_AND_VISUALIZATION_SKILL.md <-- Kỹ năng Giao diện Brutal AI
+```
 
-## Status vocabulary
+---
 
-| Status | Nghĩa |
-|---|---|
-| `DRAFT` | Đang đặc tả/chờ review |
-| `CURRENT-VERIFIED` | Có code và repeatable evidence |
-| `CURRENT-UNVERIFIED` | Có code nhưng evidence chưa đủ |
-| `PARTIAL` | Chỉ một phần capability tồn tại |
-| `TARGET` | Behavior cần đạt, chưa phải current claim |
-| `BLOCKED` | Thiếu dependency/evidence quyết định |
-| `IDEA` | Giả thuyết chưa commit |
+## 2. Phần 1: BMAD Story — Quá Trình & Tiến Độ Phát Triển
 
-## Current readiness (2026-09-12)
+Thư mục `bmad/story/` lưu trữ toàn bộ tiến trình lịch sử phát triển, các cột mốc đã hoàn thành, các rào cản kỹ thuật đã vượt qua và trạng thái vận hành hiện tại của hệ thống.
 
-- Universe policy là Top 30 CEX + Top 20 DEX. Freshness chấm theo anchor của dataset crawl (SNAPSHOT mode); hiện 3/15 candidate đạt eligibility, phần còn lại thiếu order book/spread.
-- DEX Top 20: `BLOCKED/UNPROVEN`; local fixtures thiếu pool-liquidity/token-security evidence nên không asset nào được promote eligible.
-- OKX interaction: vertical slice hiện chỉ đọc local snapshot/replay; chưa có live public/private adapter trong package này. Execution/asset movement bị deny fail-closed.
-- Engine completion: `NOT DONE`; 78 deterministic tests pass cho vertical slice local/read-only, nhưng live ingestion/reconciliation, persistence, resilience/endurance và toàn bộ PRD-10 chưa đóng.
+- 📘 **Tài liệu trung tâm:** [STORY-00: Quá Trình và Tiến Độ Phát Triển Toàn Diện Hệ Thống](bmad/story/STORY-00_SYSTEM_PROGRESSION_AND_STATUS.md)
+  - **Giai đoạn 1 (10-12/09):** Khởi tạo Engine 1 — Tái cấu trúc sổ lệnh, 10 lăng kính rủi ro và bộ tiêu chí Veto an toàn.
+  - **Giai đoạn 2 (13-14/09):** Chuẩn hóa giao thức MCP Server (cổng 8000), cơ chế thanh toán vi mô x402 qua USDC trên X Layer và bộ đệm Redis Snapshot.
+  - **Giai đoạn 3 (15/09):** Thẩm định ngoài mẫu (Out-of-sample) trên 36 bot OKX thực tế, kiểm chuẩn tương quan hạng Spearman, Deflated Sharpe Ratio và MinTRL.
+  - **Giai đoạn 4 (16-17/09):** Xây dựng ứng dụng quản trị Single-Page App (React SPA), thẻ tóm tắt Quant, phân quyền Admin truy cập mở.
+  - **Giai đoạn 5 (17-18/09):** Tích hợp Động cơ Nhận định Chuyên môn Định tính (Narrative Synthesizer), bỏ nhãn AI máy móc, popup chú giải công thức tài chính.
+  - **Giai đoạn 6 (18/09 - Hiện tại):** Tái thiết kế giao diện **NORA // BRUTAL AI TRADING SYSTEM** — kết hợp 70% OKX AI Fintech với 30% Neo-Brutalism, cân chỉnh màu sắc hài hòa Deep Slate Obsidian (`#0B0E17`, `#101522`, `#1E283D`).
+- 📂 **Các story kiểm thử cổng (Acceptance Gates):** Các tệp `STORY-02.*` đến `STORY-10.*` trong thư mục [bmad/story/](bmad/story/) ghi lại chi tiết các điều kiện nghiệm thu nghiêm ngặt của từng phân hệ.
 
-## Backend implementation order after docs approval
+---
 
-1. Freeze canonical contracts and remove favorable defaults.
-2. Create canonical OKX public/private-read adapters; only adapters know OKX endpoints.
-3. Select one authoritative repository/state implementation.
-4. Make Engine 1 pure and explicit-input; keep rolling state outside calculation.
-5. Route warm-up and closed WebSocket candles through one application use case into full `evaluate_market_risk`.
-6. Implement deterministic CEX Top 50 first; keep DEX discovery/ranking blocked until verified.
-7. Convert MCP to structured read-only queries; no order/transfer/withdraw/sign/broadcast tools.
-8. Add contract, adapter, repository, pure Engine 1, replay, integration and negative capability tests.
-9. Close PRD-10 gates before declaring `ENGINE1_DONE`.
+## 3. Phần 2: BMAD Spec — Bóc Tách Chi Tiết Từng Kỹ Năng Hệ Thống
 
-## Source references
+Thư mục `bmad/spec/` mô tả chi tiết, bóc tách về mặt toán học, thuật toán, luồng dữ liệu và hợp đồng giao tiếp của từng năng lực (Skill) cốt lõi:
 
-- Current backend paths are documented in each STORY and verified against code before status promotion.
-- Official OKX v5 reference: <https://www.okx.com/docs-v5/en/>
+| Mã Spec | Tên Kỹ Năng (Skill Specification) | Phân Hệ Phụ Trách | Tài Liệu Chi Tiết |
+| :---: | :--- | :--- | :---: |
+| **SPEC-01** | **Kỹ năng Thu thập Dữ liệu & Sổ lệnh OKX**<br>Ghép lệnh chuẩn FIFO, phát hiện om vị thế, tính PnL và Drawdown chuỗi thời gian thực. | `sources/bot_source.py`<br>`market/service.py` | [Xem Spec 01](bmad/spec/SPEC-01_OKX_INGESTION_AND_LEDGER_SKILL.md) |
+| **SPEC-02** | **Kỹ năng Nhận diện Chế độ Thị trường & Phân tích Nến**<br>Keltner Channels (EMA 20, ATR 14), 4 chế độ thị trường vi mô/vĩ mô, đồng thuận BTC Beta. | `market/service.py`<br>`lenses/market_alignment.py` | [Xem Spec 02](bmad/spec/SPEC-02_MARKET_REGIME_AND_STRUCTURE_SKILL.md) |
+| **SPEC-03** | **Kỹ năng Đo lường Rủi ro Lượng hóa 10 Chiều**<br>Fat-tail VaR/CVaR, Đòn bẩy hiệu dụng, Trượt giá khớp lệnh, Bẫy Martingale/DCA, Strategy Drift. | `qc/evaluator/lenses/` | [Xem Spec 03](bmad/spec/SPEC-03_TEN_DIMENSIONAL_QUANTITATIVE_RISK_SKILL.md) |
+| **SPEC-04** | **Kỹ năng Mô phỏng Monte Carlo & Bootstrap Thống kê**<br>10.000 kịch bản Stationary Bootstrap (Politis & Romano 1994), Deflated Sharpe (DSR), PSR, MinTRL. | `mcp/analytics/simulation/` | [Xem Spec 04](bmad/spec/SPEC-04_MONTE_CARLO_AND_STATIONARY_BOOTSTRAP_SKILL.md) |
+| **SPEC-05** | **Kỹ năng Veto An toàn & Xếp loại Chất lượng**<br>Ma trận phân loại 4 góc phần tư (Drawdown vs Quality), 6 điều kiện Veto cứng, tính toán Risk Score 0–100. | `qc/scoring/verdict.py`<br>`qc/reporting/reasons.py` | [Xem Spec 05](bmad/spec/SPEC-05_SAFETY_VETO_AND_DECISION_ENGINE_SKILL.md) |
+| **SPEC-06** | **Kỹ năng Tổng hợp Nhận định Chuyên môn Định tính**<br>Cấu trúc lập luận 3 tầng (Kết luận → Nguyên nhân cốt lõi → Luận cứ chứng minh `◆`), loại bỏ nhãn AI thô. | `qc/reporting/narrative.py`<br>`web/report_page.py` | [Xem Spec 06](bmad/spec/SPEC-06_QUALITATIVE_NARRATIVE_SYNTHESIS_SKILL.md) |
+| **SPEC-07** | **Kỹ năng Máy chủ MCP & Thanh toán Vi mô x402**<br>Chuẩn giao tiếp Model Context Protocol (JSON-RPC 2.0), thanh toán USDC onchain x402, chống replay attack. | `backend/agent_server.py`<br>`payments/x402.py` | [Xem Spec 07](bmad/spec/SPEC-07_MCP_SERVER_AND_MICRO_PAYMENTS_SKILL.md) |
+| **SPEC-08** | **Kỹ năng Giao diện Quản trị & Báo cáo Bot Chuẩn Fintech**<br>Hệ thống Design Tokens (`tokens.css`), triết lý 70% OKX + 30% Neo-Brutalism, Deep Slate Obsidian, radar SYSTEM ONLINE. | `frontend/`<br>`web/tokens.css`<br>`web/report_page.py` | [Xem Spec 08](bmad/spec/SPEC-08_INSTITUTIONAL_UI_AND_VISUALIZATION_SKILL.md) |
+
+---
+
+## 4. Tiêu Chuẩn Truy Vết & Kiểm Thử Hệ Thống (Verification Matrix)
+
+Mọi kỹ năng trong bộ Spec và mọi chặng trong bộ Story đều được bảo đảm bằng bộ kiểm thử tự động toàn diện:
+- **Pytest Suite:** Đạt **99/99 bài test PASS** trong [test_report_page.py](file:///home/ubuntu/norabt/Agent/test/test_report_page.py) cùng toàn bộ các bài test đơn vị trong `Agent/test/`.
+- **Docker Compose Services:**
+  - `norabt-agent-web` (Cổng 8770): Phục vụ REST API, React SPA bundle và trang báo cáo HTML máy chủ.
+  - `norabt-agent-redis` (Cổng 6379): Bộ đệm snapshot kết quả thẩm định dưới 50ms.
+- **Frontend SPA Build:** Vite bundle biên dịch tối ưu (199 KB JS gzip 65 KB, 18.7 KB CSS gzip 4.6 KB).

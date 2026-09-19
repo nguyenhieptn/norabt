@@ -66,7 +66,16 @@ _STARTUP_TIMEOUT_S = 10.0
 # report is regenerated and this cohort changes, this constant is the one
 # place to update.
 ASSESSED_UNIQUE_CODE = "811997770117827919"
-ASSESSED_VERDICT = "NGUY HIỂM"
+# This bot's assessment.json still stores the retired single-axis "NGUY
+# HIỂM" label in khuyen_nghi.ket_luan (written before the two-axis
+# relabeling), but list_assessed_bots/get_assessment now always recompute
+# the label from cham_diem.risk_score/quality_score/hidden_risk_flags
+# instead of trusting that stored string (see verdict.label_from_scores).
+# This bot's own risk_score is 100.0 (>= DANGEROUS_RISK) and it carries a
+# hidden_risk_flags entry (an open loss at 43% of capital), so hidden risk
+# overrides both axes: the recomputed label is "RỦI RO BỊ CHE", not
+# whichever of the 4 old buckets the file happens to still say.
+ASSESSED_VERDICT = "HIDDEN RISK"
 
 # Real, on-disk bot used by the one live-pipeline test below -- same fixture
 # `conftest.py` calls `bot_top`, so it is known to be a complete, reconciled
@@ -169,7 +178,7 @@ def test_list_assessed_bots_verdict_is_case_insensitive():
 
 def test_list_assessed_bots_rejects_unknown_verdict():
     error = _call_raises("list_assessed_bots", {"verdict": "KHONG HOP LE"})
-    assert "NGUY HIỂM" in str(error)
+    assert "HIDDEN RISK" in str(error)
 
 
 # ---------------------------------------------------------------------------
@@ -180,9 +189,9 @@ def test_list_assessed_bots_rejects_unknown_verdict():
 def test_get_assessment_returns_full_vietnamese_narrative():
     payload = _call("get_assessment", {"unique_code": ASSESSED_UNIQUE_CODE})
     assert payload["bot"]["unique_code"] == ASSESSED_UNIQUE_CODE
-    narrative = payload["khuyen_nghi"]["text_full"]
+    narrative = payload["recommendation"]["text_full"]
     assert isinstance(narrative, str) and len(narrative) > 0
-    assert payload["khuyen_nghi"]["ket_luan"] == ASSESSED_VERDICT
+    assert payload["recommendation"]["verdict"] == ASSESSED_VERDICT
 
 
 def test_get_assessment_unknown_code_is_vietnamese_not_a_traceback():
@@ -618,7 +627,7 @@ def test_require_payment_rejects_when_ctx_headers_raises(x402_env):
         def headers(self):
             raise ValueError("Context is not available outside of a request")
 
-    with pytest.raises(ToolError, match="Cần thanh toán"):
+    with pytest.raises(ToolError, match="Payment is required"):
         srv._require_payment(_RaisingHeaders(), "list_assets")
 
 
@@ -677,7 +686,7 @@ def test_require_payment_denied_verdict_is_refused(
         ),
     )
 
-    with pytest.raises(ToolError, match="Thanh toán không hợp lệ") as excinfo:
+    with pytest.raises(ToolError, match="Invalid payment") as excinfo:
         srv._require_payment(
             _FakeCtx(headers={x402.PAYMENT_SIGNATURE_HEADER: header}), "list_assets"
         )
@@ -726,7 +735,7 @@ def test_call_tool_refuses_without_payment_over_the_normal_entrypoint(x402_env):
     """No context at all -- exactly what a caller who forgot to pay produces
     (the SDK builds its placeholder Context internally). Goes through
     `MCPServer.call_tool()`, not `_require_payment()` directly."""
-    with pytest.raises(ToolError, match="Cần thanh toán"):
+    with pytest.raises(ToolError, match="Payment is required"):
         asyncio.run(srv.mcp.call_tool("list_assets", {}))
 
 
@@ -762,7 +771,7 @@ def test_http_transport_rejects_unpaid_call_when_x402_enabled():
                     result = await session.call_tool("list_assets", {})
                     assert result.is_error
                     text = result.content[0].text
-                    assert "Cần thanh toán" in text
+                    assert "Payment is required" in text
                     assert "$0.001" in text
                     assert x402.PAYMENT_REQUIRED_HEADER in text
 

@@ -242,6 +242,14 @@ class BehavioralObservations(BaseModel):
     holding_time_explosion_score: float = Field(default=0.0, ge=0.0, le=1.0)
     leverage_escalation_detected: bool = False
     size_escalation_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Phần VƯỢT TRỘI của việc nâng cỡ lệnh sau lệnh LỖ so với sau lệnh THẮNG,
+    # tức `size_escalation_score` đã trừ đi nhóm đối chứng. Một bot chỉ đơn
+    # giản hay thay đổi cỡ lệnh sẽ có hai tỉ lệ xấp xỉ nhau và đại lượng này
+    # về 0; chỉ bot nâng cỡ RIÊNG sau lệnh lỗ mới đẩy nó lên. Đây là đại
+    # lượng LIÊN TỤC mà lens chấm điểm dùng, thay cho việc rẽ nhánh theo tên
+    # chiến lược (DCA/lưới/martingale) -- tên chiến lược là nhãn mô tả, không
+    # phải thứ đo được.
+    size_escalation_excess: float = Field(default=0.0, ge=0.0, le=1.0)
     behavioral_risk_tier: str = "UNKNOWN"
     evidence: List[str] = Field(default_factory=list)
 
@@ -341,6 +349,12 @@ class SimulationResults(BaseModel):
     simulation_method: str
     iterations: int = Field(..., ge=0)
     sample_size: int = Field(..., ge=0)
+    # `True` khi mô phỏng CÓ chạy nhưng cỡ mẫu nằm dưới
+    # `MonteCarloSimulationEngine.THIN_SAMPLE_SIZE` -- kết quả hợp lệ nhưng
+    # sai số chuẩn ở hai đuôi rất lớn, tầng trình bày BẮT BUỘC kèm lưu ý
+    # (xem hằng số đó và `THIN_SAMPLE_WARNING_VI`). Mặc định `False` nên mọi
+    # nơi dựng `SimulationResults` từ trước không phải đổi gì.
+    sample_is_thin: bool = False
     horizon_trades: int = Field(..., ge=0)
     return_basis: str
     capital_basis: str = "CURRENT_AUM"

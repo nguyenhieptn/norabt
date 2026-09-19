@@ -3,17 +3,19 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from Agent.backend.infra.config import config
 from Agent.backend.infra.quality import EvaluationMode
 from Agent.backend.market.service import MarketService
-from Agent.backend.mcp.service import BotObservationService
+from Agent.backend.mcp.service import BotDataUnavailableError, BotObservationService
 from Agent.backend.okx.client import OkxClient
+from Agent.backend.qc.reporting import narrative
 from Agent.backend.qc.reporting.analysis_store import persist as persist_analysis
 from Agent.backend.qc.reporting.assessment_store import persist as persist_assessment
-from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+from Agent.backend.qc.reporting.cohort import BotEvaluationRow, CohortAssessmentService
 from Agent.backend.qc.reporting.data_report import DataReportService
 from Agent.backend.qc.reporting.market_report import MarketRegimeService
 from Agent.backend.qc.reporting.pair_report import PairedBotReportService
@@ -35,6 +37,34 @@ from Agent.backend.sources.market_source import (
     MarketDataSource,
     MarketDataUnavailableError,
 )
+from Agent.backend.web.data import (
+
+    _asset_states_from_bot_result,
+    _behavioral_evidence,
+    _closed_trade_series_from_bot_result,
+    _narrative_strategy_profile_vi,
+    _phase_breakdown_numbers,
+    _strategy_evidence,
+)
+
+# Tham số Monte Carlo của BẢN CHẠY THẬT. Đặt thành hằng số vì có HAI đường
+# vào chấm điểm -- lượt chấm cả đàn (`main`) và lượt người dùng bấm "Re-
+# analyze" (`rescore_one_bot_complete`) -- và trước đây mỗi đường lấy một bộ
+# mặc định khác nhau: đường lẻ không truyền gì nên rơi vào mặc định của
+# `CohortAssessmentService.scan` (5.000 lượt, tầm CỐ ĐỊNH 500 lệnh), trong
+# khi lượt chấm đàn truyền 10.000 lượt và tầm = số lệnh bot thật sự đã đóng.
+# Cùng một bot, cùng một dữ liệu, ra hai báo cáo khác hẳn nhau: trung vị
+# kết cục +216% theo đường lẻ so với +29% theo lượt chấm đàn, chỉ vì tầm dự
+# phóng âm thầm nhảy từ 71 lên 500 lệnh. Đường lẻ còn là đường LẠC QUAN
+# hơn, nên người dùng bấm nút lại nhận về bản đẹp hơn -- kiểu sai tệ nhất.
+#
+# `HORIZON = None` nghĩa là "dùng đúng số lệnh bot đã đóng", chứ không phải
+# "không có tầm": chỉ dự phóng xa bằng đúng quãng đã quan sát được. Chiếu xa
+# hơn thì `horizon_exceeds_observed` bật lên và báo cáo phải tự nói ra.
+PRODUCTION_SIMULATION_ITERATIONS = 10_000
+PRODUCTION_SIMULATION_HORIZON: Optional[int] = None
+PRODUCTION_SIMULATION_SEED = 42
+
 
 # --------------------------------------------------------------------------- #
 # --source live wiring.
@@ -86,7 +116,7 @@ class _ProgressBotSource(BotDataSource):
             self._seen[unique_code] = len(self._seen) + 1
         print(
             f"  [live bot #{self._seen[unique_code]}] {unique_code}: "
-            f"đang gọi OKX ({what})...",
+            f"calling OKX ({what})...",
             file=sys.stderr,
         )
 
@@ -95,7 +125,7 @@ class _ProgressBotSource(BotDataSource):
         return self._inner.get_overview(unique_code, bot_dir)
 
     def get_ledger(self, unique_code, bot_dir=None):
-        self._mark(unique_code, "sổ lệnh")
+        self._mark(unique_code, "ledger")
         return self._inner.get_ledger(unique_code, bot_dir)
 
 
@@ -119,7 +149,7 @@ class _ProgressMarketSource(MarketDataSource):
         if symbol not in self._seen:
             self._seen[symbol] = len(self._seen) + 1
         print(
-            f"  [live market #{self._seen[symbol]}] {symbol}: đang gọi OKX ({what})...",
+            f"  [live market #{self._seen[symbol]}] {symbol}: calling OKX ({what})...",
             file=sys.stderr,
         )
 
@@ -127,11 +157,11 @@ class _ProgressMarketSource(MarketDataSource):
         return self._inner.resolve_venue(symbol, venue_type)
 
     def get_candles(self, symbol, venue_type):
-        self._mark(symbol, "nến")
+        self._mark(symbol, "candles")
         return self._inner.get_candles(symbol, venue_type)
 
     def get_orderbook(self, symbol, venue_type):
-        self._mark(symbol, "sổ lệnh")
+        self._mark(symbol, "order book")
         return self._inner.get_orderbook(symbol, venue_type)
 
     def get_open_interest(self, symbol, venue_type):
@@ -147,7 +177,7 @@ class _ProgressMarketSource(MarketDataSource):
         return self._inner.get_sentiment(symbol, venue_type)
 
     def get_macro_context(self, symbol, venue_type):
-        self._mark(symbol, "macro (nến BTC)")
+        self._mark(symbol, "macro (BTC candles)")
         return self._inner.get_macro_context(symbol, venue_type)
 
     # DEX-only inputs: no network call on this (CEX-only) source, see class docstring.
@@ -461,84 +491,562 @@ def default_selection_codes(
     return set(json.loads(selection_path.read_text(encoding="utf-8"))["unique_codes"])
 
 
+# --------------------------------------------------------------------------- #
+# Việc 1/4 -- carrying strategy/behavioural evidence and the LLM narrative
+# into step 3's own persisted `assessment.json` files, which
+# `CohortAssessmentService.scan()` cannot do on its own: `BotEvaluationRow`
+# (cohort.py, off-limits to edit for this task) never carries
+# `phase_breakdown`/the behavioural flags/scores, and `scan()` throws away
+# the `BotResult`/`BotRiskAssessment` pair it computed for each bot once the
+# row is flattened. Both fixes here work the SAME way: re-fetch exactly the
+# one artefact `BotEvaluationRow` is missing, from the SAME snapshot the
+# scan already read (same `asset`/`bot_folder`/`venue`, same
+# `as_of_ms=cohort.generated_at_ms`), and read it OFF, never re-score
+# anything -- the risk/quality/dimension numbers in the assessment always
+# come from `row` alone, exactly as before this task.
+#
+# Deliberately NOT a second call to `QCCoreService.assess_bot`/
+# `RiskSupervisionPipeline.run`: either would need this run's exact
+# `portfolio_bots` list (whichever OTHER bots were in the same cohort scan)
+# to reproduce the SAME `portfolio_risk` dimension score cohort.py's own
+# call already computed, and nothing outside cohort.py has that list. Since
+# `strategy_observations`/`behavioral_observations` are pure functions of
+# one bot's own ledger + market timeline (see
+# Agent/backend/mcp/analytics/strategy/profile.py's own module docstring --
+# "Nothing here is inferred where the evidence is absent"), independent of
+# portfolio, seed or Monte Carlo settings, a bare `get_bot_result` re-fetch
+# reproduces them byte-for-byte without that risk -- see
+# `test_run_report_narrative.py`'s own "matches the row's own numbers" test.
+#
+# `closed_trade_series`/`horizon_scenarios`/`assets` (added later, same fix
+# that restores what `GET /bot/<code>` loses when it has to read
+# assessment.json instead of running live -- verified by literally counting
+# `<svg>`/`<details>` on both: file-sourced was 5/8, live is 7/12 -- see
+# `assessment_store.build_assessment`'s own docstring) ride the SAME
+# re-fetch. `trade_ledger_summary`/`current_state.open_positions` are just
+# as pure/re-fetch-safe as the strategy/behavioural observations above, but
+# `simulation_results.horizon_scenarios` is NOT -- it is genuine Monte Carlo
+# output, so unlike the three observation-only objects, THIS one only
+# reproduces the exact numbers already used to score the bot when the
+# re-fetch uses the SAME `iterations`/`horizon`/`seed` `cohort_service.
+# scan()` did. `main()` below passes those real values through
+# `build_assessment_extras` for exactly this reason -- never the throwaway
+# tiny settings a plain strategy/behavioural-only re-fetch could get away
+# with. (`assets`' own `last_close_days`/`state` are frozen at THIS run's
+# `as_of_ms`, same as every other bang_chung field already is -- the
+# existing "quá 24 giờ" staleness banner on the assessment-file-served page
+# is what tells a reader when that freeze is stale, not a live recompute.)
+# --------------------------------------------------------------------------- #
+
+
+def _fetch_bot_for_extras(
+    bot_service: BotObservationService,
+    row: BotEvaluationRow,
+    as_of_ms: int,
+    *,
+    simulation_iterations: int = 100,
+    simulation_horizon: Optional[int] = 1,
+    seed: int = 42,
+) -> Optional[Any]:
+    """Re-fetch this ONE row's own `BotResult`, from the same snapshot
+    `CohortAssessmentService.scan()` already scored it from -- `None` (never
+    raises) when the snapshot has since become unreadable, so a flaky re-read
+    degrades this bot's strategy/behavioural extras to absent rather than
+    aborting the whole run.
+
+    `simulation_iterations=100`/`simulation_horizon=1` are the historical
+    defaults -- deliberately tiny, because the ONLY things this call used to
+    be for (`.strategy_observations`/`.behavioral_observations`) never touch
+    the Monte Carlo pass, so there was no reason to pay for a full
+    10,000-iteration simulation a second time just to reach them. Now that
+    this same re-fetch also supplies `.simulation_results.horizon_scenarios`
+    (see the module comment above this function), `build_assessment_extras`
+    passes the REAL `iterations`/`horizon`/`seed` the caller's `scan()` run
+    used -- these three parameters stay at the old cheap defaults only so a
+    caller that genuinely never needs `horizon_scenarios` (e.g. a future
+    strategy/behavioural-only use) is unaffected.
+    """
+    try:
+        return bot_service.get_bot_result(
+            row.asset_context,
+            row.bot_folder,
+            seed=seed,
+            venue_type=row.snapshot_venue,
+            as_of_ms=as_of_ms,
+            simulation_iterations=simulation_iterations,
+            simulation_horizon=simulation_horizon,
+        )
+    except (BotDataUnavailableError, BotSourceError, ValueError) as exc:
+        print(
+            f"[step 3] {row.unique_code}: could not re-fetch BotResult to add "
+            f"strategy/behavioural evidence -- {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+
+def _horizon_scenarios_evidence(bot: Any) -> Optional[List[Dict[str, Any]]]:
+    """`bot.simulation_results.horizon_scenarios` (a `List[HorizonOutcome]`,
+    Agent/backend/mcp/schemas/bot_result.py), reshaped to plain dicts for
+    `assessment_store.build_assessment`'s `horizon_scenarios=` -- the exact
+    same `model_dump(mode="json")` shape the LIVE path already exposes via
+    `bot.simulation_results.model_dump(mode="json")["horizon_scenarios"]`
+    (Agent/backend/web/data.py), so `report_page.py` reads identical keys
+    (`label`, `horizon_trades`, `probability_of_profit`, ...) regardless of
+    which path produced them.
+
+    `None` (never `[]`) when `bot` is `None` or the simulation produced no
+    scenarios (e.g. too few trades) -- same "absent, not fabricated" contract
+    `_strategy_evidence`/`_behavioral_evidence` already follow, so
+    `build_assessment` can tell "nothing to add" apart from "add an empty
+    list" without a second signal.
+    """
+    if bot is None:
+        return None
+    sim = getattr(bot, "simulation_results", None)
+    scenarios = getattr(sim, "horizon_scenarios", None) if sim is not None else None
+    if not scenarios:
+        return None
+    return [
+        scenario.model_dump(mode="json")
+        for scenario in scenarios
+        if hasattr(scenario, "model_dump")
+    ] or None
+
+
+def _closed_trade_series_evidence(bot: Any) -> Optional[List[Dict[str, Any]]]:
+    """`_closed_trade_series_from_bot_result(bot)` (data.py), guarded for
+    `bot is None`/a test double that never set `.trade_ledger_summary` at
+    all (that attribute IS required on a real `BotResult`, so this guard
+    only ever fires for the latter) -- same "absent, not fabricated"
+    contract as `_horizon_scenarios_evidence` above.
+    """
+    if bot is None or not hasattr(bot, "trade_ledger_summary"):
+        return None
+    return _closed_trade_series_from_bot_result(bot) or None
+
+
+def _assets_evidence(bot: Any) -> Optional[List[Dict[str, Any]]]:
+    """`_asset_states_from_bot_result(bot)` (data.py) -- the third field
+    this same re-fetch turned out to be necessary for: `report_page.py`'s
+    "Tài sản đang giao dịch" table/theory-block (`_render_assets`) is gated
+    on a non-empty top-level `assets` list, which
+    `assessment_to_analyze_result` used to hard-code to `[]` unconditionally
+    -- a THIRD, separate gap from `closed_trade_series`/`horizon_scenarios`
+    (a table, not a chart, so it cost 0 `<svg>` but 1 `<details>`), found by
+    actually counting tags rather than assuming the two known root causes
+    were the whole gap. Guarded the same way the two helpers above are.
+    """
+    if (
+        bot is None
+        or not hasattr(bot, "current_state")
+        or not hasattr(bot, "trade_ledger_summary")
+    ):
+        return None
+    return _asset_states_from_bot_result(bot) or None
+
+
+def _row_narrative_numbers(row: BotEvaluationRow) -> List["narrative.NumberSpec"]:
+    """The row-sourced half of a batch narrative's `NumberSpec`s -- mirrors
+    `Agent/backend/web/data.py`'s `_narrative_numbers` labels/roundings
+    where the same figure exists on `BotEvaluationRow`, but reads
+    EXCLUSIVELY from `row` (never a re-fetched/recomputed object): `row` is
+    this exact assessment's own already-scored numbers, and Việc 4's own
+    hard constraint is that a batch narrative must never drift from them.
+    """
+    N = narrative.make_number
+    specs = []
+
+    def add(spec: Optional["narrative.NumberSpec"]) -> None:
+        if spec is not None:
+            specs.append(spec)
+
+    add(
+        N(
+            "Risk score (a composite score, not a percentage -- higher means riskier)",
+            row.risk_score,
+            decimals=1,
+        )
+    )
+    add(
+        N(
+            "Quality score (a composite score, not a percentage)",
+            row.quality_score,
+            decimals=1,
+        )
+    )
+    add(N("Confidence level of this assessment", row.confidence, decimals=0, percent=True))
+    add(N("Closed trades", row.trade_count, decimals=0))
+    add(N("Win rate", row.win_rate, decimals=1, percent=True))
+    add(N("Profit factor on closed trades", row.profit_factor, decimals=2))
+    add(N("Max drawdown recorded", row.max_drawdown_pct, decimals=1, percent=True))
+    add(N("Sharpe ratio", row.sharpe_ratio, decimals=2))
+    add(
+        N(
+            "Payoff ratio (average win divided by average loss)",
+            row.payoff_ratio,
+            decimals=2,
+        )
+    )
+    add(N("Longest losing streak", row.max_loss_streak, decimals=0))
+    add(
+        N("Profit factor if the open book were closed now", row.marked_profit_factor, decimals=2)
+    )
+    add(
+        N(
+            "Unrealised loss on the open book as a share of reference capital",
+            row.open_loss_to_capital_pct,
+            decimals=1,
+            percent=True,
+        )
+    )
+    add(
+        N(
+            "Probability of account ruin in the simulation",
+            row.p_ruin,
+            decimals=1,
+            percent=True,
+        )
+    )
+    add(
+        N(
+            "Simulated drawdown in the bad-case band (tail of the distribution)",
+            row.p95_max_drawdown,
+            decimals=1,
+            percent=True,
+        )
+    )
+    add(
+        N(
+            "Probability of still being in a loss after the simulation horizon",
+            row.p_loss_after_horizon,
+            decimals=1,
+            percent=True,
+        )
+    )
+    if row.mc_iterations:
+        add(N("Number of Monte Carlo simulation scenarios", row.mc_iterations, decimals=0))
+    if row.mc_horizon:
+        add(N("Simulation horizon", row.mc_horizon, decimals=0))
+    if row.trades_per_day is not None:
+        add(N("Average trading frequency", row.trades_per_day, decimals=1))
+    if row.capital_at_risk is not None:
+        add(
+            N(
+                "Reference capital inferred from the actual equity curve",
+                row.capital_at_risk,
+                decimals=0,
+                money=True,
+            )
+        )
+    if row.score_decided_by and row.score_decided_by != "WEIGHTED_AVERAGE":
+        add(
+            N(
+                "Weighted average across risk dimensions before any veto/emergency override",
+                row.weighted_average,
+                decimals=1,
+            )
+        )
+        if row.veto_floor is not None:
+            add(
+                N(
+                    "Veto floor that set the final risk score",
+                    row.veto_floor,
+                    decimals=1,
+                )
+            )
+    return specs
+
+
+def _narrative_for_row(row: BotEvaluationRow, bot: Optional[Any]) -> Optional[str]:
+    """`None` when the narrative feature is unconfigured (see
+    `narrative.select_backend_from_env`) or `bot` could not be re-fetched
+    (`_fetch_bot_for_extras` already logged why) -- the strategy-profile
+    text needs the re-fetched `BotResult`, so without it there is nothing
+    safe to build a narrative from. Any other unexpected error degrades to
+    `narrative.FALLBACK_NARRATIVE_VI`, same "additive field, must never take
+    down the rest of an otherwise-successful run" contract
+    `_generate_narrative_for_full_result` (data.py) already follows for the
+    live web path.
+    """
+    if bot is None:
+        return None
+    try:
+        numbers = _row_narrative_numbers(row)
+        numbers.extend(_phase_breakdown_numbers(bot.strategy_observations))
+        context = narrative.NarrativeContext(
+            verdict=row.verdict or "",
+            traded_symbol=row.traded_symbol or "",
+            untrusted_nick_name=row.nick_name or "",
+            strategy_profile_vi=_narrative_strategy_profile_vi(bot),
+        )
+        return narrative.generate_narrative_sync(numbers, context)
+    except Exception:  # noqa: BLE001 - additive field, must not abort the run.
+        print(
+            f"[step 3] {row.unique_code}: unexpected error generating the "
+            "expert narrative -- using the default sentence",
+            file=sys.stderr,
+        )
+        return narrative.FALLBACK_NARRATIVE_VI
+
+
+def build_assessment_extras(
+    cohort: Any,
+    bot_service: BotObservationService,
+    *,
+    generate_narrative_flag: bool = True,
+    reuse_stored_narrative: bool = False,
+    data_dir: Optional[Path] = None,
+    simulation_iterations: int = 100,
+    simulation_horizon: Optional[int] = 1,
+    seed: int = 42,
+) -> Dict[str, Dict[str, Any]]:
+    """`{unique_code: {"strategy": {...}, "behavioral": {...}, "narrative":
+    str|None, "closed_trade_series": [...]|None, "horizon_scenarios":
+    [...]|None, "assets": [...]|None}}` for every scored row in `cohort` --
+    fed straight into `assessment_store.persist(..., extra_by_code=...)`.
+
+    `simulation_iterations`/`simulation_horizon`/`seed` default to the same
+    historical cheap-refetch settings `_fetch_bot_for_extras` always used
+    (so every pre-existing caller/test is unaffected), but `main()` below
+    passes the REAL `--iterations`/`--horizon`/`--seed` this run's own
+    `cohort_service.scan()` used -- required for `horizon_scenarios` to
+    match the Monte Carlo actually used to score each bot (see
+    `_fetch_bot_for_extras`'s own docstring).
+
+    HAI PHA, và lý do chia pha là số đo chứ không phải sở thích:
+    trên 30 bot thật, phần chấm điểm (nạp bot, Monte Carlo, dựng bằng chứng)
+    tốn TRUNG VỊ 0,4 GIÂY mỗi bot -- tổng 14 giây -- trong khi phần sinh văn
+    bằng mô hình ngôn ngữ tốn TRUNG VỊ 88 GIÂY mỗi bot. Tức 99,5% thời gian
+    của cả lượt nằm ở đúng một chỗ.
+
+      pha 1 (tuần tự) : nạp bot + dựng bằng chứng. Nhanh, giữ nguyên thứ tự.
+      pha 2 (song song): sinh văn, tối đa `narrative.MAX_CONCURRENT_CALLS`
+                         lượt cùng lúc.
+
+    VÌ SAO SONG SONG LÀ AN TOÀN Ở ĐÂY, trong khi nguyên tắc của dự án là
+    "chạy tuần tự, không đẩy nền": nguyên tắc đó sinh ra để chặn việc dội
+    request vào OKX và việc chạy ngầm không ai thấy tiến độ. Sinh văn KHÔNG
+    gọi OKX (nó gọi một tiến trình CLI cục bộ), và pha 2 dưới đây VẪN in
+    tiến độ từng bot ngay khi bot đó xong. Trần đồng thời do chính
+    `narrative._SEMAPHORE` giữ, nên số luồng ở đây không thể vượt qua nó --
+    đặt nhiều luồng hơn cũng chỉ xếp hàng, không tạo thêm tiến trình nào.
+
+    Không đổi một chữ nào trong prompt, model hay năm cổng kiểm duyệt: đây
+    thuần tuý là bỏ việc bắt bot sau đứng chờ bot trước.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from Agent.backend.qc.reporting import narrative as _narrative
+
+    extras: Dict[str, Dict[str, Any]] = {}
+    rows = [r for r in cohort.rows if not r.error and r.verdict is not None]
+    total = len(rows)
+
+    # --- Pha 1: chấm điểm, tuần tự (trung vị 0,4s/bot) --------------------
+    fetched: List[Tuple[Any, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        started = time.monotonic()
+        bot = _fetch_bot_for_extras(
+            bot_service,
+            row,
+            cohort.generated_at_ms,
+            simulation_iterations=simulation_iterations,
+            simulation_horizon=simulation_horizon,
+            seed=seed,
+        )
+        extras[row.unique_code] = {
+            "strategy": _strategy_evidence(bot.strategy_observations) if bot else None,
+            "behavioral": (
+                _behavioral_evidence(bot.behavioral_observations) if bot else None
+            ),
+            "narrative": None,
+            "closed_trade_series": _closed_trade_series_evidence(bot),
+            "horizon_scenarios": _horizon_scenarios_evidence(bot),
+            "assets": _assets_evidence(bot),
+        }
+        fetched.append((row, bot))
+        print(
+            f"[step 3] ({index}/{total}) {row.nick_name} ({row.unique_code}): "
+            f"strategy/behavioural evidence {'OK' if bot else 'MISSING'} "
+            f"-- {time.monotonic() - started:.1f}s",
+            file=sys.stderr,
+        )
+
+    if not generate_narrative_flag:
+        if reuse_stored_narrative and data_dir is not None:
+            # Ghi lại CÙNG những bot này chỉ vì hình dạng dữ liệu đổi (thêm
+            # một trường bằng chứng, đổi tên một khoá) không làm đoạn văn cũ
+            # sai đi -- nó nói về chiến lược và rủi ro của bot, không nói về
+            # bố cục JSON. Nhưng `persist` ghi thẳng `narrative_text` xuống
+            # `expert_assessment`, nên bỏ trống nó là XOÁ, không phải giữ.
+            # Đọc lại từ chính file của bot là cách duy nhất giữ được văn mà
+            # không tốn một giây gọi mô hình nào.
+            # Tra theo MÃ BOT chứ không dựng lại đường dẫn từ venue/symbol:
+            # `BotEvaluationRow` không mang tên thư mục tài sản (nó có
+            # `traded_symbol` là mã hợp đồng, khác với tên ô lưu trữ), và
+            # đoán sai đường dẫn ở đây sẽ âm thầm giữ được 0 đoạn văn rồi
+            # xoá sạch -- đúng thứ cả nhánh này sinh ra để tránh.
+            root = Path(data_dir) / "assessment"
+            by_code = {
+                path.parent.name.rpartition("__")[2]: path
+                for path in root.glob("*/*/bot/*/assessment.json")
+            }
+            kept = 0
+            for row in rows:
+                path = by_code.get(row.unique_code)
+                if path is None:
+                    continue
+                try:
+                    stored = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                text = stored.get("expert_assessment")
+                if isinstance(text, str) and text.strip():
+                    extras[row.unique_code]["narrative"] = text
+                    kept += 1
+            print(
+                f"[step 3] giữ lại {kept}/{total} nhận định đã lưu "
+                f"(không gọi mô hình)",
+                file=sys.stderr,
+            )
+        return extras
+
+    # --- Pha 2: sinh văn, song song trong đúng trần đã có ------------------
+    workers = max(1, _narrative.MAX_CONCURRENT_CALLS)
+    print(
+        f"[step 3] sinh nhận định cho {total} bot, tối đa {workers} lượt cùng lúc",
+        file=sys.stderr,
+    )
+    started_all = time.monotonic()
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(_narrative_for_row, row, bot): row for row, bot in fetched
+        }
+        for future in as_completed(futures):
+            row = futures[future]
+            done += 1
+            try:
+                text = future.result()
+            except Exception:  # noqa: BLE001 - trường bổ sung, không được
+                # làm hỏng cả lượt chấm; _narrative_for_row đã tự bắt lỗi,
+                # đây chỉ là lưới cuối.
+                text = _narrative.FALLBACK_NARRATIVE_VI
+            extras[row.unique_code]["narrative"] = text
+            print(
+                f"[step 3] narrative ({done}/{total}) {row.nick_name}: "
+                f"{'OK' if text and text != _narrative.FALLBACK_NARRATIVE_VI else 'FALLBACK'}"
+                f" -- {time.monotonic() - started_all:.0f}s trôi qua",
+                file=sys.stderr,
+            )
+    return extras
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Đánh giá toàn bộ bot trong dataset và xếp hạng theo rủi ro"
+        description="Evaluate every bot in the dataset and rank them by risk"
     )
     parser.add_argument(
         "--venue",
         choices=("CEX", "DEX", "ALL"),
         default="ALL",
-        help="Phạm vi venue cần quét",
+        help="Venue scope to scan",
     )
-    parser.add_argument("--iterations", type=int, default=10_000)
+    parser.add_argument(
+        "--iterations", type=int, default=PRODUCTION_SIMULATION_ITERATIONS
+    )
     parser.add_argument(
         "--horizon",
         type=int,
-        default=None,
+        default=PRODUCTION_SIMULATION_HORIZON,
         help=(
-            "số lệnh mỗi kịch bản Monte Carlo; bỏ trống thì dùng đúng số lệnh "
-            "của chính bot, vì đó là quãng đời đã quan sát được"
+            "trades per Monte Carlo scenario; leave blank to use the bot's own "
+            "trade count, since that is the horizon actually observed"
         ),
     )
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=PRODUCTION_SIMULATION_SEED)
     parser.add_argument(
         "--as-of-ms",
         type=int,
         default=None,
-        help="Đồng hồ đánh giá cho replay xác định",
+        help="Evaluation clock for a deterministic replay",
     )
     parser.add_argument(
         "--mode",
         choices=("SNAPSHOT", "LIVE"),
         default="SNAPSHOT",
-        help="SNAPSHOT: chấm freshness theo mốc dataset crawl",
+        help="SNAPSHOT: grade freshness against the dataset crawl timestamp",
     )
     parser.add_argument(
         "--report",
         choices=("data", "market", "bot", "cohort", "qc", "gaps", "all"),
         default="all",
         help=(
-            "data = bước 1 (kiểm kê dữ liệu market + bot), "
-            "market/bot = hai phần của bước 2 (phân tích market và phân tích bot), "
-            "qc = bước 3, cohort = danh sách phẳng mọi bot đã crawl, all = cả ba bước"
+            "data = step 1 (market + bot data inventory), "
+            "market/bot = the two halves of step 2 (market analysis and bot analysis), "
+            "qc = step 3, cohort = flat list of every crawled bot, all = all three steps"
         ),
     )
     parser.add_argument(
         "--all-bots",
         action="store_true",
-        help=("chấm mọi bot đã crawl thay vì đúng 30 bot bước 2 đã chọn"),
+        help=("score every crawled bot instead of just the 30 bots step 2 selected"),
     )
     parser.add_argument(
         "--bot",
         help=(
-            "chỉ chạy đúng một bot theo uniqueCode; bước 1 và 2 thu hẹp về asset "
-            "của bot đó, bước 3 chỉ chấm bot đó"
+            "run exactly one bot by uniqueCode; steps 1 and 2 narrow down to "
+            "that bot's asset, step 3 scores only that bot"
         ),
     )
     parser.add_argument(
         "--no-write",
         action="store_true",
-        help="không ghi kết quả bước 2/3 xuống data/analysis và data/assessment",
+        help="don't write step 2/3 output to data/analysis and data/assessment",
+    )
+    parser.add_argument(
+        "--no-narrative",
+        action="store_true",
+        help=(
+            "disable generating the expert (LLM) narrative when writing the "
+            "step 3 assessment -- ON by default (if NORABT_NARRATIVE_BACKEND "
+            "is configured); use this flag to run faster when the narrative "
+            "isn't needed, e.g. when iterating repeatedly during development"
+        ),
+    )
+    parser.add_argument(
+        "--reuse-narrative",
+        action="store_true",
+        help=(
+            "reuse the expert narrative already stored in each bot's "
+            "assessment.json instead of generating a new one -- for re-"
+            "persisting the same bots after a DATA-shape change (a new "
+            "evidence field, a renamed key), where the prose is still "
+            "correct and only the numbers around it need rewriting. Without "
+            "it, --no-narrative writes expert_assessment=null and every "
+            "stored narrative is lost; with it the same run costs no model "
+            "time at all. Ignored when the narrative is being generated."
+        ),
     )
     parser.add_argument(
         "--source",
         choices=("file", "live"),
         default="file",
         help=(
-            "file (mặc định) = đọc dữ liệu đã crawl sẵn dưới data/, không đổi "
-            "hành vi cũ; live = đọc thẳng OKX qua LiveBotDataSource/"
-            "LiveMarketDataSource, không ghi gì xuống data/cex hay data/dex"
+            "file (default) = read already-crawled data under data/, unchanged "
+            "old behaviour; live = read straight from OKX via LiveBotDataSource/"
+            "LiveMarketDataSource, without writing anything to data/cex or data/dex"
         ),
     )
     parser.add_argument(
         "--out-dir",
         default=None,
         help=(
-            "nơi ghi output bước 2/3 (data/analysis, data/assessment); mặc "
-            "định giữ nguyên bên trong data/ -- đổi giá trị này khi chạy "
-            "--source live để khỏi đè lên kết quả của đường file, phục vụ "
-            "run_compare.py so sánh hai đường"
+            "where to write step 2/3 output (data/analysis, data/assessment); "
+            "defaults to staying inside data/ -- change this when running "
+            "--source live so it doesn't overwrite the file path's results, "
+            "for run_compare.py to compare the two paths"
         ),
     )
     parser.add_argument("--json", dest="as_json", action="store_true")
@@ -558,8 +1066,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     live_market_source: Optional[MarketDataSource] = None
     if args.source == "live":
         print(
-            "[nguồn] LIVE — đọc thẳng OKX qua LiveBotDataSource/"
-            "LiveMarketDataSource, không dùng file đã crawl sẵn",
+            "[source] LIVE -- reading straight from OKX via LiveBotDataSource/"
+            "LiveMarketDataSource, not using already-crawled files",
             file=sys.stderr,
         )
         live_bot_source, live_market_source = build_live_sources()
@@ -635,20 +1143,54 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 # can open one bot and read what the decision was made from.
                 written = persist_analysis(pair_report, out_dir)
                 print(
-                    f"[bước 2] đã ghi {len(written)} file phân tích vào "
+                    f"[step 2] wrote {len(written)} analysis files to "
                     f"{out_dir / 'analysis'}",
                     file=sys.stderr,
                 )
 
-        if cohort is not None and want in ("qc", "all") and not args.no_write:
+        if cohort is not None and want in ("qc", "all"):
+            # Việc 1/4: fill in what BotEvaluationRow itself cannot carry
+            # (phase_breakdown, behavioural flags/scores, the LLM narrative)
+            # before persisting -- built even under --no-write, so a
+            # single-bot dry run can still be inspected for its narrative
+            # (task's own explicit test requirement) without ever touching
+            # disk. Runs sequentially with its own per-bot progress/timing
+            # output regardless of --report/--json (never pushed to the
+            # background -- this project's own crawler-throttle preference).
+            extras = build_assessment_extras(
+                cohort,
+                shared_bot_service,
+                generate_narrative_flag=not args.no_narrative,
+                reuse_stored_narrative=args.reuse_narrative,
+                data_dir=data_dir,
+                # Real params (not the historical cheap default) -- see
+                # build_assessment_extras/_fetch_bot_for_extras's own
+                # docstrings: horizon_scenarios must come from the SAME
+                # Monte Carlo settings cohort_service.scan() above just used
+                # to score these exact bots.
+                simulation_iterations=args.iterations,
+                simulation_horizon=args.horizon,
+                seed=args.seed,
+            )
             # Step 3's verdict has to be readable one bot at a time as well; the
             # ranking table is a view of these files, not the other way round.
-            written = persist_assessment(cohort, out_dir)
-            print(
-                f"[bước 3] đã ghi {len(written)} file đánh giá vào "
-                f"{out_dir / 'assessment'}",
-                file=sys.stderr,
+            written = persist_assessment(
+                cohort, out_dir, extra_by_code=extras, write=not args.no_write
             )
+            if args.no_write:
+                print(
+                    f"[step 3] --no-write: {len(written)} assessment files (with "
+                    "strategy/behavioural evidence and narrative if available) "
+                    f"were built in memory for {out_dir / 'assessment'} -- NOT "
+                    "written to disk",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"[step 3] wrote {len(written)} assessment files to "
+                    f"{out_dir / 'assessment'}",
+                    file=sys.stderr,
+                )
 
         market_report = None
         if needs_market:
@@ -678,7 +1220,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # against a bare traceback -- it turns one bot's OKX failure into a
         # clear Vietnamese message and a non-zero exit instead of a crash.
         print(
-            f"[live] Lỗi khi lấy dữ liệu bot trực tiếp từ OKX: {exc}", file=sys.stderr
+            f"[live] Error fetching bot data directly from OKX: {exc}", file=sys.stderr
         )
         return 1
     except MarketDataUnavailableError as exc:
@@ -688,7 +1230,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # actually fire -- kept only so a future gap in that coverage still
         # degrades to a clear message instead of a traceback.
         print(
-            f"[live] Lỗi khi lấy dữ liệu thị trường trực tiếp từ OKX: {exc}",
+            f"[live] Error fetching market data directly from OKX: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -698,10 +1240,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # were served from memory instead of asking the source (OKX under
     # --source live, disk under --source file) again.
     print(
-        f"[cache] market: {shared_market_service.cache_hits} trúng / "
-        f"{shared_market_service.cache_calls} lượt gọi get_market_result; "
-        f"bot: {shared_bot_service.cache_hits} trúng / "
-        f"{shared_bot_service.cache_calls} lượt gọi get_bot_result",
+        f"[cache] market: {shared_market_service.cache_hits} hits / "
+        f"{shared_market_service.cache_calls} get_market_result calls; "
+        f"bot: {shared_bot_service.cache_hits} hits / "
+        f"{shared_bot_service.cache_calls} get_bot_result calls",
         file=sys.stderr,
     )
 
@@ -739,3 +1281,80 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+
+def rescore_one_bot_complete(
+    data_dir: Path,
+    unique_code: str,
+    *,
+    data_venue: Optional[str] = None,
+) -> Optional[str]:
+    """Chấm lại MỘT bot ĐẦY ĐỦ -- điểm số, bằng chứng VÀ đoạn nhận định --
+    rồi ghi đè `assessment.json` của chính nó. Trả về đường dẫn đã ghi.
+
+    VÌ SAO Ở ĐÂY chứ không ở `assessment_store`: bản trước đặt trong
+    assessment_store chỉ chấm lại được ĐIỂM, vì đoạn nhận định cần đối
+    tượng `bot` (hồ sơ chiến lược, phân rã theo pha) mà chỉ
+    `_fetch_bot_for_extras` dựng ra, và nó sống ở file này cùng
+    `_narrative_for_row`. Hệ quả của bản thiếu đó thấy ngay khi đo: bot vừa
+    chạy lại có số mới nhưng MẤT đoạn văn cho tới lượt chấm hàng loạt kế
+    tiếp -- tức người dùng bấm "Phân tích lại" rồi nhận về một báo cáo
+    NGHÈO HƠN trước khi bấm.
+
+    Dùng đúng những mảnh mà lượt chấm hàng loạt dùng (`build_assessment_
+    extras` + `assessment_store.persist`), nên một bot chạy lại lẻ và một
+    bot trong lượt chấm cả đàn cho ra cùng một hình dạng dữ liệu.
+    """
+    from Agent.backend.qc.reporting.assessment_store import persist as persist_assessment
+    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+
+    root = Path(data_dir)
+
+    market_service, bot_service = build_shared_services(root, EvaluationMode.SNAPSHOT)
+    service = CohortAssessmentService(data_dir=root, persist_history=False)
+    apply_shared_services(
+        service,
+        shared_market_service=market_service,
+        shared_bot_service=bot_service,
+    )
+
+    # `scan()` duyệt cây data/<venue>/ THẬT. Mọi slot DEX đều do trader OKX
+    # lấp và dữ liệu của họ nằm dưới cex/, nên phải thử cả hai thay vì đoán
+    # theo venue của slot -- đúng con bug mà `live/poller.py` đã vấp.
+    report = row = None
+    # Nơi gọi đã biết venue THẬT (poller giải được từ cây dữ liệu) thì dùng
+    # luôn, khỏi quét thừa một lượt; không biết thì thử cả hai.
+    venues = (data_venue,) if data_venue else ("CEX", "DEX")
+    for data_venue in venues:
+        report = service.scan(
+            venue_types=(data_venue,),
+            only_codes={unique_code},
+            seed=PRODUCTION_SIMULATION_SEED,
+            simulation_iterations=PRODUCTION_SIMULATION_ITERATIONS,
+            simulation_horizon=PRODUCTION_SIMULATION_HORIZON,
+        )
+        row = next(
+            (r for r in report.rows if r.unique_code == unique_code and not r.error),
+            None,
+        )
+        if row is not None:
+            break
+    if row is None or report is None:
+        return None
+
+    extras = build_assessment_extras(
+        report,
+        bot_service,
+        generate_narrative_flag=True,
+        # Phải TRÙNG với `scan` ngay trên: `horizon_scenarios` sinh ở đây,
+        # còn điểm số sinh ở đó -- lệch tham số là hai nửa cùng một báo cáo
+        # nói về hai lần mô phỏng khác nhau. Lượt chấm đàn đã làm đúng việc
+        # này từ đầu (xem chỗ gọi trong `main`); đường lẻ thì chưa.
+        simulation_iterations=PRODUCTION_SIMULATION_ITERATIONS,
+        simulation_horizon=PRODUCTION_SIMULATION_HORIZON,
+        seed=PRODUCTION_SIMULATION_SEED
+    )
+    # Giữ thứ hạng: `assessment_store.persist` lo, cho MỌI đường.
+    written = persist_assessment(report, root, extra_by_code=extras, write=True)
+    return written[0] if written else None

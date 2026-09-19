@@ -262,14 +262,14 @@ def _format_change_vi(change: BotChange) -> str:
     target = change.target
     label = f"{target.name} ({target.unique_code})"
     if change.not_crawled:
-        return f"{label}: CHUA_CRAWL - {change.error}"
+        return f"{label}: NOT_CRAWLED - {change.error}"
     if not change.ok:
-        tag = "STALE" if change.stale else "lỗi"
+        tag = "STALE" if change.stale else "error"
         return f"{label}: {tag} - {change.error}"
 
     if not change.positions_changed and change.new_closed_count == 0:
         # Case 1: genuinely nothing happened.
-        return f"{label}: không đổi gì, bỏ qua chấm điểm"
+        return f"{label}: nothing changed, skipping scoring"
 
     if change.new_closed_count == 0:
         # Case 2: positions_changed is True here (that's the only other way
@@ -280,24 +280,24 @@ def _format_change_vi(change: BotChange) -> str:
         # scope, there is nothing yet worth re-scoring over.
         bits = []
         if change.opened_ids:
-            bits.append(f"mở thêm {len(change.opened_ids)} vị thế")
+            bits.append(f"opened {len(change.opened_ids)} more position(s)")
         if change.closed_ids:
-            bits.append(f"đóng {len(change.closed_ids)} vị thế (đang chờ khớp lịch sử)")
-        detail = ", ".join(bits) if bits else "vị thế thay đổi"
-        return f"{label}: {detail}, CHƯA có lệnh nào chốt thêm -> bỏ qua chấm điểm"
+            bits.append(f"closed {len(change.closed_ids)} position(s) (pending history match)")
+        detail = ", ".join(bits) if bits else "position set changed"
+        return f"{label}: {detail}, NO new closed trade yet -> skipping scoring"
 
     # Case 3: at least one trade newly closed this round -- the only case a
     # re-score was actually attempted (see poll_once).
     bits = []
     if change.opened_ids:
-        bits.append(f"mở thêm {len(change.opened_ids)} vị thế")
+        bits.append(f"opened {len(change.opened_ids)} more position(s)")
     if change.closed_ids:
-        bits.append(f"đóng {len(change.closed_ids)} vị thế")
-    bits.append(f"ghép {change.new_closed_count} lệnh mới vào sổ lệnh")
+        bits.append(f"closed {len(change.closed_ids)} position(s)")
+    bits.append(f"merged {change.new_closed_count} new trade(s) into the ledger")
     detail = ", ".join(bits)
 
     if change.rescore is None:
-        suffix = f" | chưa chấm lại được: {change.rescore_error}"
+        suffix = f" | rescoring failed: {change.rescore_error}"
         return f"{label}: {detail}{suffix}"
 
     outcome = change.rescore
@@ -307,14 +307,14 @@ def _format_change_vi(change: BotChange) -> str:
     new_score = (
         "?" if outcome.new_risk_score is None else f"{outcome.new_risk_score:.1f}"
     )
-    score_bit = f"điểm rủi ro {old_score} -> {new_score}"
+    score_bit = f"risk score {old_score} -> {new_score}"
     tier_bit = f"{outcome.old_tier or '?'} -> {outcome.new_tier}"
-    line = f"{label}: {detail} | {score_bit} | xếp loại {tier_bit}"
+    line = f"{label}: {detail} | {score_bit} | tier {tier_bit}"
     if outcome.tier_changed:
-        line += f"  *** ĐỔI XẾP LOẠI: {outcome.old_tier} -> {outcome.new_tier} ***"
+        line += f"  *** TIER CHANGED: {outcome.old_tier} -> {outcome.new_tier} ***"
     elif outcome.verdict_changed:
         line += (
-            f"  *** ĐỔI KHUYẾN NGHỊ: {outcome.old_verdict} -> {outcome.new_verdict} ***"
+            f"  *** VERDICT CHANGED: {outcome.old_verdict} -> {outcome.new_verdict} ***"
         )
     return line
 
@@ -345,13 +345,16 @@ class LivePoller:
         self.client = client or OkxClient()
         self.rate_limiter = rate_limiter or TokenBucket()
         self.stale_after = stale_after
+        # Giữ lại cho nơi gọi đọc/ghi; phần chấm điểm nay do
+        # `run_report.rescore_one_bot_complete` lo, và hàm đó tự chọn
+        # SNAPSHOT -- cùng chế độ lượt chấm cả đàn dùng, nên poller
+        # không còn tự dựng cohort service với một chế độ riêng nữa.
         self.evaluation_mode = evaluation_mode
         self.progress = progress
         self.now_fn = now_fn
         # Overridable so tests can count/stub calls without paying for a real
         # Monte Carlo run; the default wires up the real QC pipeline.
         self._rescore_fn = rescore_fn or self._rescore_bot
-        self._cohort_service = None  # built lazily, only if the default path runs
 
     # -- one bot -----------------------------------------------------------
 
@@ -372,8 +375,8 @@ class LivePoller:
                 ok=False,
                 not_crawled=True,
                 error=(
-                    "chưa có dữ liệu crawl cho bot này (không tìm thấy thư mục "
-                    f"bot_{target.unique_code} dưới bất kỳ venue/asset nào)"
+                    "no crawled data for this bot yet (directory "
+                    f"bot_{target.unique_code} not found under any venue/asset)"
                 ),
             )
         trade_list_path = bot_dir / "trade_list.json"
@@ -402,7 +405,7 @@ class LivePoller:
                 target,
                 state,
                 now,
-                "phản hồi vị thế hiện tại không hợp lệ (không phải danh sách)",
+                "current-positions response is invalid (not a list)",
             )
 
         existing_trade_list = read_json(trade_list_path) or {}
@@ -445,15 +448,15 @@ class LivePoller:
                 # are still good and get written; only the ledger merge is
                 # deferred. `pending` stays as-is so the next round retries.
                 self.progress(
-                    f"  ! {target.name}: không lấy được lịch sử để ghép lệnh vừa "
-                    f"đóng ({exc}), sẽ thử lại vòng sau"
+                    f"  ! {target.name}: could not fetch history to merge the "
+                    f"just-closed trade ({exc}), will retry next round"
                 )
             else:
                 history_rows = _valid_history_rows(raw_history, target.unique_code)
                 if history_rows is None:
                     self.progress(
-                        f"  ! {target.name}: trang lịch sử trả về không hợp lệ, "
-                        "không ghép vào sổ lệnh vòng này (dữ liệu cũ được giữ nguyên)"
+                        f"  ! {target.name}: history page returned is invalid, not "
+                        "merged into the ledger this round (existing data kept unchanged)"
                     )
                 else:
                     existing_ids = {
@@ -504,9 +507,10 @@ class LivePoller:
                 "crawled_at_ms": now,
                 "source": "LIVE_POLLER_INCREMENTAL",
                 "note": (
-                    "open_positions cập nhật mỗi vòng qua public-current-subpositions; "
-                    "closed_trades chỉ được GHÉP thêm (không crawl lại) khi phát hiện "
-                    "vị thế vừa đóng, qua trang đầu public-subpositions-history"
+                    "open_positions is refreshed every round via "
+                    "public-current-subpositions; closed_trades is only APPENDED to "
+                    "(never re-crawled) when a just-closed position is detected, via "
+                    "the first page of public-subpositions-history"
                 ),
             },
         }
@@ -543,8 +547,9 @@ class LivePoller:
         save_state(self.data_dir, state)
         if became_stale:
             self.progress(
-                f"  !!! {target.name} ({target.unique_code}): STALE - lỗi liên tục "
-                f"{state.consecutive_errors} lần, dữ liệu KHÔNG còn được coi là mới"
+                f"  !!! {target.name} ({target.unique_code}): STALE - "
+                f"{state.consecutive_errors} consecutive failures, data is NO LONGER "
+                f"considered fresh"
             )
         return BotChange(
             target=target,
@@ -556,173 +561,85 @@ class LivePoller:
     # -- scoring -------------------------------------------------------------
 
     def _rescore_bot(self, target: BotTarget) -> Optional[RescoreOutcome]:
-        """Re-run step 3 for one bot and persist assessment.json in place.
+        """Chấm lại MỘT bot rồi ghi đè `assessment.json` của nó.
 
-        Uses `CohortAssessmentService.scan(only_codes={...})` rather than
-        calling `RiskSupervisionPipeline.run()` directly: both run the exact
-        same market/bot/QCCoreService.assess_bot computation, but only the
-        cohort service already produces the fully-populated row shape
-        `assessment_store.build_assessment()` expects (trade counts, MC
-        percentiles, dimension scores, the Vietnamese narrative...). Rebuilding
-        that ~150-line row from a bare BotRiskAssessment would duplicate
-        logic that already exists and is already correct.
+        Uỷ THÁC toàn bộ phần chấm+ghi cho
+        `Agent/backend/run_report.rescore_one_bot_complete` -- cùng đúng hàm
+        mà nút "Re-analyze" trên web và lượt chấm cả đàn dùng. Trước đây chỗ
+        này là bản cài ĐỘC LẬP thứ ba và nó đã trôi khỏi hai bản kia theo ba
+        hướng cùng lúc:
+
+          * tham số mô phỏng rơi vào mặc định của `scan` (5.000 lượt, tầm
+            CỐ ĐỊNH 500 lệnh) thay vì 10.000 lượt / tầm = số lệnh bot thật
+            sự đã đóng -- cùng một bot ra hai bộ số khác hẳn tuỳ đường nào
+            chạm vào nó sau cùng;
+          * gọi thẳng `build_assessment(row, ...)` mà KHÔNG có `extras`, nên
+            `expert_assessment` bị ghi đè thành `None`: mỗi lượt poll thành
+            công là một đoạn nhận định bị xoá, cùng với hồ sơ chiến lược,
+            chuỗi lệnh đã đóng, kịch bản theo tầm và danh sách tài sản;
+          * tự hợp nhất `index.json` bằng `_update_assessment_index`, viết ra
+            vì `persist` khi đó dựng lại index từ đúng tập bot được đưa vào.
+            `persist` nay tự hợp nhất, nên bản riêng đó thành thừa.
+
+        Phần CÒN LẠI ở đây -- so trước/sau để dựng `RescoreOutcome` -- là
+        việc riêng của poller, không phải của lượt chấm, nên vẫn nằm lại.
         """
         from pathlib import Path
 
-        from Agent.backend.qc.reporting.analysis_store import folder_name
         from Agent.backend.qc.reporting.assessment_store import (
-            build_assessment,
             load_bot as load_assessment,
         )
-        from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+        from Agent.backend.run_report import rescore_one_bot_complete
 
-        # data/assessment/ is filed by SLOT (assessment_store._slot_index()
-        # reads bot_selection.json the same way load_bot_targets() does), so
-        # this lookup correctly uses target.venue/target.symbol, not
-        # data_venue/data_symbol -- unlike scan() below, which walks the real
-        # data/<venue>/ tree.
+        # data/assessment/ xếp theo SLOT (`assessment_store._slot_index()`
+        # đọc bot_selection.json giống `load_bot_targets()`), nên tra bằng
+        # target.venue/target.symbol -- khác với việc quét cây dữ liệu thật
+        # bên dưới, vốn phải dùng data_venue.
         previous = load_assessment(
             Path(self.data_dir), target.venue, target.symbol, target.unique_code
         )
 
         if target.data_venue is None:
-            # Only happens if _rescore_bot is called on a target that never
-            # went through poll_bot()/with_data_location() -- e.g. a caller
-            # bypassing the normal flow. Refusing loudly here is the whole
-            # point of this fix: silently falling back to the slot venue is
-            # exactly the bug that made scan() search the wrong directory.
+            # Chỉ xảy ra khi `_rescore_bot` được gọi trên một target chưa đi
+            # qua `poll_bot()`/`with_data_location()`. Từ chối ồn ào ở đây
+            # chính là mục đích của bản sửa trước: im lặng lui về venue của
+            # slot đúng là con bug làm `scan()` tìm nhầm thư mục.
             raise RuntimeError(
-                f"target {target.unique_code} chưa được resolve theo dữ liệu "
-                "thật (data_venue is None) -- phải gọi qua poll_bot() trước "
-                "khi chấm lại"
+                f"target {target.unique_code} has not been resolved against its "
+                "real data (data_venue is None) -- must go through poll_bot() "
+                "before rescoring"
             )
 
-        if self._cohort_service is None:
-            # persist_history=False mirrors RiskSupervisionPipeline's own
-            # default for on-demand scoring (see agent_server.py): a live
-            # poll re-score is not the deliberate, periodic run that the risk
-            # *trend* history is meant to track, so it must not feed it.
-            self._cohort_service = CohortAssessmentService(
-                data_dir=Path(self.data_dir),
-                evaluation_mode=self.evaluation_mode,
-                persist_history=False,
-            )
-        report = self._cohort_service.scan(
-            as_of_ms=self.now_fn(),
-            # `_discover()` walks data_dir/<venue>/ on disk, so this MUST be
-            # the real venue the bot's files live under, not its slot venue
-            # -- passing target.venue here is exactly the bug this fix
-            # addresses (a DEX slot whose data is actually under cex/ made
-            # scan() search dex/ and always come back with nothing).
-            venue_types=(target.data_venue,),
-            only_codes={target.unique_code},
+        written = rescore_one_bot_complete(
+            Path(self.data_dir),
+            target.unique_code,
+            data_venue=target.data_venue,
         )
-        matches = [r for r in report.rows if r.unique_code == target.unique_code]
-        row = next((r for r in matches if r.error is None), None)
-        if row is None:
-            # Never return a bare None here: "không tạo được bản chấm điểm
-            # mới" told the operator nothing about *why*, which is exactly
-            # how the venue_types bug above went unnoticed for so long.
-            # Raising with the concrete scan parameters lets poll_once()'s
-            # existing exception handler surface a diagnosable rescore_error.
-            if not matches:
-                raise RuntimeError(
-                    f"scan() không thấy bot {target.unique_code} khi quét "
-                    f"venue_types=({target.data_venue!r},) -- {len(report.rows)} "
-                    "dòng trả về tổng cộng, không dòng nào khớp uniqueCode"
-                )
-            reasons = sorted({r.error for r in matches if r.error})
+        if written is None:
+            # Nêu rõ tham số đã dùng: một `None` trần không nói được gì về
+            # VÌ SAO, và đó đúng là cách con bug venue_types lọt lưới lâu.
             raise RuntimeError(
-                f"scan() tìm thấy bot {target.unique_code} khi quét "
-                f"venue_types=({target.data_venue!r},) nhưng {len(matches)} dòng "
-                f"đều lỗi: {'; '.join(reasons) if reasons else '(không rõ lỗi)'}"
+                f"rescore_one_bot_complete found nothing for bot "
+                f"{target.unique_code} under data venue {target.data_venue!r}"
             )
 
-        slot = f"{target.venue}/{target.symbol}"
-        payload = build_assessment(row, report.generated_at_ms, slot)
-        if previous:
-            # `rank_in_cohort` is only meaningful across the full 30-bot
-            # cohort; scoring one bot alone always computes rank 1. Keep the
-            # last known rank rather than publish a number that looks
-            # authoritative but was computed with a cohort of one bot.
-            payload["bot"]["rank_in_cohort"] = previous.get("bot", {}).get(
-                "rank_in_cohort"
-            )
-        bot_dir = (
-            Path(self.data_dir)
-            / "assessment"
-            / target.venue.lower()
-            / target.symbol
-            / "bot"
-            / folder_name(row.nick_name, row.unique_code)
-        )
-        write_atomic(bot_dir / "assessment.json", payload)
-        self._update_assessment_index(target.venue, target.symbol, payload)
-
-        old_cham_diem = (previous or {}).get("cham_diem", {})
-        old_khuyen_nghi = (previous or {}).get("khuyen_nghi", {})
+        current = load_assessment(
+            Path(self.data_dir), target.venue, target.symbol, target.unique_code
+        ) or {}
+        new_scoring = current.get("scoring", {})
+        new_recommendation = current.get("recommendation", {})
+        old_scoring = (previous or {}).get("scoring", {})
+        old_recommendation = (previous or {}).get("recommendation", {})
         return RescoreOutcome(
             unique_code=target.unique_code,
-            assessment_path=str(bot_dir / "assessment.json"),
-            old_risk_score=old_cham_diem.get("risk_score"),
-            new_risk_score=row.risk_score,
-            old_tier=old_cham_diem.get("risk_tier"),
-            new_tier=row.risk_tier,
-            old_verdict=old_khuyen_nghi.get("ket_luan"),
-            new_verdict=row.verdict,
+            assessment_path=written,
+            old_risk_score=old_scoring.get("risk_score"),
+            new_risk_score=new_scoring.get("risk_score"),
+            old_tier=old_scoring.get("risk_tier"),
+            new_tier=new_scoring.get("risk_tier"),
+            old_verdict=old_recommendation.get("verdict"),
+            new_verdict=new_recommendation.get("verdict"),
         )
-
-    def _update_assessment_index(
-        self, venue: str, symbol: str, payload: Dict[str, Any]
-    ) -> None:
-        """Merge one bot's summary into data/assessment/index.json in place.
-
-        Never calls `assessment_store.persist()` for this: that function
-        rebuilds the *whole* index from whatever rows it is given, so handing
-        it a single-bot report would clobber the other 29 bots' entries.
-        A surgical read-modify-write keeps every other bot's summary intact.
-        """
-        from pathlib import Path
-
-        index_path = Path(self.data_dir) / "assessment" / "index.json"
-        index = read_json(index_path) or {
-            "step": "3_QC_DANH_GIA",
-            "generated_at_ms": 0,
-            "bots_assessed": 0,
-            "note": (
-                "Mỗi bot một file assessment.json: điểm chất lượng, điểm rủi ro, xếp "
-                "loại, nguyên nhân và bản khuyến nghị text đầy đủ. Text là phần "
-                "chính; các chỉ số bên dưới là bằng chứng cho text đó."
-            ),
-            "bots": [],
-        }
-        summary = {
-            "nick_name": payload["bot"]["nick_name"],
-            "unique_code": payload["bot"]["unique_code"],
-            "slot": payload["bot"]["slot"],
-            "verdict": payload["khuyen_nghi"]["ket_luan"],
-            "quality_score": payload["khuyen_nghi"]["diem_chat_luong"],
-            "risk_score": payload["cham_diem"]["risk_score"],
-            "file": None,  # filled in below with the absolute path convention
-        }
-        bots = list(index.get("bots") or [])
-        replaced = False
-        for i, entry in enumerate(bots):
-            if entry.get("unique_code") == summary["unique_code"]:
-                summary["file"] = entry.get("file")
-                bots[i] = summary
-                replaced = True
-                break
-        if not replaced:
-            bots.append(summary)
-        index["bots"] = bots
-        index["bots_assessed"] = len(bots)
-        index["generated_at_ms"] = max(
-            int(index.get("generated_at_ms") or 0), payload["generated_at_ms"]
-        )
-        write_atomic(index_path, index)
-
-    # -- a whole round ---------------------------------------------------
 
     def poll_once(self) -> List[BotChange]:
         results: List[BotChange] = []
@@ -730,13 +647,13 @@ class LivePoller:
         for i, target in enumerate(self.targets, start=1):
             self.progress(
                 f"[{i}/{total}] {target.name} ({target.unique_code}, "
-                f"{target.venue}/{target.symbol}) - đang lấy vị thế..."
+                f"{target.venue}/{target.symbol}) - fetching positions..."
             )
             try:
                 change = self.poll_bot(target)
             except Exception as exc:  # noqa: BLE001 - one bot must never kill the round
                 change = BotChange(
-                    target=target, ok=False, error=f"lỗi không lường trước: {exc}"
+                    target=target, ok=False, error=f"unexpected error: {exc}"
                 )
 
             # Gate re-scoring on new_closed_count, NOT on positions_changed:
@@ -757,7 +674,7 @@ class LivePoller:
                     # the un-resolved slot-only target this loop still holds.
                     change.rescore = self._rescore_fn(change.target)
                     if change.rescore is None:
-                        change.rescore_error = "không tạo được bản chấm điểm mới"
+                        change.rescore_error = "could not produce a new assessment"
                 except Exception as exc:  # noqa: BLE001 - scoring failure != poll failure
                     change.rescore_error = str(exc)
 
@@ -778,9 +695,9 @@ class LivePoller:
                 elapsed = time.monotonic() - started
                 remaining = max(0.0, interval_seconds - elapsed)
                 self.progress(
-                    f"Vòng quét mất {elapsed:.1f}s, chờ {remaining:.1f}s trước vòng kế tiếp"
+                    f"Round took {elapsed:.1f}s, waiting {remaining:.1f}s before the next round"
                 )
                 if stop_event.wait(remaining):
                     break
         except KeyboardInterrupt:
-            self.progress("Đã nhận Ctrl+C, dừng live poller.")
+            self.progress("Received Ctrl+C, stopping live poller.")

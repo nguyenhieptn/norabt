@@ -54,24 +54,24 @@ def _header(columns: Sequence[tuple], title: str, subtitle: str) -> List[str]:
 # ---------------------------------------------------------------- REPORT 1
 MARKET_COLUMNS = (
     ("ASSET", 12),
-    ("TƯ THẾ", 16),
-    ("CHẾ ĐỘ THỊ TRƯỜNG", 30),
-    ("THANH KHOẢN", 13),
-    ("DÒNG TIỀN", 14),
+    ("POSTURE", 16),
+    ("MARKET REGIME", 30),
+    ("LIQUIDITY", 13),
+    ("FLOW", 14),
     ("ATR%", 7),
-    ("VỊ TRÍ BIÊN", 12),
-    ("CHẤT LƯỢNG", 11),
+    ("RANGE POS", 12),
+    ("QUALITY", 11),
     ("BOT", 4),
-    ("ĐỦ ĐK", 7),
+    ("ELIGIBLE", 8),
 )
 
 
 def render_market_report(report: MarketRegimeReport, detail: bool = True) -> str:
     lines = _header(
         MARKET_COLUMNS,
-        "BƯỚC 2.1 — PHÂN TÍCH THỊ TRƯỜNG (CHẾ ĐỘ VÀ TƯ THẾ)",
-        f"{_stamp(report.generated_at_ms)} | Quan sát {report.markets_observed} thị trường | "
-        f"Đạt điều kiện giám sát {report.markets_eligible}",
+        "STEP 2.1 — MARKET ANALYSIS (REGIME AND POSTURE)",
+        f"{_stamp(report.generated_at_ms)} | Observed {report.markets_observed} markets | "
+        f"Eligible for monitoring {report.markets_eligible}",
     )
     for row in report.rows:
         lines.append(
@@ -86,20 +86,20 @@ def render_market_report(report: MarketRegimeReport, detail: bool = True) -> str
                     _cell(row.range_position_pct, 12, 0),
                     _cell(row.data_quality * 100, 11, 0),
                     _cell(row.bots_trading, 4),
-                    _cell("có" if row.eligible else "không", 7),
+                    _cell("YES" if row.eligible else "NO", 8),
                 ]
             )
         )
     lines.append("-" * len(lines[4]))
     lines.append(
-        "Phân bố tư thế: "
+        "Posture distribution: "
         + " | ".join(
             f"{k}: {v}"
             for k, v in sorted(report.posture_summary.items(), key=lambda kv: -kv[1])
         )
     )
     lines.append(
-        "Phân bố chế độ: "
+        "Regime distribution: "
         + " | ".join(
             f"{k}: {v}"
             for k, v in sorted(report.regime_summary.items(), key=lambda kv: -kv[1])
@@ -107,14 +107,14 @@ def render_market_report(report: MarketRegimeReport, detail: bool = True) -> str
     )
     if detail:
         lines.append("")
-        lines.append("DIỄN GIẢI TỪNG THỊ TRƯỜNG")
+        lines.append("PER-MARKET EXPLANATION")
         lines.append("=" * len(lines[4]))
         for row in report.rows:
             lines.append(f"[{row.symbol}/{row.venue_type}] {row.note}")
             if row.posture_evidence:
-                lines.append(f"    {row.posture} vì: {'; '.join(row.posture_evidence)}")
+                lines.append(f"    {row.posture} because: {'; '.join(row.posture_evidence)}")
             if row.missing_sources:
-                lines.append(f"    Nguồn còn thiếu: {', '.join(row.missing_sources)}")
+                lines.append(f"    Missing sources: {', '.join(row.missing_sources)}")
     return "\n".join(lines)
 
 
@@ -122,14 +122,14 @@ def render_market_report(report: MarketRegimeReport, detail: bool = True) -> str
 BOT_COLUMNS = (
     ("BOT", 22),
     ("ASSET", 11),
-    ("LỆNH", 6),
+    ("TRADES", 6),
     ("WIN%", 6),
-    ("PF SỔ", 7),
-    ("PF CHỐT", 8),
-    ("SỤT VỐN", 9),
-    ("VỊ THẾ", 7),
+    ("PF BOOK", 7),
+    ("PF CLOSE", 8),
+    ("DRAWDOWN", 9),
+    ("POSITION", 8),
     ("EXPOSURE", 11),
-    ("LỖ CHƯA CHỐT", 14),
+    ("OPEN LOSS", 14),
 )
 
 
@@ -137,9 +137,9 @@ def render_bot_report(report: CohortReport, detail: bool = True) -> str:
     rows = sorted(report.rows, key=lambda r: (r.traded_symbol, r.nick_name))
     lines = _header(
         BOT_COLUMNS,
-        "BƯỚC 2 — PHÂN TÍCH TỪNG BOT THEO ASSET ĐANG TRADE",
-        f"{_stamp(report.generated_at_ms)} | {report.distinct_bots} bot | "
-        f"Số liệu thuần quan sát, chưa phải phán quyết rủi ro",
+        "STEP 2 — PER-BOT ANALYSIS BY TRADED ASSET",
+        f"{_stamp(report.generated_at_ms)} | {report.distinct_bots} bots | "
+        f"Raw observed data, not yet a risk verdict",
     )
     current = None
     for row in rows:
@@ -164,7 +164,7 @@ def render_bot_report(report: CohortReport, detail: bool = True) -> str:
                         ),
                         9,
                     ),
-                    _cell(row.open_positions, 7),
+                    _cell(row.open_positions, 8),
                     _cell(
                         f"{row.gross_exposure / 1000:,.0f}k$"
                         if row.gross_exposure
@@ -183,29 +183,29 @@ def render_bot_report(report: CohortReport, detail: bool = True) -> str:
     lines.append("-" * len(lines[4]))
     if detail:
         lines.append("")
-        lines.append("CHI TIẾT QUAN SÁT")
+        lines.append("OBSERVATION DETAIL")
         lines.append("=" * len(lines[4]))
         for row in rows:
-            lines.append(f"[{row.nick_name}] giao dịch {row.traded_symbol}")
+            lines.append(f"[{row.nick_name}] trading {row.traded_symbol}")
             lines.append(
-                f"    Sổ lệnh: {row.trade_count} lệnh, đối soát {row.reconciliation_status}, "
-                f"đo lường {row.measurement_mode}"
+                f"    Ledger: {row.trade_count} trades, reconciliation {row.reconciliation_status}, "
+                f"measurement {row.measurement_mode}"
             )
             lines.append(
-                f"    Nền vốn: {row.capital_basis}"
+                f"    Capital basis: {row.capital_basis}"
                 + (f" ({row.capital_at_risk:,.0f} USDT)" if row.capital_at_risk else "")
             )
             if row.open_positions:
                 lines.append(
-                    f"    Vị thế: {row.open_positions} lệnh mở, "
-                    f"{row.observed_positions_count} có instId, "
-                    f"{row.inferred_positions_count} suy luận, "
-                    f"{row.positions_outside_ledger_universe} ngoài sổ lệnh"
+                    f"    Positions: {row.open_positions} open, "
+                    f"{row.observed_positions_count} with instId, "
+                    f"{row.inferred_positions_count} inferred, "
+                    f"{row.positions_outside_ledger_universe} outside the ledger universe"
                 )
             if row.loss_representativeness in ("PARTIAL", "UNREPRESENTATIVE"):
                 lines.append(
-                    f"    Lỗ hoãn nhận: {row.loss_representativeness}, "
-                    f"{row.open_loss:,.0f} USDT chưa chốt"
+                    f"    Deferred loss: {row.loss_representativeness}, "
+                    f"{row.open_loss:,.0f} USDT unrealised"
                 )
             lines.append("")
     return "\n".join(lines)
@@ -214,22 +214,35 @@ def render_bot_report(report: CohortReport, detail: bool = True) -> str:
 # ---------------------------------------------------------------- REPORT 3
 QC_COLUMNS = (
     ("#", 3),
-    ("TÊN BOT", 21),
+    ("BOT NAME", 21),
     ("ASSET", 10),
     ("TRADE", 6),
     ("WIN%", 5),
-    ("PF SỔ", 6),
-    ("PF CHỐT", 8),
-    ("SỤT VỐN", 8),
-    ("P95 ĐUÔI", 9),
-    ("RỦI RO", 7),
-    ("CHẤT LG", 8),
-    ("XẾP LOẠI", 14),
-    ("NHẬN XÉT", 46),
+    ("PF BOOK", 7),
+    ("PF CLOSE", 8),
+    ("DRAWDOWN", 8),
+    ("P95 TAIL", 9),
+    ("RISK", 7),
+    ("QUALITY", 8),
+    # Widened from 14: the two-axis labels ("DRAWDOWN: HIGH · QUALITY: GOOD",
+    # 31 chars) are longer than the old 4 single-word buckets ever were.
+    ("VERDICT", 32),
+    ("NOTES", 46),
 )
 
-# Ordered worst first, which is the order the table is read in.
-VERDICT_ORDER = {"NGUY HIỂM": 0, "TIỀM ẨN": 1, "AN TOÀN": 2, "TIỀM NĂNG": 3}
+# Ordered worst first, which is the order the table is read in. "Worst" here
+# means "needs a human look the soonest": hidden risk first (neither axis's
+# number can be trusted), then the high-drawdown states (the axis the
+# out-of-sample validation actually supports), then the low-drawdown states.
+# Anything not listed (INSUFFICIENT EVIDENCE, or a stray/legacy value) sorts last
+# via the `.get(..., 9)` default at each call site below.
+VERDICT_ORDER = {
+    "HIDDEN RISK": 0,
+    "DRAWDOWN: HIGH · QUALITY: WEAK": 1,
+    "DRAWDOWN: HIGH · QUALITY: GOOD": 2,
+    "DRAWDOWN: LOW · QUALITY: WEAK": 3,
+    "DRAWDOWN: LOW · QUALITY: GOOD": 4,
+}
 
 
 def _wrap(text: str, width: int, indent: str) -> List[str]:
@@ -251,9 +264,9 @@ def _wrap(text: str, width: int, indent: str) -> List[str]:
 def render_qc_ranking(report: CohortReport) -> str:
     lines = _header(
         QC_COLUMNS,
-        "BƯỚC 3 — CHẤM ĐIỂM VÀ XẾP LOẠI BOT (QC CORE)",
-        f"{_stamp(report.generated_at_ms)} | {report.distinct_bots} bot | "
-        f"RỦI RO càng thấp càng an toàn · CHẤT LƯỢNG càng cao càng tốt",
+        "STEP 3 — BOT SCORING AND VERDICT (QC CORE)",
+        f"{_stamp(report.generated_at_ms)} | {report.distinct_bots} bots | "
+        f"RISK: lower is safer · QUALITY: higher is better",
     )
     ordered = sorted(
         report.rows,
@@ -281,13 +294,13 @@ def render_qc_ranking(report: CohortReport) -> str:
                     _cell(f"{row.traded_symbol}/{row.venue_type}", 10),
                     _cell(row.trade_count, 6),
                     _cell(row.win_rate, 5, 0),
-                    _cell(row.profit_factor, 6, 2),
+                    _cell(row.profit_factor, 7, 2),
                     _cell(row.marked_profit_factor, 8, 2),
                     _cell(drawdown, 8),
                     _cell(tail, 9),
                     _cell(row.risk_score, 7, 1),
                     _cell(row.quality_score, 8, 1),
-                    _cell(row.verdict, 14),
+                    _cell(row.verdict, 32),
                     _cell(row.verdict_reason, 46),
                 ]
             )
@@ -295,26 +308,26 @@ def render_qc_ranking(report: CohortReport) -> str:
         # The reasons are the point of the row, so they wrap rather than truncate.
         computed = computed_summary_vi(row)
         if computed:
-            lines.extend(_wrap(f"↳ tính toán: {computed}", width - 6, "     "))
+            lines.extend(_wrap(f"↳ computed: {computed}", width - 6, "     "))
         cause = explain_vi(row)
         if cause:
-            lines.extend(_wrap(f"↳ nguyên nhân: {cause}", width - 6, "     "))
+            lines.extend(_wrap(f"↳ cause: {cause}", width - 6, "     "))
         if row.hidden_risk_flags:
             lines.extend(
                 _wrap(
-                    "↳ rủi ro bị che: " + "; ".join(row.hidden_risk_flags),
+                    "↳ hidden risk: " + "; ".join(row.hidden_risk_flags),
                     width - 6,
                     "     ",
                 )
             )
         if row.recommended_action:
-            lines.append(f"     ↳ đề xuất: {row.recommended_action}")
+            lines.append(f"     ↳ recommendation: {row.recommended_action}")
     lines.append("-" * width)
     verdicts: dict = {}
     for row in report.rows:
         verdicts[row.verdict or "?"] = verdicts.get(row.verdict or "?", 0) + 1
     lines.append(
-        "Phân loại: "
+        "Verdicts: "
         + " | ".join(
             f"{k}: {v}"
             for k, v in sorted(
@@ -323,14 +336,14 @@ def render_qc_ranking(report: CohortReport) -> str:
         )
     )
     lines.append(
-        "Phân bố hạng rủi ro: "
+        "Risk tier distribution: "
         + " | ".join(
             f"{TIER_VI.get(k, k)}: {v}"
             for k, v in sorted(report.tier_summary.items(), key=lambda kv: -kv[1])
         )
     )
     lines.append("")
-    lines.append("PHIẾU ĐÁNH GIÁ TỪNG BOT")
+    lines.append("PER-BOT SCORECARD")
     lines.append("=" * width)
     for index, row in enumerate(ordered, 1):
         lines.extend(_bot_card(index, row, width))
@@ -350,93 +363,93 @@ def _bot_card(index: int, row, width: int) -> List[str]:
 
     lines = [
         f"[{index}] {row.nick_name} — {row.traded_symbol}/{row.venue_type}",
-        f"     XẾP LOẠI: {row.verdict}"
-        f"   ·   ĐIỂM NGON: {num(row.quality_score, 1)}/100"
-        f"   ·   ĐIỂM RỦI RO: {num(row.risk_score, 1)}/100 (càng thấp càng an toàn)"
-        f"   ·   ĐỀ XUẤT: {row.recommended_action}",
-        f"     Độ tin cậy của đánh giá: {num(row.confidence, 0)}%"
-        f" · đối soát sổ lệnh {row.reconciliation_status}"
-        f" · chế độ đo {row.measurement_mode}",
+        f"     VERDICT: {row.verdict}"
+        f"   ·   QUALITY SCORE: {num(row.quality_score, 1)}/100"
+        f"   ·   RISK SCORE: {num(row.risk_score, 1)}/100 (lower is safer)"
+        f"   ·   RECOMMENDATION: {row.recommended_action}",
+        f"     Assessment confidence: {num(row.confidence, 0)}%"
+        f" · ledger reconciliation {row.reconciliation_status}"
+        f" · measurement mode {row.measurement_mode}",
         "",
     ]
 
     # 1. What the bot actually is.
     book = []
     if row.trade_count is not None:
-        book.append(f"{row.trade_count} lệnh đã chốt")
+        book.append(f"{row.trade_count} closed trades")
     if row.win_rate is not None:
-        book.append(f"thắng {row.win_rate:.0f}%")
+        book.append(f"win rate {row.win_rate:.0f}%")
     if row.profit_factor is not None:
         book.append(f"profit factor {row.profit_factor:.2f}")
     if row.total_pnl is not None:
-        book.append(f"tổng lãi/lỗ {row.total_pnl:,.0f} USDT")
+        book.append(f"total PnL {row.total_pnl:,.0f} USDT")
     if row.sharpe_ratio is not None:
         book.append(f"Sharpe {row.sharpe_ratio:.2f}")
     if row.max_drawdown_pct is not None:
-        book.append(f"sụt vốn sâu nhất {row.max_drawdown_pct:.1f}%")
-    lines.extend(_wrap("THÔNG SỐ CỦA BOT: " + " · ".join(book), width - 6, "     "))
+        book.append(f"max drawdown {row.max_drawdown_pct:.1f}%")
+    lines.extend(_wrap("BOT STATS: " + " · ".join(book), width - 6, "     "))
 
     holding = []
     if row.open_positions:
-        holding.append(f"{row.open_positions} vị thế đang mở")
+        holding.append(f"{row.open_positions} open positions")
     if row.gross_exposure:
         holding.append(f"exposure {row.gross_exposure:,.0f} USDT")
     if row.leverage:
-        holding.append(f"đòn bẩy {row.leverage:.0f}x")
+        holding.append(f"leverage {row.leverage:.0f}x")
     if row.open_loss:
-        holding.append(f"lỗ chưa chốt {row.open_loss:,.0f} USDT")
+        holding.append(f"unrealised loss {row.open_loss:,.0f} USDT")
     if row.capital_at_risk:
-        holding.append(f"vốn tham chiếu {row.capital_at_risk:,.0f} USDT")
+        holding.append(f"reference capital {row.capital_at_risk:,.0f} USDT")
     if holding:
-        lines.extend(_wrap("ĐANG NẮM GIỮ: " + " · ".join(holding), width - 6, "     "))
+        lines.extend(_wrap("CURRENTLY HOLDING: " + " · ".join(holding), width - 6, "     "))
 
     # 2. What the simulation says could happen next.
     if row.mc_iterations and row.mc_horizon:
         sim = (
-            f"CHẠY MÔ PHỎNG {row.mc_iterations:,} kịch bản × {row.mc_horizon} lệnh "
-            f"(bootstrap từ chính sổ lệnh đã chốt của bot): "
-            f"trung vị lãi {pct(row.profit_pct_p50)} trên vốn, "
-            f"kịch bản tốt (p95) {pct(row.profit_pct_p95)}, "
-            f"kịch bản xấu (p05) {pct(row.profit_pct_p05)}, "
-            f"XẤU NHẤT {pct(row.profit_pct_worst)}. "
-            f"Sụt vốn P95 {prob(row.p95_max_drawdown)}, xấu nhất "
+            f"RAN {row.mc_iterations:,} SIMULATIONS × {row.mc_horizon} trades "
+            f"(bootstrapped from the bot's own closed book): "
+            f"median profit {pct(row.profit_pct_p50)} on capital, "
+            f"good scenario (p95) {pct(row.profit_pct_p95)}, "
+            f"bad scenario (p05) {pct(row.profit_pct_p05)}, "
+            f"WORST CASE {pct(row.profit_pct_worst)}. "
+            f"P95 drawdown {prob(row.p95_max_drawdown)}, worst "
             f"{prob(row.worst_drawdown)}. "
-            f"Xác suất thua lỗ {prob(row.p_loss_after_horizon)}, "
-            f"xác suất cháy tài khoản {prob(row.p_ruin)}."
+            f"Probability of loss {prob(row.p_loss_after_horizon)}, "
+            f"probability of ruin {prob(row.p_ruin)}."
         )
         lines.extend(_wrap(sim, width - 6, "     "))
 
     # 3. Whether the edge behind those numbers is real.
     if row.psr is not None:
         parts = [
-            f"KIỂM ĐỊNH THỐNG KÊ: xác suất Sharpe thật lớn hơn 0 là "
+            f"STATISTICAL TEST: probability the true Sharpe is above 0 is "
             f"{row.psr * 100:.1f}%"
         ]
         if not row.inference_reliable:
             parts.append(
-                " (con số này không đáng tin vì vài lệnh đơn lẻ đang chi phối "
-                "độ lệch và đuôi phân phối)"
+                " (this figure is not reliable because a few individual trades "
+                "dominate the skew and tail of the distribution)"
             )
         if row.deflated_sharpe is not None and row.selection_trials:
             parts.append(
-                f"; sau khi trừ việc bot này được chọn là con tốt nhất trong "
-                f"{row.selection_trials} ứng viên cùng asset, xác suất còn "
-                f"{row.deflated_sharpe * 100:.1f}%"
+                f"; after accounting for this bot being chosen as the best of "
+                f"{row.selection_trials} candidates for the same asset, the probability "
+                f"drops to {row.deflated_sharpe * 100:.1f}%"
             )
         if row.min_track_record_trades and row.trade_count:
             need = row.min_track_record_trades
             have = row.trade_count
             parts.append(
-                f". Cần tối thiểu {need:,.0f} lệnh để tin được thành tích này, "
-                f"bot đang có {have}"
-                + (" — đã đủ" if have >= need else f" — còn thiếu {need - have:,.0f}")
+                f". Needs at least {need:,.0f} trades for this track record to be "
+                f"trustworthy, the bot currently has {have}"
+                + (" — enough" if have >= need else f" — {need - have:,.0f} short")
             )
         lines.extend(_wrap("".join(parts), width - 6, "     "))
 
     # 4. The recommendation in prose. This is what a trading agent reads; the
     # numbers above are the attachment, not the message.
     lines.append("")
-    lines.append("     ĐÁNH GIÁ VÀ KHUYẾN NGHỊ:")
+    lines.append("     ASSESSMENT AND RECOMMENDATION:")
     previous_was_bullet = False
     for paragraph in recommendation_vi(row):
         if paragraph.startswith("• "):
@@ -456,15 +469,15 @@ def _bot_card(index: int, row, width: int) -> List[str]:
         previous_was_bullet = False
 
     lines.extend(
-        _wrap(f"VÌ SAO XẾP LOẠI NÀY: {row.verdict_reason}", width - 6, "     ")
+        _wrap(f"WHY THIS VERDICT: {row.verdict_reason}", width - 6, "     ")
     )
     cause = explain_vi(row)
     if cause:
-        lines.extend(_wrap(f"VÌ SAO RỦI RO: {cause}", width - 6, "     "))
+        lines.extend(_wrap(f"WHY THIS RISK: {cause}", width - 6, "     "))
     if row.hidden_risk_flags:
         lines.extend(
             _wrap(
-                "RỦI RO BỊ CHE SAU SỐ ĐẸP: " + "; ".join(row.hidden_risk_flags),
+                "HIDDEN RISK BEHIND THE GOOD NUMBERS: " + "; ".join(row.hidden_risk_flags),
                 width - 6,
                 "     ",
             )
@@ -486,14 +499,14 @@ def render_text(report: CohortReport, detail: bool = True) -> str:
 def render_gaps(report: CohortReport) -> str:
     if not report.gaps:
         return ""
-    lines = ["THIẾU DỮ LIỆU — VIỆC CẦN THU THẬP", "=" * 100]
+    lines = ["MISSING DATA — WORK TO COLLECT", "=" * 100]
     for gap in report.gaps:
         who = (
-            f" | Ảnh hưởng: {', '.join(gap.affected_bots)}" if gap.affected_bots else ""
+            f" | Affects: {', '.join(gap.affected_bots)}" if gap.affected_bots else ""
         )
         lines.append(f"[{gap.priority:6s}] {gap.scope} — {gap.evidence}")
         lines.append(f"    {gap.detail}")
-        lines.append(f"    Mở khóa: {', '.join(gap.unlocks) or '—'}{who}")
+        lines.append(f"    Unlocks: {', '.join(gap.unlocks) or '—'}{who}")
     return "\n".join(lines)
 
 
@@ -508,18 +521,18 @@ __all__ = [
 
 
 BIAS_VI = {
-    "LONG_ONLY": "chỉ long",
-    "SHORT_ONLY": "chỉ short",
-    "LONG_TILTED": "nghiêng long",
-    "SHORT_TILTED": "nghiêng short",
-    "TWO_WAY": "hai chiều",
-    "UNKNOWN": "chưa rõ",
+    "LONG_ONLY": "long only",
+    "SHORT_ONLY": "short only",
+    "LONG_TILTED": "long tilted",
+    "SHORT_TILTED": "short tilted",
+    "TWO_WAY": "two-way",
+    "UNKNOWN": "unclear",
 }
 STYLE_VI = {
-    "TREND_FOLLOWING": "thuận xu hướng",
-    "MEAN_REVERSION": "nghịch xu hướng",
-    "MIXED": "pha trộn",
-    "UNKNOWN": "chưa đủ dữ liệu",
+    "TREND_FOLLOWING": "trend following",
+    "MEAN_REVERSION": "mean reversion",
+    "MIXED": "mixed",
+    "UNKNOWN": "insufficient data",
 }
 
 
@@ -527,36 +540,36 @@ def render_pair_report(report, detail: bool = True) -> str:
     """Step 2, one block per asset: the market, then the pair that trades it."""
     lines = [
         "=" * 118,
-        "BƯỚC 2.2 — PHÂN TÍCH VÀ MÔ PHỎNG TỪNG BOT",
-        f"{_stamp(report.generated_at_ms)} | {report.slots} asset | "
-        f"{report.bots_evaluated} bot phân tích được"
-        + (f", {report.bots_failed} bot lỗi" if report.bots_failed else "")
-        + " | Số liệu quan sát, chưa phải phán quyết rủi ro",
+        "STEP 2.2 — PER-BOT ANALYSIS AND SIMULATION",
+        f"{_stamp(report.generated_at_ms)} | {report.slots} assets | "
+        f"{report.bots_evaluated} bots analyzed"
+        + (f", {report.bots_failed} bots failed" if report.bots_failed else "")
+        + " | Observed data, not yet a risk verdict",
         "=" * 118,
     ]
 
     # Two tables, because they answer different questions: what the bot did,
     # and what could happen next. One combined row carried twenty columns and
     # stopped being readable.
-    perf_width = 135
+    perf_width = 140
     lines += [
         "",
-        f"BẢNG A — HIỆU SUẤT ĐÃ THỰC HIỆN ({report.slots} ASSET · "
-        f"{report.bots_evaluated} BOT)",
+        f"TABLE A — REALIZED PERFORMANCE ({report.slots} ASSETS · "
+        f"{report.bots_evaluated} BOTS)",
         "-" * perf_width,
         _cell("ASSET", 10)
-        + _cell("VAI", 10)
+        + _cell("ROLE", 10)
         + _cell("BOT", 20)
         + _cell("TRADE", 6)
         + _cell("WIN%", 5)
         + _cell("PROFIT", 12)
-        + _cell("PF SỔ", 6)
-        + _cell("PF CHỐT", 8)
+        + _cell("PF BOOK", 8)
+        + _cell("PF CLOSE", 9)
         + _cell("MDD", 8)
         + _cell("SHARPE", 7)
-        + _cell("LỖ MỞ", 8)
-        + _cell("HƯỚNG", 14)
-        + "KIỂU VÀO",
+        + _cell("OPEN LOSS", 10)
+        + _cell("DIRECTION", 14)
+        + "ENTRY STYLE",
         "-" * perf_width,
     ]
     for block in report.blocks:
@@ -567,7 +580,7 @@ def render_pair_report(report, detail: bool = True) -> str:
                     _cell(asset_cell, 10)
                     + _cell(bot.role, 10)
                     + _cell(bot.nick_name, 20)
-                    + f"LỖI: {bot.error}"
+                    + f"ERROR: {bot.error}"
                 )
                 continue
             dd = (
@@ -585,39 +598,39 @@ def render_pair_report(report, detail: bool = True) -> str:
                 + _cell(
                     f"{bot.ledger_pnl:,.0f}" if bot.ledger_pnl is not None else "—", 12
                 )
-                + _cell(bot.profit_factor, 6, 2)
-                + _cell(bot.marked_profit_factor, 8, 2)
+                + _cell(bot.profit_factor, 8, 2)
+                + _cell(bot.marked_profit_factor, 9, 2)
                 + _cell(dd, 8)
                 + _cell(bot.sharpe_ratio, 7, 2)
-                + _cell(f"{bot.open_loss / 1000:,.0f}k$" if bot.open_loss else "0", 8)
+                + _cell(f"{bot.open_loss / 1000:,.0f}k$" if bot.open_loss else "0", 10)
                 + _cell(BIAS_VI.get(bot.directional_bias, bot.directional_bias), 14)
                 + STYLE_VI.get(bot.entry_style, bot.entry_style)
             )
     lines += [
         "-" * perf_width,
-        "PROFIT = PnL sổ đã chốt · PF CHỐT = profit factor nếu chốt hết vị thế đang "
-        "mở · MDD có dấu * = vượt vốn ghi nhận nên là sàn",
+        "PROFIT = closed-book PnL · PF CLOSE = profit factor if all open positions "
+        "were closed now · MDD marked with * exceeds the recorded capital, so it is a floor",
     ]
 
-    mc_width = 158
+    mc_width = 160
     lines += [
         "",
-        "BẢNG B — MÔ PHỎNG MONTE CARLO VÀ ĐÁNH GIÁ RỦI RO",
-        "10.000 kịch bản/bot · stationary bootstrap (Politis-Romano 1994) · mỗi "
-        "kịch bản replay đúng số lệnh "
-        "của chính bot · chỉ lệnh ĐÃ CHỐT",
+        "TABLE B — MONTE CARLO SIMULATION AND RISK ASSESSMENT",
+        "10,000 scenarios/bot · stationary bootstrap (Politis-Romano 1994) · each "
+        "scenario replays the bot's own exact trade count "
+        "· CLOSED trades only",
         "-" * mc_width,
         _cell("ASSET", 10)
         + _cell("BOT", 20)
-        + _cell("LN xấu nhất", 12)
-        + _cell("LN t.vị", 9)
-        + _cell("LN p95", 9)
+        + _cell("PROFIT WORST", 13)
+        + _cell("PFT MED", 9)
+        + _cell("PFT P95", 9)
         + _cell("CVaR95", 9)
-        + _cell("DD t.vị", 9)
-        + _cell("DD p95", 8)
+        + _cell("DD MEDIAN", 10)
+        + _cell("DD P95", 8)
         + _cell("MAR", 7)
-        + _cell("P(lãi)", 7)
-        + _cell("P(cháy)", 8)
+        + _cell("P(WIN)", 7)
+        + _cell("P(RUIN)", 8)
         + _cell("PSR", 7)
         + _cell("DSR", 7)
         + "MinTRL",
@@ -631,20 +644,20 @@ def render_pair_report(report, detail: bool = True) -> str:
             prob = lambda v: "—" if v is None else f"{v:.0f}%"  # noqa: E731
             prb = lambda v: "—" if v is None else f"{v:.3f}"  # noqa: E731
             trl = (
-                f"{bot.min_track_record_trades:,.0f} (có {bot.mc_sample_size})"
+                f"{bot.min_track_record_trades:,.0f} (of {bot.mc_sample_size})"
                 if bot.min_track_record_trades
                 else "—"
             )
             lines.append(
                 _cell(f"{block.venue_type}/{block.symbol}" if not position else "", 10)
                 + _cell(bot.nick_name, 20)
-                + _cell(pct(bot.mc_profit_worst_pct), 12)
+                + _cell(pct(bot.mc_profit_worst_pct), 13)
                 + _cell(pct(bot.mc_profit_p50_pct), 9)
                 + _cell(pct(bot.mc_profit_p95_pct), 9)
                 + _cell(
                     pct(-bot.cvar_95_pct) if bot.cvar_95_pct is not None else "—", 9
                 )
-                + _cell(prob(bot.mc_median_drawdown), 9)
+                + _cell(prob(bot.mc_median_drawdown), 10)
                 + _cell(prob(bot.mc_p95_drawdown), 8)
                 + _cell(
                     f"{bot.mar_ratio_median:.1f}"
@@ -660,45 +673,46 @@ def render_pair_report(report, detail: bool = True) -> str:
             )
     lines += [
         "-" * mc_width,
-        f"Tổng: {report.slots} asset · {report.bots_evaluated} bot"
-        + (f" · {report.bots_failed} bot lỗi" if report.bots_failed else ""),
-        "LN = lợi nhuận trên vốn · CVaR95 = lỗ trung bình trong 5% kịch bản tệ nhất "
-        "· MAR = lợi nhuận chia sụt vốn",
-        "PSR = xác suất Sharpe thật > 0 sau khi tính độ dài mẫu, độ lệch và đuôi dày; "
-        "dấu ? = mô men do vài lệnh đơn lẻ chi phối nên không đáng tin",
-        "DSR = PSR sau khi trừ việc bot được chọn là con tốt nhất trong pool ứng viên "
-        "· MinTRL = số lệnh tối thiểu để Sharpe đủ tin ở mức 95%",
+        f"Total: {report.slots} assets · {report.bots_evaluated} bots"
+        + (f" · {report.bots_failed} bots failed" if report.bots_failed else ""),
+        "PROFIT = profit on capital · CVaR95 = average loss in the worst 5% of scenarios "
+        "· MAR = profit divided by drawdown",
+        "PSR = probability the true Sharpe is > 0 after accounting for sample length, skew "
+        "and fat tails; a ? mark means the moments are dominated by a few individual trades "
+        "and are not reliable",
+        "DSR = PSR after accounting for this bot being chosen as the best of a candidate pool "
+        "· MinTRL = minimum trades needed for the Sharpe to be trustworthy at 95% confidence",
         "(Bailey & López de Prado 2012, 2014)",
         "",
-        "CHI TIẾT TỪNG ASSET",
+        "PER-ASSET DETAIL",
     ]
 
     for block in report.blocks:
         lines.append("")
         market = (
             f"{block.market_posture} · {block.market_trend}/{block.market_volatility}"
-            f" · thanh khoản {block.market_liquidity}"
-            f" · chất lượng dữ liệu {block.market_quality:.2f}"
+            f" · liquidity {block.market_liquidity}"
+            f" · data quality {block.market_quality:.2f}"
             if block.market_available
-            else f"KHÔNG DỰNG ĐƯỢC THỊ TRƯỜNG: {block.market_error}"
+            else f"COULD NOT BUILD MARKET: {block.market_error}"
         )
         lines.append(f"── {block.venue_type}/{block.symbol} ── {market}")
         if block.market_evidence:
-            lines.append(f"   Vì: {'; '.join(block.market_evidence)}")
+            lines.append(f"   Because: {'; '.join(block.market_evidence)}")
 
         lines.append(
             "   "
-            + _cell("VAI", 10)
-            + _cell("BOT", 21)
-            + _cell("lệnh", 6)
+            + _cell("role", 10)
+            + _cell("bot", 21)
+            + _cell("trades", 7)
             + _cell("/asset", 7)
             + _cell("win%", 6)
-            + _cell("PF sổ", 7)
-            + _cell("PF chốt", 8)
-            + _cell("sụt vốn", 9)
-            + _cell("vị thế", 7)
-            + _cell("lỗ mở", 9)
-            + "CHIẾN LƯỢC"
+            + _cell("pf book", 8)
+            + _cell("pf close", 9)
+            + _cell("drawdown", 9)
+            + _cell("position", 9)
+            + _cell("open loss", 10)
+            + "STRATEGY"
         )
         for bot in block.bots:
             if bot.error:
@@ -706,7 +720,7 @@ def render_pair_report(report, detail: bool = True) -> str:
                     "   "
                     + _cell(bot.role, 10)
                     + _cell(bot.nick_name, 21)
-                    + f"LỖI: {bot.error}"
+                    + f"ERROR: {bot.error}"
                 )
                 continue
             dd = (
@@ -718,7 +732,7 @@ def render_pair_report(report, detail: bool = True) -> str:
             strategy = (
                 f"{BIAS_VI.get(bot.directional_bias, bot.directional_bias)}, "
                 f"{STYLE_VI.get(bot.entry_style, bot.entry_style)}"
-                f" · phủ pha {bot.phase_coverage_pct:.0f}%"
+                f" · phase coverage {bot.phase_coverage_pct:.0f}%"
                 if bot.phase_coverage_pct is not None
                 else BIAS_VI.get(bot.directional_bias, bot.directional_bias)
             )
@@ -726,14 +740,14 @@ def render_pair_report(report, detail: bool = True) -> str:
                 "   "
                 + _cell(bot.role, 10)
                 + _cell(bot.nick_name, 21)
-                + _cell(bot.trade_count, 6)
+                + _cell(bot.trade_count, 7)
                 + _cell(bot.trades_on_asset, 7)
                 + _cell(bot.win_rate, 6, 0)
-                + _cell(bot.profit_factor, 7, 2)
-                + _cell(bot.marked_profit_factor, 8, 2)
+                + _cell(bot.profit_factor, 8, 2)
+                + _cell(bot.marked_profit_factor, 9, 2)
                 + _cell(dd, 9)
-                + _cell(bot.open_positions, 7)
-                + _cell(f"{bot.open_loss / 1000:,.0f}k$" if bot.open_loss else "0", 9)
+                + _cell(bot.open_positions, 9)
+                + _cell(f"{bot.open_loss / 1000:,.0f}k$" if bot.open_loss else "0", 10)
                 + strategy
             )
 
@@ -742,27 +756,27 @@ def render_pair_report(report, detail: bool = True) -> str:
                 if bot.error or not bot.phase_rows:
                     continue
                 num = lambda v, d=2: "—" if v is None else f"{v:,.{d}f}"  # noqa: E731
-                lines.append(f"   · {bot.nick_name} — thông số đầy đủ:")
+                lines.append(f"   · {bot.nick_name} — full stats:")
                 lines.append(
-                    "       hiệu suất:      "
-                    f"kỳ vọng {num(bot.expectancy)}/lệnh"
+                    "       PERFORMANCE:      "
+                    f"expectancy {num(bot.expectancy)}/trade"
                     f" · payoff {num(bot.payoff_ratio)}"
-                    f" · lãi TB {num(bot.average_win)} / lỗ TB {num(bot.average_loss)}"
-                    f" · tổng PnL {num(bot.ledger_pnl, 0)}"
+                    f" · avg win {num(bot.average_win)} / avg loss {num(bot.average_loss)}"
+                    f" · total PnL {num(bot.ledger_pnl, 0)}"
                 )
                 lines.append(
-                    "       hiệu chỉnh RR:  "
+                    "       RISK-ADJUSTED:    "
                     f"Sharpe {num(bot.sharpe_ratio)}"
                     f" · Sortino {num(bot.sortino_ratio)}"
                     f" · Calmar {num(bot.calmar_ratio)}"
-                    f" · hồi phục {num(bot.recovery_factor)}"
+                    f" · recovery {num(bot.recovery_factor)}"
                 )
                 lines.append(
-                    "       nhịp giao dịch: "
-                    f"{num(bot.trades_per_day)} lệnh/ngày"
-                    f" · giữ lệnh trung vị {num(bot.median_hold_minutes, 0)} phút"
-                    f" · chuỗi thắng dài nhất {bot.max_win_streak}"
-                    f" · chuỗi thua dài nhất {bot.max_loss_streak}"
+                    "       CADENCE:          "
+                    f"{num(bot.trades_per_day)} trades/day"
+                    f" · median hold time {num(bot.median_hold_minutes, 0)} min"
+                    f" · longest win streak {bot.max_win_streak}"
+                    f" · longest loss streak {bot.max_loss_streak}"
                 )
                 ci = (
                     f"[{bot.mean_pnl_ci[0]:,.0f}; {bot.mean_pnl_ci[1]:,.0f}]"
@@ -770,39 +784,39 @@ def render_pair_report(report, detail: bool = True) -> str:
                     else "—"
                 )
                 lines.append(
-                    "       phân phối lệnh: "
-                    f"trung vị {num(bot.pnl_median, 0)}"
-                    f" · độ lệch chuẩn {num(bot.pnl_std, 0)}"
+                    "       DISTRIBUTION:     "
+                    f"median {num(bot.pnl_median, 0)}"
+                    f" · std dev {num(bot.pnl_std, 0)}"
                     f" · skew {num(bot.pnl_skew)}"
                     f" · kurtosis {num(bot.pnl_kurtosis)}"
                     f" · p05 {num(bot.pnl_p05, 0)} / p95 {num(bot.pnl_p95, 0)}"
-                    f" · KTC95 trung bình {ci}"
+                    f" · mean 95% CI {ci}"
                 )
                 lines.append(
-                    "       vốn và sổ:      "
-                    f"vốn tham chiếu {num(bot.capital_at_risk, 0)}"
+                    "       CAPITAL & LEDGER: "
+                    f"reference capital {num(bot.capital_at_risk, 0)}"
                     f" ({bot.capital_basis})"
-                    f" · sổ phủ {num(bot.ledger_coverage_days, 0)}/"
-                    f"{bot.declared_lead_days or '—'} ngày dẫn"
-                    f" · đối soát {bot.reconciliation}"
-                    f" · chế độ đo {bot.measurement_mode}"
+                    f" · ledger covers {num(bot.ledger_coverage_days, 0)}/"
+                    f"{bot.declared_lead_days or '—'} lead days"
+                    f" · reconciliation {bot.reconciliation}"
+                    f" · measurement mode {bot.measurement_mode}"
                 )
                 if bot.stress_verdict:
                     lines.append(
-                        "       stress tất định:"
-                        f" biến động ×2 {num(bot.stress_volatility_2x, 0)}"
+                        "       STRESS TEST:     "
+                        f" volatility ×2 {num(bot.stress_volatility_2x, 0)}"
                         f" · spread ×3 {num(bot.stress_spread_3x, 0)}"
-                        f" · thanh khoản ½ {num(bot.stress_liquidity_half, 0)}"
+                        f" · liquidity ½ {num(bot.stress_liquidity_half, 0)}"
                         f" → {bot.stress_verdict}"
                     )
-                lines.append("     theo pha thị trường:")
+                lines.append("     by market phase:")
                 for row in bot.phase_rows:
                     win = row.get("win_rate")
                     share = row.get("profit_share_pct")
                     lines.append(
                         "       "
                         + _cell(phase_vi(row["phase"]), 16)
-                        + _cell(f"{row['trades']} lệnh", 10)
+                        + _cell(f"{row['trades']} trades", 10)
                         + _cell(f"win {win:.0f}%" if win is not None else "win —", 9)
                         + _cell(f"PnL {row['total_pnl']:,.0f}", 18)
                         + (
@@ -810,62 +824,62 @@ def render_pair_report(report, detail: bool = True) -> str:
                             # still hold a lot of; saying "chiếm x% lợi nhuận"
                             # there would read as if the phase made money.
                             (
-                                f"góp {share:.0f}% lãi gộp"
-                                + (" nhưng lỗ ròng" if row["total_pnl"] < 0 else "")
+                                f"{share:.0f}% of gross profit"
+                                + (" but net losing" if row["total_pnl"] < 0 else "")
                             )
                             if share is not None
-                            else "không có lãi gộp"
+                            else "no gross profit"
                         )
                     )
                 if bot.mc_iterations:
                     draws = bot.mc_iterations * (bot.mc_horizon or 0)
                     lines.append(
-                        f"       Monte Carlo: {bot.mc_iterations:,} kịch bản × "
-                        f"{bot.mc_horizon} lệnh = {draws:,} lượt bốc"
-                        + "  · phạm vi: chỉ lệnh ĐÃ CHỐT"
+                        f"       Monte Carlo: {bot.mc_iterations:,} scenarios × "
+                        f"{bot.mc_horizon} trades = {draws:,} draws"
+                        + "  · scope: CLOSED trades only"
                         + (
-                            f", bot đang giữ {bot.open_loss / 1000:,.0f}k$ lỗ chưa "
-                            "chốt nằm ngoài mô phỏng"
+                            f", the bot is holding {bot.open_loss / 1000:,.0f}k$ of "
+                            "unrealised loss outside the simulation"
                             if bot.mc_deferred_loss_bias and bot.open_loss
                             else ""
                         )
                     )
                     fmt = lambda v: "—" if v is None else f"{v:+.1f}%"  # noqa: E731
                     lines.append(
-                        "       lợi nhuận/vốn:  "
-                        + f"xấu nhất {fmt(bot.mc_profit_worst_pct)}"
+                        "       PROFIT/CAPITAL:   "
+                        + f"worst {fmt(bot.mc_profit_worst_pct)}"
                         + f" · p05 {fmt(bot.mc_profit_p05_pct)}"
-                        + f" · trung vị {fmt(bot.mc_profit_p50_pct)}"
+                        + f" · median {fmt(bot.mc_profit_p50_pct)}"
                         + f" · p95 {fmt(bot.mc_profit_p95_pct)}"
-                        + f" · tốt nhất {fmt(bot.mc_profit_best_pct)}"
+                        + f" · best {fmt(bot.mc_profit_best_pct)}"
                     )
                     lines.append(
-                        "       sụt vốn:        " + f"P95 {bot.mc_p95_drawdown:.1f}%"
+                        "       DRAWDOWN:         " + f"P95 {bot.mc_p95_drawdown:.1f}%"
                         if bot.mc_p95_drawdown is not None
-                        else "       sụt vốn:        —"
+                        else "       DRAWDOWN:         —"
                     )
                     lines[-1] += (
-                        f" · xấu nhất {bot.mc_worst_drawdown:.1f}%"
+                        f" · worst {bot.mc_worst_drawdown:.1f}%"
                         if bot.mc_worst_drawdown is not None
                         else ""
                     )
                     lines[-1] += (
-                        f" · xác suất cháy {bot.mc_p_ruin:.1f}%"
+                        f" · probability of ruin {bot.mc_p_ruin:.1f}%"
                         if bot.mc_p_ruin is not None
                         else ""
                     )
                     lines[-1] += (
-                        f" · xác suất lỗ {bot.mc_p_loss:.1f}%"
+                        f" · probability of loss {bot.mc_p_loss:.1f}%"
                         if bot.mc_p_loss is not None
                         else ""
                     )
                 if bot.entry_style_evidence:
                     lines.append(
-                        f"       căn cứ kiểu vào lệnh: {bot.entry_style_evidence}"
+                        f"       entry style basis: {bot.entry_style_evidence}"
                     )
                 if bot.untested_phases:
                     lines.append(
-                        "       pha thị trường đã có nhưng bot chưa từng trải: "
+                        "       market phases that exist but this bot has never traded through: "
                         + ", ".join(phase_vi(p) for p in bot.untested_phases)
                     )
 
@@ -874,7 +888,7 @@ def render_pair_report(report, detail: bool = True) -> str:
 
     lines.append("")
     lines.append("-" * 118)
-    lines.append("* = mức sụt vốn vượt vốn ghi nhận tại thời điểm đó, con số là sàn.")
+    lines.append("* = drawdown exceeds the capital recorded at that time, so the figure is a floor.")
     for note in report.notes:
         lines.append(f"· {note}")
     return "\n".join(lines)
@@ -884,53 +898,53 @@ def render_data_report(report) -> str:
     """Step 1: two inventories — the markets, then the bots."""
     lines = [
         "=" * 140,
-        "BƯỚC 1 — DỮ LIỆU (KIỂM KÊ ĐẦU VÀO CHO MARKET VÀ BOT)",
+        "STEP 1 — DATA (INPUT INVENTORY FOR MARKET AND BOT)",
         f"{_stamp(report.generated_at_ms)} | "
-        f"{report.markets_complete}/{len(report.markets)} thị trường đủ nguồn | "
-        f"{report.bots_complete}/{len(report.bots)} bot đủ dữ liệu",
+        f"{report.markets_complete}/{len(report.markets)} markets with complete sources | "
+        f"{report.bots_complete}/{len(report.bots)} bots with complete data",
         "=" * 140,
         "",
-        f"BẢNG 1.1 — DỮ LIỆU THỊ TRƯỜNG ({len(report.markets)} ASSET)",
+        f"TABLE 1.1 — MARKET DATA ({len(report.markets)} ASSETS)",
         "-" * 140,
-        _cell("THỊ TRƯỜNG", 13)
-        + _cell("NẾN 1H", 9)
-        + _cell("NGUỒN ĐẠT", 11)
-        + _cell("CHẤT LƯỢNG", 12)
-        + "THIẾU / QUÁ HẠN",
+        _cell("MARKET", 13)
+        + _cell("1H CANDLE", 10)
+        + _cell("SOURCES OK", 11)
+        + _cell("QUALITY", 12)
+        + "MISSING / STALE",
         "-" * 140,
     ]
     for row in report.markets:
         if not row.available:
             lines.append(
                 _cell(f"{row.venue_type}/{row.symbol}", 13)
-                + f"KHÔNG DỰNG ĐƯỢC: {row.error}"
+                + f"COULD NOT BUILD: {row.error}"
             )
             continue
-        gaps = [f"thiếu {s}" for s in row.missing] + [f"cũ {s}" for s in row.stale]
+        gaps = [f"missing {s}" for s in row.missing] + [f"stale {s}" for s in row.stale]
         lines.append(
             _cell(f"{row.venue_type}/{row.symbol}", 13)
-            + _cell(f"{row.candles:,}", 9)
+            + _cell(f"{row.candles:,}", 10)
             + _cell(f"{row.sources_ok}/{row.sources_total}", 11)
             + _cell(f"{row.quality:.2f}" if row.quality is not None else "—", 12)
-            + ("; ".join(gaps) if gaps else "✓ đủ")
+            + ("; ".join(gaps) if gaps else "✓ OK")
         )
 
     lines += [
         "-" * 140,
         "",
-        f"BẢNG 1.2 — DỮ LIỆU BOT ({len(report.bots)} BOT)",
+        f"TABLE 1.2 — BOT DATA ({len(report.bots)} BOTS)",
         "-" * 140,
         _cell("SLOT", 11)
-        + _cell("VAI", 10)
+        + _cell("ROLE", 10)
         + _cell("BOT", 21)
-        + _cell("LỆNH", 6)
+        + _cell("TRADES", 7)
         + _cell("/ASSET", 7)
-        + _cell("VỊ THẾ", 7)
-        + _cell("THIẾU inst", 11)
-        + _cell("TUẦN", 6)
-        + _cell("HỒ SƠ", 7)
-        + _cell("HOẠT ĐỘNG", 11)
-        + "CHẶN / GHI CHÚ",
+        + _cell("POSITION", 9)
+        + _cell("MISSING ID", 11)
+        + _cell("WEEKLY", 7)
+        + _cell("PROFILE", 8)
+        + _cell("ACTIVITY", 11)
+        + "BLOCKING / NOTES",
         "-" * 140,
     ]
     for row in report.bots:
@@ -939,29 +953,29 @@ def render_data_report(report) -> str:
                 _cell(row.slot, 11)
                 + _cell(row.role, 10)
                 + _cell(row.nick_name, 21)
-                + "CHƯA CRAWL"
+                + "NOT CRAWLED"
             )
             continue
-        status = "; ".join(f"CHẶN: {b}" for b in row.blocking)
+        status = "; ".join(f"BLOCKED: {b}" for b in row.blocking)
         if row.notes:
             status = (status + " · " if status else "") + "; ".join(row.notes)
         lines.append(
             _cell(row.slot, 11)
             + _cell(row.role, 10)
             + _cell(row.nick_name, 21)
-            + _cell(row.trades, 6)
+            + _cell(row.trades, 7)
             + _cell(row.trades_on_asset, 7)
-            + _cell(row.open_positions, 7)
+            + _cell(row.open_positions, 9)
             + _cell(row.positions_without_instrument, 11)
-            + _cell(row.weekly_points, 6)
-            + _cell("có" if row.has_profile else "thiếu", 7)
+            + _cell(row.weekly_points, 7)
+            + _cell("yes" if row.has_profile else "no", 8)
             + _cell(
                 f"{row.last_close_days:.1f}d"
                 if row.last_close_days is not None
                 else "—",
                 11,
             )
-            + (status or "✓ đủ")
+            + (status or "✓ OK")
         )
 
     lines.append("-" * 140)

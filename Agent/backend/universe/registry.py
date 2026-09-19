@@ -75,12 +75,6 @@ class UniverseRegistry:
             else:
                 self._rejections[candidate.asset_id] = reason
 
-    def get_asset(self, asset_id: str) -> Optional[UniverseAsset]:
-        return self._assets.get(asset_id)
-
-    def get_by_symbol(self, symbol: str) -> List[UniverseAsset]:
-        return list(self._by_symbol.get(symbol.upper(), []))
-
     def list_all(self) -> List[UniverseAsset]:
         return list(self._assets.values())
 

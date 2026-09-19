@@ -1,5 +1,9 @@
 # Agent — QC Risk Supervisor
 
+> 📚 **Hệ thống Tài liệu Kỹ thuật Chuẩn BMAD:** Xem toàn diện tại [Agent/docs/readme.md](docs/readme.md) gồm:
+> - **BMAD Story:** Quá trình & tiến độ phát triển hệ thống ([bmad/story/](docs/bmad/story/STORY-00_SYSTEM_PROGRESSION_AND_STATUS.md))
+> - **BMAD Spec:** Mô tả chi tiết bóc tách từng kỹ năng định lượng của hệ thống ([bmad/spec/](docs/bmad/spec/))
+
 Hệ thống đánh giá rủi ro bot theo kiến trúc đã chốt trong [plan.md](plan.md):
 
 ```text

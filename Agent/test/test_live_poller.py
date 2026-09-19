@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import time as real_time
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -501,7 +500,7 @@ def test_empty_or_malformed_response_never_overwrites_good_data(tmp_path):
     change = poller.poll_bot(target)
 
     assert change.ok is False
-    assert "không hợp lệ" in change.error
+    assert "invalid" in change.error
     after_bytes = target.trade_list_path(tmp_path).read_bytes()
     assert after_bytes == before_bytes, (
         "malformed response must not touch the file at all"
@@ -841,7 +840,7 @@ def test_poll_bot_reports_chua_crawl_when_no_directory_exists_anywhere(tmp_path)
 
     assert change.ok is False
     assert change.not_crawled is True
-    assert "CHUA_CRAWL" in _format_change_vi_or_error(change)
+    assert "NOT_CRAWLED" in _format_change_vi_or_error(change)
     assert client.calls == [], "no OKX call may be spent on an uncrawled bot"
 
     dirs_after = _all_bot_dirs(tmp_path)
@@ -937,19 +936,6 @@ def test_two_new_closes_append_to_large_existing_ledger_without_duplicates(tmp_p
 # ---------------------------------------------------------------------------
 
 
-class _CapturingCohortService:
-    """Stands in for CohortAssessmentService: records scan() kwargs, returns
-    an empty report -- exactly what a real scan() returns when it searched
-    the wrong venue and found nothing there."""
-
-    def __init__(self) -> None:
-        self.scan_calls: List[Dict[str, Any]] = []
-
-    def scan(self, **kwargs: Any) -> SimpleNamespace:
-        self.scan_calls.append(kwargs)
-        return SimpleNamespace(rows=[], generated_at_ms=0)
-
-
 def test_with_data_location_reads_real_venue_and_symbol_from_bot_dir(tmp_path):
     # Slot says DEX/PEPE; the bot's real files are filed under cex/SNDK/,
     # mirroring one of the 11/30 real mismatches this bug was found from.
@@ -987,46 +973,66 @@ def test_poll_bot_resolves_real_data_location_onto_returned_target(tmp_path):
     assert change.target.data_symbol == "BTC"
 
 
-def test_rescore_bot_scans_real_data_venue_not_slot_venue(tmp_path):
-    """The exact bug: khe DEX/WBTC, dữ liệu thật cex/BTC -> scan() phải được
-    gọi với venue_types=("CEX",), không phải ("DEX",)."""
+def _capture_rescore(monkeypatch):
+    """Bắt tham số `_rescore_bot` truyền xuống lõi chấm điểm CHUNG.
+
+    Trước đây ba test dưới đây tiêm `poller._cohort_service` để bắt lời gọi
+    `scan()`. Poller nay không còn tự chấm điểm: nó uỷ thác cho
+    `run_report.rescore_one_bot_complete`, cùng hàm mà nút "Re-analyze" và
+    lượt chấm cả đàn dùng -- nên không còn `scan()` nào của riêng nó để bắt.
+    Thứ CẦN khoá vẫn y nguyên: venue truyền xuống phải là venue của DỮ LIỆU
+    THẬT, không phải venue của khe.
+    """
+    calls = []
+
+    def fake(data_dir, unique_code, *, data_venue=None):
+        calls.append({"unique_code": unique_code, "data_venue": data_venue})
+        return None
+
+    monkeypatch.setattr(
+        "Agent.backend.run_report.rescore_one_bot_complete", fake
+    )
+    return calls
+
+
+def test_rescore_bot_uses_real_data_venue_not_slot_venue(tmp_path, monkeypatch):
+    """Đúng con bug: khe DEX/WBTC nhưng dữ liệu thật ở cex/BTC -> lõi chấm
+    điểm phải nhận "CEX", không phải "DEX"."""
     real_dir = _seed_dataset_at(
         tmp_path, "CEX", "BTC", "SLOTMIS1", "Slot Mismatch", [_position("1")], []
     )
     target = _target("SLOTMIS1", name="Slot Mismatch", venue="DEX", symbol="WBTC")
     resolved = target.with_data_location(real_dir)
+    calls = _capture_rescore(monkeypatch)
 
     poller = _make_poller(tmp_path, ScriptedClient(), [target])
-    fake_service = _CapturingCohortService()
-    poller._cohort_service = fake_service
-
     with pytest.raises(RuntimeError):
         poller._rescore_bot(resolved)
 
-    assert len(fake_service.scan_calls) == 1
-    assert fake_service.scan_calls[0]["venue_types"] == ("CEX",), (
-        "must scan the real data venue, not the DEX slot"
+    assert len(calls) == 1
+    assert calls[0]["data_venue"] == "CEX", (
+        "phải dùng venue của dữ liệu thật, không phải khe DEX"
     )
-    assert fake_service.scan_calls[0]["only_codes"] == {"SLOTMIS1"}
+    assert calls[0]["unique_code"] == "SLOTMIS1"
 
 
-def test_rescore_bot_scan_venue_unchanged_when_slot_matches_real_venue(tmp_path):
-    """Non-regression: when the slot and the real venue already agree
-    (the common case, ~19/30 bots), behaviour must stay exactly as before."""
+def test_rescore_bot_venue_unchanged_when_slot_matches_real_venue(
+    tmp_path, monkeypatch
+):
+    """Không hồi quy: khi khe và venue thật đã trùng (~19/30 bot), hành vi
+    phải y hệt trước."""
     real_dir = _seed_dataset_at(
         tmp_path, "CEX", "BTC", "MATCH1", "Matched", [_position("1")], []
     )
     target = _target("MATCH1", name="Matched", venue="CEX", symbol="BTC")
     resolved = target.with_data_location(real_dir)
+    calls = _capture_rescore(monkeypatch)
 
     poller = _make_poller(tmp_path, ScriptedClient(), [target])
-    fake_service = _CapturingCohortService()
-    poller._cohort_service = fake_service
-
     with pytest.raises(RuntimeError):
         poller._rescore_bot(resolved)
 
-    assert fake_service.scan_calls[0]["venue_types"] == ("CEX",)
+    assert calls[0]["data_venue"] == "CEX"
 
 
 def test_rescore_bot_refuses_target_never_resolved_to_a_data_location(tmp_path):
@@ -1040,7 +1046,7 @@ def test_rescore_bot_refuses_target_never_resolved_to_a_data_location(tmp_path):
         poller._rescore_bot(target)
 
 
-def test_empty_scan_gives_a_specific_diagnosable_rescore_error(tmp_path):
+def test_empty_scan_gives_a_specific_diagnosable_rescore_error(tmp_path, monkeypatch):
     """When scan() comes back with no matching row, rescore_error must say
     which venue was scanned and which code was searched for -- the old
     generic "không tạo được bản chấm điểm mới" told nobody anything."""
@@ -1050,7 +1056,12 @@ def test_empty_scan_gives_a_specific_diagnosable_rescore_error(tmp_path):
     client.queue(CURRENT_POSITIONS_PATH, "EMPTYSCAN1", [])  # "1" just closed
     client.queue(HISTORY_PATH, "EMPTYSCAN1", [_closed_trade("1")])
     poller = _make_poller(tmp_path, client, [target], rescore_fn=None)
-    poller._cohort_service = _CapturingCohortService()
+    # Lõi chấm điểm không tìm thấy bot -> `_rescore_bot` phải nêu rõ mã
+    # và venue đã tìm, không trả một `None` trần.
+    monkeypatch.setattr(
+        "Agent.backend.run_report.rescore_one_bot_complete",
+        lambda data_dir, unique_code, *, data_venue=None: None,
+    )
 
     changes = poller.poll_once()
 

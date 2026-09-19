@@ -32,29 +32,29 @@ class StrategyDriftLens:
 
         if coverage is None or coverage < MIN_COVERAGE_PCT:
             return unknown(
-                "Strategy Drift",
+                "Strategy durability across phases",
                 0.8,
-                f"Chỉ đặt được {coverage:.0f}% số lệnh vào pha thị trường"
+                f"Only {coverage:.0f}% of trades could be placed into a market phase"
                 if coverage is not None
-                else "Không đặt được lệnh nào vào pha thị trường",
+                else "Could not place any trade into a market phase",
             )
 
         score = 15.0
         findings = [
-            f"Đặt {coverage:.0f}% số lệnh vào pha thị trường; "
-            f"thiên hướng {obs.directional_bias}, kiểu vào lệnh {obs.entry_style}"
+            f"Placed {coverage:.0f}% of trades into a market phase; "
+            f"directional bias {obs.directional_bias}, entry style {obs.entry_style}"
         ]
 
         dependence = obs.regime_dependence_pct
         if dependence is not None and dependence >= CONCENTRATED_PCT:
             score += 35
             findings.append(
-                f"{dependence:.0f}% lãi gộp đến từ riêng pha {obs.best_phase}: "
-                "đổi chế độ thị trường là mất lợi thế"
+                f"{dependence:.0f}% of gross profit comes from phase {obs.best_phase} "
+                "alone: a change of market regime means losing the edge"
             )
         elif dependence is not None and dependence >= LEANING_PCT:
             score += 20
-            findings.append(f"{dependence:.0f}% lãi gộp dồn vào pha {obs.best_phase}")
+            findings.append(f"{dependence:.0f}% of gross profit is concentrated in phase {obs.best_phase}")
 
         if (
             bot.performance.trade_count >= MIN_TRADES_FOR_UNTESTED
@@ -62,36 +62,38 @@ class StrategyDriftLens:
         ):
             score += 25
             findings.append(
-                "Chưa có đủ lệnh nào trong pha giảm: chiến lược chưa được thử ở "
-                "chiều xuống"
+                "Not enough trades in a downtrend phase yet: the strategy has not "
+                "been tested on the way down"
             )
 
         losing = len(obs.losing_phases)
         if losing >= BROAD_LOSS_PHASES:
             score += min(30.0, 10.0 * (losing - BROAD_LOSS_PHASES + 1))
             findings.append(
-                f"Lỗ ở {losing}/6 pha thị trường, không chỉ riêng một chế độ"
+                f"Losing in {losing}/6 market phases, not just one regime"
             )
 
         if obs.directional_bias in ("LONG_ONLY", "SHORT_ONLY"):
             score += 15
             side = "long" if obs.directional_bias == "LONG_ONLY" else "short"
             findings.append(
-                f"Sổ lệnh một chiều ({side}): kết quả phụ thuộc thị trường đi đúng "
-                "một hướng"
+                f"One-way book ({side}): the result depends on the market moving "
+                "in exactly one direction"
             )
 
         if obs.untested_phases:
             findings.append(
-                "Pha thị trường đã xuất hiện nhưng bot chưa từng trải: "
+                "Market phases that occurred but the bot never experienced: "
                 + ", ".join(obs.untested_phases)
             )
 
         if obs.declared_strategy and obs.strategy_drift_score is not None:
             score += obs.strategy_drift_score * 20.0
             findings.append(
-                f"Khai báo {obs.declared_strategy}, quan sát {obs.observed_profile}"
+                f"Declared {obs.declared_strategy}, observed {obs.observed_profile}"
             )
 
         # Confidence follows how much of the ledger could actually be placed.
-        return available("Strategy Drift", score, 0.8, findings, coverage / 100.0)
+        return available(
+            "Strategy durability across phases", score, 0.8, findings, coverage / 100.0
+        )

@@ -27,10 +27,10 @@ RANGE_EDGE_PCT = 15.0
 HIGH_BETA = 1.5
 OI_EXPANSION_PCT = 1.0
 
-POSTURE_RISK = "RỦI RO"
-POSTURE_GROWTH = "ĐANG PHÁT TRIỂN"
-POSTURE_STABLE = "ỔN ĐỊNH"
-POSTURE_UNCLEAR = "CHƯA ĐỦ CƠ SỞ"
+POSTURE_RISK = "RISK"
+POSTURE_GROWTH = "GROWTH"
+POSTURE_STABLE = "STABLE"
+POSTURE_UNCLEAR = "INSUFFICIENT EVIDENCE"
 
 # Evidence is weighted, not counted: a book that cannot absorb a 50k exit is a
 # different order of problem from a mild downtrend, and counting them equally let
@@ -85,20 +85,20 @@ def assess(market) -> MarketPosture:
 
     if vol_state == "HIGH" or (vol_pct is not None and vol_pct >= HIGH_VOL_PERCENTILE):
         label = (
-            f"biến động cao (phân vị {vol_pct:.0f})"
+            f"high volatility (percentile {vol_pct:.0f})"
             if vol_pct is not None
-            else "biến động cao"
+            else "high volatility"
         )
         note(risk, "risk", label, SEVERE)
     elif vol_pct is not None and vol_pct <= CALM_VOL_PERCENTILE:
-        note(stable, "stability", f"biến động thấp (phân vị {vol_pct:.0f})", SEVERE)
+        note(stable, "stability", f"low volatility (percentile {vol_pct:.0f})", SEVERE)
 
     if trend == "BEARISH":
-        note(risk, "risk", "xu hướng giảm", MODERATE)
+        note(risk, "risk", "downtrend", MODERATE)
     elif trend == "BULLISH":
-        note(growth, "growth", "xu hướng tăng", SEVERE)
+        note(growth, "growth", "uptrend", SEVERE)
     elif trend in ("NEUTRAL", "RANGING"):
-        note(stable, "stability", "giá đi ngang", MODERATE)
+        note(stable, "stability", "sideways price action", MODERATE)
 
     position = _num(getattr(structure, "range_position_pct", None))
     if position is not None and (
@@ -107,7 +107,7 @@ def assess(market) -> MarketPosture:
         note(
             risk,
             "risk",
-            f"giá sát biên khoảng ({position:.0f}% biên độ)",
+            f"price sitting at the edge of its range ({position:.0f}% of range)",
             MODERATE,
         )
 
@@ -118,30 +118,30 @@ def assess(market) -> MarketPosture:
         depth is not None and depth < THIN_DEPTH_USD
     ):
         label = (
-            f"thanh khoản mỏng ({depth:,.0f} USD trong ±0,2%)"
+            f"thin liquidity ({depth:,.0f} USD within ±0.2%)"
             if depth is not None
-            else "thanh khoản mỏng"
+            else "thin liquidity"
         )
         note(risk, "risk", label, SEVERE)
     elif depth is not None and depth >= DEEP_DEPTH_USD:
         note(
             stable,
             "stability",
-            f"sổ lệnh dày ({depth:,.0f} USD trong ±0,2%)",
+            f"deep order book ({depth:,.0f} USD within ±0.2%)",
             SEVERE,
         )
 
     slippage = _num(getattr(liquidity, "estimated_slippage_50k_pct", None))
     if slippage is not None and slippage >= COSTLY_SLIPPAGE_PCT:
-        note(risk, "risk", f"trượt giá lệnh 50k ước tính {slippage:.2f}%", SEVERE)
+        note(risk, "risk", f"estimated slippage on a 50k order {slippage:.2f}%", SEVERE)
 
     bias = getattr(flow, "flow_bias", "UNKNOWN")
     if bias == "BUY_PRESSURE":
-        note(growth, "growth", "dòng tiền chủ động mua", MODERATE)
+        note(growth, "growth", "active buy pressure", MODERATE)
     elif bias == "SELL_PRESSURE":
-        note(risk, "risk", "dòng tiền chủ động bán", MODERATE)
+        note(risk, "risk", "active sell pressure", MODERATE)
     elif bias == "NEUTRAL":
-        note(stable, "stability", "dòng tiền hai chiều cân bằng", MODERATE)
+        note(stable, "stability", "balanced two-way flow", MODERATE)
 
     if derivatives is not None:
         ls = _num(getattr(derivatives, "long_short_ratio", None))
@@ -152,24 +152,24 @@ def assess(market) -> MarketPosture:
             note(
                 risk,
                 "risk",
-                f"vị thế dồn một phía ({side}, tỷ lệ L/S {ls:.2f})",
+                f"positioning crowded on one side ({side}, L/S ratio {ls:.2f})",
                 SEVERE,
             )
 
         funding_z = _num(getattr(derivatives, "funding_zscore", None))
         if funding_z is not None and abs(funding_z) >= STRETCHED_FUNDING_Z:
-            note(risk, "risk", f"funding lệch chuẩn ({funding_z:+.1f}σ)", SEVERE)
+            note(risk, "risk", f"funding stretched ({funding_z:+.1f}σ)", SEVERE)
 
         delta_oi = _num(getattr(derivatives, "delta_oi_pct", None))
         if delta_oi is not None and delta_oi >= OI_EXPANSION_PCT:
-            note(growth, "growth", f"vị thế mở đang nở ({delta_oi:+.1f}%)", MODERATE)
+            note(growth, "growth", f"open interest expanding ({delta_oi:+.1f}%)", MODERATE)
 
     beta = _num(getattr(macro, "btc_beta", None))
     if beta is not None and beta >= HIGH_BETA:
         note(
             risk,
             "risk",
-            f"beta theo BTC cao ({beta:.2f}), khuếch đại cú sốc chung",
+            f"high beta to BTC ({beta:.2f}), amplifying broad market shocks",
             MODERATE,
         )
 

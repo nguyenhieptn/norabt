@@ -76,7 +76,7 @@ def test_each_bot_folder_holds_performance_and_monte_carlo_separately(tmp_path):
     performance = json.loads((bot_dir / "performance.json").read_text())
     simulation = json.loads((bot_dir / "monte_carlo.json").read_text())
 
-    assert performance["step"] == "2.2_HIEU_SUAT"
+    assert performance["step"] == "2.2_PERFORMANCE"
     assert performance["profit_factor"] == 11.12
     assert "mc_iterations" not in performance
 
@@ -116,6 +116,6 @@ def test_the_index_says_what_the_files_are_for(tmp_path):
 
     index = json.loads((tmp_path / "analysis" / "index.json").read_text())
 
-    assert index["step"] == "2_PHAN_TICH_MO_PHONG"
+    assert index["step"] == "2_ANALYSIS_AND_SIMULATION"
     assert "bước 3" in index["note"]
     assert len(index["files"]) >= 3

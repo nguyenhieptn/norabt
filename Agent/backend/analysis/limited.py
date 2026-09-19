@@ -58,13 +58,16 @@ weight-0 -- "unknown pushes risk up," not "unknown falls back to safe."
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from Agent.backend.analysis.limited_matrix import build_matrix, simulate_matrix
+from Agent.backend.analysis.population_reference import population_percentile
 from Agent.backend.mcp.capital.equity_curve import EquityCurve, EquityCurveBuilder
 from Agent.backend.mcp.analytics.simulation.monte_carlo import (
     MonteCarloSimulationEngine,
 )
-from Agent.backend.mcp.schemas.bot_result import PositionSide, TradeLedgerItem
+from Agent.backend.mcp.schemas.bot_result import SimulationResults
 
 # ---------------------------------------------------------------------------
 # Vocabulary shared with Agent/backend/sources/bot_source.LedgerUnavailableError.
@@ -117,6 +120,77 @@ _STABILITY_WEIGHT = 1.0
 # Agent/test/test_limited_assessment.py, which checks this against a real
 # QCCoreService.assess_bot confidence for a comparably clean bot).
 LIMITED_CONFIDENCE_CEILING = 40.0
+
+# --- Độ tin cậy tỉ lệ với KHỐI LƯỢNG BẰNG CHỨNG THẬT ----------------------
+# Trước đây mỗi chiều đo được mang một độ tin cậy HẰNG SỐ (sụt vốn 0,55; ổn
+# định 0,50) bất kể đường vốn có 12 tuần hay 120 tuần. Điều đó mâu thuẫn với
+# nguyên tắc của chính sản phẩm: ít dữ liệu thì độ tin cậy phải thấp hơn,
+# nhiều dữ liệu thì cao hơn. Ba hằng số dưới đây biến nó thành một hàm bão
+# hoà: `sàn + (trần - sàn) * min(1, n / mốc_bão_hoà)`.
+#
+# `_CONFIDENCE_FLOOR_FRACTION = 0.35`: một chiều ĐÃ ĐO ĐƯỢC không bao giờ bị
+# đẩy về gần 0 chỉ vì mẫu nhỏ -- nó vẫn là bằng chứng thật, chỉ là yếu. Đặt
+# sàn ở 35% mức trần giữ cho nó còn tiếng nói thay vì bị các chiều bị che
+# (vốn confidence = 0) nuốt chửng hoàn toàn.
+_CONFIDENCE_FLOOR_FRACTION = 0.35
+
+# 52 tuần = một năm đầy đủ, đủ để đường vốn đi qua cả pha tăng lẫn pha giảm
+# ít nhất một lần. Dưới mốc đó thì mức sụt vốn quan sát được chưa chắc đã
+# gặp kịch bản xấu nhất của chiến lược.
+_DRAWDOWN_SATURATION_WEEKS = 52
+
+# 365 ngày lãi/lỗ: cùng lý do, quy về nhịp NGÀY vì public-stats đếm theo
+# ngày chứ không theo tuần.
+_STABILITY_SATURATION_DAYS = 365
+
+# --- Chiều mới: nhịp độ đường lợi nhuận tích luỹ --------------------------
+# `profile.pnlRatios` (public-lead-traders) là một chuỗi RIÊNG, khác endpoint
+# và khác nhịp lấy mẫu với chuỗi PnL tuần (đo thật trên bot
+# ED2DE1A47EEF62EC: 19 điểm trải 90 ngày, tức ~5 ngày/điểm, so với 12 điểm
+# tuần). Hai chuỗi cùng nói về MỘT tài khoản nên KHÔNG độc lập hoàn toàn --
+# vì vậy trọng số ở đây cố tình nhỏ hơn `_DRAWDOWN_WEIGHT`: nó bổ sung thông
+# tin về NHỊP ĐỘ (đều đặn hay giật cục) chứ không phải đếm cùng một nguồn
+# hai lần.
+_RETURN_PATH_WEIGHT = 0.7
+_RETURN_PATH_CONFIDENCE_MAX = 0.45
+_RETURN_PATH_SATURATION_POINTS = 52
+# Dưới ngần này điểm thì đường lợi nhuận chưa đủ để nói về nhịp độ.
+_RETURN_PATH_MIN_POINTS = 4
+
+# --- Trần độ tin cậy theo SỐ LUỒNG DỮ LIỆU thật sự kết hợp được -----------
+# Trần phẳng 40% cũ coi một bot chỉ còn đúng một luồng ngang với một bot còn
+# đủ bốn luồng -- trái với nguyên tắc "ít dữ liệu thì càng phải kết hợp
+# nhiều nguồn, và kết hợp được nhiều thì đáng tin hơn".
+#
+# `_CONFIDENCE_CEILING_PER_STREAM = 7.5` và nền 15.0 cho dải 22,5% (1 luồng)
+# đến 45,0% (4 luồng). Trần tuyệt đối 45% được chọn có căn cứ ĐO ĐƯỢC, không
+# phải số tròn: độ tin cậy THẤP NHẤT trong 31 bot công khai đầy đủ của kho
+# hiện tại là 50,8%. Giữ trần của nhánh LIMITED dưới mốc đó bảo đảm một bot
+# giấu sổ lệnh KHÔNG BAO GIỜ được tin bằng con bot minh bạch kém tin cậy
+# nhất -- đúng tinh thần fail-closed của module này.
+_CONFIDENCE_CEILING_BASE = 15.0
+_CONFIDENCE_CEILING_PER_STREAM = 7.5
+_CONFIDENCE_CEILING_ABSOLUTE = 45.0
+
+
+def _evidence_confidence(
+    observed: Optional[int], saturation: int, ceiling: float
+) -> float:
+    """Độ tin cậy của MỘT chiều, tỉ lệ bão hoà với số quan sát thật của nó.
+
+    `observed=None`/<=0 -> 0,0 (không có gì để tin). Ngược lại chạy từ
+    `ceiling * _CONFIDENCE_FLOOR_FRACTION` lên tới `ceiling` khi số quan sát
+    đạt `saturation`. Tuyến tính chứ không phải 1/sqrt(n): mục đích ở đây là
+    một thang TRÌNH BÀY dễ giải thích cho người đọc, không phải một sai số
+    chuẩn thống kê -- sai số chuẩn thật đã được nói riêng ở cảnh báo mẫu
+    mỏng của chính engine mô phỏng.
+    """
+    if not observed or observed <= 0:
+        return 0.0
+    reach = min(1.0, float(observed) / float(saturation))
+    floor = ceiling * _CONFIDENCE_FLOOR_FRACTION
+    return floor + (ceiling - floor) * reach
+
 
 # NOT_FOUND carries no evidence about a real bot at all, so confidence is
 # fixed at zero rather than derived from any formula (there is nothing to
@@ -176,7 +250,43 @@ class _Component:
         }
 
 
-def _drawdown_component(curve: EquityCurve) -> _Component:
+# Ánh xạ chiều -> (tham số trong kho, trường tương ứng của kết quả mô phỏng).
+# Hai tên khác nhau vì file lưu dùng tiền tố `mc_`; ánh xạ này KIỂM TỪ
+# `Agent/backend/qc/reporting/pair_report.py` (chỗ ghi ra file), không đoán.
+_PERCENTILE_PARAMETERS = {
+    "drawdown": ("mc_p95_drawdown", "p95_max_drawdown"),
+    MONTE_CARLO_KEY: ("mc_p_ruin", "p_ruin"),
+}
+
+
+def _percentile_scored(
+    dimension: str, simulation: Any, data_dir: Optional[Path]
+) -> Optional[Dict[str, Any]]:
+    """Điểm của một chiều tính bằng HẠNG PHÂN VỊ trong quần thể bot đã chấm.
+
+    Thay cho các cut-point tự đặt (`score = 15`, `+50 nếu > 30%`...): điểm
+    giờ trả lời đúng một câu kiểm chứng được -- "tham số này tệ hơn bao
+    nhiêu phần trăm số bot đã quan sát". Xem
+    `Agent/backend/analysis/population_reference.py` cho lý do đầy đủ.
+
+    `None` khi thiếu mô phỏng, thiếu tham số, hoặc quần thể chưa đủ lớn --
+    khi đó nơi gọi giữ nguyên nhánh "không đo được", KHÔNG rơi về thang cũ.
+    """
+    if simulation is None or not getattr(simulation, "is_valid", False):
+        return None
+    mapping = _PERCENTILE_PARAMETERS.get(dimension)
+    if mapping is None or data_dir is None:
+        return None
+    stored_key, field = mapping
+    value = getattr(simulation, field, None)
+    return population_percentile(data_dir, stored_key, value)
+
+
+def _drawdown_component(
+    curve: EquityCurve,
+    simulation: Any = None,
+    data_dir: Optional[Path] = None,
+) -> _Component:
     """Same thresholds Agent/backend/qc/evaluator/lenses/drawdown_risk.py uses
     for its own AVAILABLE case (score 15 baseline, +50 past 30%, +25 past
     15%) -- kept numerically aligned so a LIMITED and a FULL assessment of
@@ -186,22 +296,48 @@ def _drawdown_component(curve: EquityCurve) -> _Component:
     if curve.wiped_out:
         return _Component(
             "drawdown",
-            "Sụt vốn (suy từ đường vốn tuần)",
+            "Drawdown (inferred from the weekly equity curve)",
             100.0,
             _DRAWDOWN_WEIGHT,
             "AVAILABLE",
             0.55,
             [
-                "Đường vốn tuần từng về 0 trong giai đoạn quan sát: tài khoản "
-                "đã cháy vốn ít nhất một lần"
+                "Weekly equity dropped to 0 during the observed period: the "
+                "account was wiped out at least once"
             ],
         )
     if curve.is_usable and curve.max_drawdown_pct is not None:
+        # ƯU TIÊN chấm bằng HẠNG PHÂN VỊ trong quần thể đã chấm. Thang cũ
+        # (`15` rồi `+50 nếu > 30%`, `+25 nếu > 15%`) là ba con số không
+        # suy ra từ đâu; phân vị thì trả lời được một câu kiểm chứng được:
+        # "sụt vốn mô phỏng của bot này tệ hơn bao nhiêu phần trăm số bot
+        # đã quan sát". Chỉ rơi về thang cũ khi quần thể chưa đủ lớn -- và
+        # khi đó `findings` nói rõ đang dùng thang nào.
+        ranked = _percentile_scored("drawdown", simulation, data_dir)
+        if ranked is not None:
+            return _Component(
+                "drawdown",
+                "Drawdown (inferred from the weekly equity curve)",
+                float(ranked["score"]),
+                _DRAWDOWN_WEIGHT,
+                "AVAILABLE",
+                _evidence_confidence(
+                    curve.usable_points, _DRAWDOWN_SATURATION_WEEKS, 0.55
+                ),
+                [
+                    f"Max drawdown inferred from the weekly equity curve: "
+                    f"{curve.max_drawdown_pct:.1f}% (over {curve.usable_points}/"
+                    f"{curve.coverage_weeks} weeks with usable data)",
+                    f"Percentile: simulated P95 drawdown {ranked['value']:.1f}% — worse "
+                    f"than {ranked['score']:.0f}% of {ranked['population_size']} scored "
+                    f"bots (population median {ranked['population_median']:.1f}%)",
+                ],
+            )
         score = 15.0
         findings = [
-            f"Sụt vốn tối đa suy từ đường vốn tuần: {curve.max_drawdown_pct:.1f}% "
-            f"(trên {curve.usable_points}/{curve.coverage_weeks} tuần có dữ liệu "
-            "dùng được)"
+            f"Max drawdown inferred from the weekly equity curve: {curve.max_drawdown_pct:.1f}% "
+            f"(over {curve.usable_points}/{curve.coverage_weeks} weeks with usable "
+            "data)"
         ]
         if curve.max_drawdown_pct > 30:
             score += 50
@@ -209,16 +345,16 @@ def _drawdown_component(curve: EquityCurve) -> _Component:
             score += 25
         if curve.consistency == "FLOWS_DETECTED":
             findings.append(
-                "Có dấu hiệu nạp/rút vốn giữa các tuần, thay đổi vốn không chỉ "
-                "đến từ giao dịch"
+                "There are signs of deposits/withdrawals between weeks; the capital "
+                "change is not entirely from trading"
             )
         return _Component(
             "drawdown",
-            "Sụt vốn (suy từ đường vốn tuần)",
+            "Drawdown (inferred from the weekly equity curve)",
             min(100.0, score),
             _DRAWDOWN_WEIGHT,
             "AVAILABLE",
-            0.55,
+            _evidence_confidence(curve.usable_points, _DRAWDOWN_SATURATION_WEEKS, 0.55),
             findings,
         )
     # Weekly-pnl itself is one of the endpoints that survives 60004 (see
@@ -229,11 +365,11 @@ def _drawdown_component(curve: EquityCurve) -> _Component:
     reason = (
         curve.warnings[0]
         if curve.warnings
-        else "Không đủ dữ liệu đường vốn tuần để suy ra % sụt vốn"
+        else "Not enough weekly equity data to infer a drawdown %"
     )
     return _Component(
         "drawdown",
-        "Sụt vốn (suy từ đường vốn tuần)",
+        "Drawdown (inferred from the weekly equity curve)",
         _UNKNOWN_GAP_SCORE,
         _DRAWDOWN_WEIGHT,
         "UNKNOWN_GAP",
@@ -266,33 +402,192 @@ def _stability_component(stats: Optional[Dict[str, Any]]) -> _Component:
     if win_ratio is None:
         return _Component(
             "stability",
-            "Tính ổn định (ngày lãi/lỗ)",
+            "Stability (winning/losing days)",
             _UNKNOWN_GAP_SCORE,
             _STABILITY_WEIGHT,
             "UNKNOWN_GAP",
             0.0,
-            ["Không có public-stats nên không tính được tỷ lệ ngày lãi/lỗ"],
+            ["No public-stats available, so the winning/losing day ratio could not be computed"],
         )
 
     win_ratio = max(0.0, min(1.0, win_ratio))
     score = (1.0 - win_ratio) * 100.0
-    findings = [f"Tỷ lệ thắng (public-stats): {win_ratio * 100:.1f}%"]
+    # GỌI ĐÚNG TÊN: `stats.winRatio` bằng ĐÚNG profitDays/(profitDays +
+    # lossDays) -- kiểm trên bot thật: 101/172 = 58,72%, khớp chính xác
+    # winRatio công bố -- tức tỉ lệ NGÀY LÃI, không phải tỉ lệ LỆNH
+    # THẮNG. Nhãn cũ ghi "Tỷ lệ thắng" khiến người đọc đem so thẳng với
+    # "tỉ lệ thắng" của bot công khai đầy đủ (vốn tính trên từng LỆNH)
+    # rồi kết luận sai.
+    findings = [f"Winning-day ratio (public-stats): {win_ratio * 100:.1f}%"]
     if profit_days is not None and loss_days is not None:
         findings.append(
-            f"{profit_days} ngày lãi / {loss_days} ngày lỗ trong cửa sổ đo public-stats"
+            f"{profit_days} winning days / {loss_days} losing days in the public-stats measurement window"
         )
     invest_amt = _float((stats or {}).get("investAmt"))
     if invest_amt is not None:
         findings.append(f"investAmt (public-stats): {invest_amt:,.0f} USDT")
     return _Component(
         "stability",
-        "Tính ổn định (ngày lãi/lỗ)",
+        "Stability (winning/losing days)",
         score,
         _STABILITY_WEIGHT,
         "AVAILABLE",
-        0.5,
+        _evidence_confidence(total_days or None, _STABILITY_SATURATION_DAYS, 0.5),
         findings,
     )
+
+
+def _return_path_component(profile: Optional[Dict[str, Any]]) -> _Component:
+    """Nhịp độ của đường lợi nhuận tích luỹ, dựng từ `profile.pnlRatios`.
+
+    ĐÂY LÀ LUỒNG DỮ LIỆU THỨ BA, trước nay bị bỏ không: `public-lead-traders`
+    trả kèm `pnlRatios` -- chuỗi tỉ lệ lợi nhuận TÍCH LUỸ theo mốc thời gian
+    (đo thật trên bot ED2DE1A47EEF62EC: 19 điểm trải 90 ngày, ~5 ngày/điểm,
+    trong khi chuỗi PnL tuần chỉ có 12 điểm). Với một bot giấu sổ lệnh, đây
+    là chuỗi thời gian DÀI NHẤT còn công khai.
+
+    KHÔNG ĐỘC LẬP HOÀN TOÀN với chuỗi PnL tuần -- cùng một tài khoản, chỉ
+    khác endpoint và khác nhịp lấy mẫu -- nên trọng số cố tình đặt thấp hơn
+    chiều sụt vốn (`_RETURN_PATH_WEIGHT` < `_DRAWDOWN_WEIGHT`). Cái nó thêm
+    vào là thông tin về NHỊP ĐỘ: lợi nhuận đi lên đều đặn hay giật cục rồi
+    đứng im, và trên chính đường đó đã có lần thụt lùi nào chưa.
+
+    Đo hai thứ, cả hai đều không cần biết quy mô vốn (nên không dính vấn đề
+    lệch mẫu số đã chặn ở `_implied_base_spread`):
+      * tỉ lệ kỳ ĐI LÊN trên tổng số kỳ;
+      * mức thụt lùi sâu nhất của đường tích luỹ so với đỉnh của chính nó.
+    """
+    raw = (profile or {}).get("pnlRatios")
+    points: List[Dict[str, float]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            ts = EquityCurveBuilder._timestamp_ms(item.get("beginTs"))
+            ratio = _float(item.get("pnlRatio"))
+            if ts is None or ratio is None:
+                continue
+            points.append({"ts": float(ts), "ratio": ratio})
+    points.sort(key=lambda d: d["ts"])
+
+    if len(points) < _RETURN_PATH_MIN_POINTS:
+        return _Component(
+            "return_path",
+            "Return path cadence",
+            _UNKNOWN_GAP_SCORE,
+            _RETURN_PATH_WEIGHT,
+            "UNKNOWN_GAP",
+            0.0,
+            [
+                "The public pnlRatios series is too short to say anything about cadence "
+                f"({len(points)} points, at least {_RETURN_PATH_MIN_POINTS} needed)"
+            ],
+        )
+
+    steps = [points[i]["ratio"] - points[i - 1]["ratio"] for i in range(1, len(points))]
+    ups = sum(1 for d in steps if d > 0)
+    downs = sum(1 for d in steps if d < 0)
+    flats = len(steps) - ups - downs
+    up_share = ups / len(steps) if steps else 0.0
+
+    peak = points[0]["ratio"]
+    setback = 0.0
+    for point in points:
+        peak = max(peak, point["ratio"])
+        setback = max(setback, peak - point["ratio"])
+    # Quy mức thụt lùi về % của đỉnh để so sánh được giữa các bot; đỉnh <= 0
+    # nghĩa là đường tích luỹ chưa từng dương, không có "đỉnh" để so.
+    setback_pct = (setback / peak * 100.0) if peak > 0 else None
+
+    # KHÔNG CHẤM ĐIỂM RỦI RO Ở ĐÂY NỮA.
+    #
+    # Bản đầu của hàm này tự đặt ra một công thức: `(1 - tỉ lệ kỳ tăng) *
+    # 100`, cộng thêm `+25` nếu thụt lùi > 30% và `+12` nếu > 15%. Cả ba
+    # con số đó là do người viết nghĩ ra, không suy từ lý thuyết nào, không
+    # hiệu chỉnh trên dữ liệu nào -- đúng loại tham số bịa mà sản phẩm này
+    # cấm. Một tỉ lệ kỳ tăng 61% KHÔNG có nghĩa rủi ro là 39/100.
+    #
+    # Chiều này vì vậy chỉ mang BẰNG CHỨNG QUAN SÁT ĐƯỢC (số kỳ tăng/giảm,
+    # mức thụt lùi trên đường tích luỹ) và độ tin cậy theo số điểm thật;
+    # điểm rủi ro của nó để trung tính bằng `_UNKNOWN_GAP_SCORE` như mọi
+    # chiều chưa có cách chấm chính đáng. Cách chấm ĐÚNG là đưa chuỗi này
+    # qua chính bộ chỉ số + mô phỏng mà nhánh đầy đủ dùng (hiệu các
+    # `pnlRatio` là lợi suất trên cùng một mẫu số -- đã kiểm: tổng của
+    # chúng bằng đúng tích luỹ 9,3951 mà OKX công bố), việc đó làm ở bước
+    # xây ma trận dữ liệu, không phải bằng một công thức tự chế ở đây.
+    score = _UNKNOWN_GAP_SCORE
+
+    findings = [
+        f"{len(points)} cumulative-return points (public-lead-traders), "
+        f"{ups} up periods / {downs} down periods / {flats} flat periods "
+        f"({up_share * 100:.0f}% of periods moving up)"
+    ]
+    if setback_pct is not None:
+        findings.append(
+            f"Deepest setback on the cumulative return path: {setback_pct:.1f}% "
+            "below its own peak"
+        )
+    return _Component(
+        "return_path",
+        "Return path cadence",
+        score,
+        _RETURN_PATH_WEIGHT,
+        "AVAILABLE",
+        _evidence_confidence(
+            len(points), _RETURN_PATH_SATURATION_POINTS, _RETURN_PATH_CONFIDENCE_MAX
+        ),
+        findings,
+    )
+
+
+# Khoảng dao động TỐI ĐA cho phép của "vốn ngầm" giữa các tuần trước khi
+# chuỗi tuần bị coi là KHÔNG dùng được cho bootstrap. Vốn ngầm của một tuần
+# = pnl / pnlRatio (OKX công bố cả hai), tức quy mô tài khoản mà tuần đó
+# kiếm lãi trên đó.
+#
+# VÌ SAO PHẢI CÓ (đo thật trên bot ED2DE1A47EEF62EC, 18/09): vốn ngầm 12
+# tuần của bot này chạy từ 1.020 tới 81.775 USDT -- chênh 80 lần. Bootstrap
+# (dù IID hay khối) đứng trên giả định các quan sát ĐỔI CHỖ ĐƯỢC CHO NHAU
+# (exchangeable): rút ngẫu nhiên tuần này thay tuần kia phải hợp lệ. Một
+# tuần lãi 763 USDT trên vốn 1.749 và một tuần lãi 56.554 USDT trên vốn
+# 79.151 KHÔNG phải hai mẫu của cùng một phân phối -- trộn chúng rồi chia
+# cho một mốc vốn duy nhất cho ra con số vô nghĩa: mô phỏng đang chạy trả
+# về trung vị +9.839% trong khi lợi nhuận tích luỹ THẬT mà OKX công bố cho
+# chính bot đó là +963%, lệch hơn 10 lần.
+#
+# 3.0 là ngưỡng có chủ đích chứ không phải số tròn tuỳ hứng: vốn tài khoản
+# co giãn trong khoảng ±3 lần còn có thể coi là cùng một quy mô hoạt động
+# (nạp/rút thông thường, lãi kép tích luỹ), vượt qua đó thì tài khoản đã
+# đổi hẳn cấp độ và các tuần không còn so sánh trực tiếp được nữa. Ngưỡng
+# này chỉ quyết định CÓ CHẠY mô phỏng hay không; nó không tham gia chấm
+# điểm bất kỳ chiều nào.
+_MAX_IMPLIED_BASE_SPREAD = 3.0
+
+# Dưới ngưỡng này thì `pnlRatio` coi như bằng 0 và tuần đó không suy ra
+# được vốn ngầm (chia cho ~0). Không phải tuần lỗi -- chỉ là tuần không
+# dùng được cho phép kiểm tra quy mô.
+_MIN_RATIO_FOR_IMPLIED_BASE = 1e-6
+
+
+def _implied_base_spread(rows: List[Dict[str, Any]]) -> Optional[float]:
+    """Tỉ số vốn-ngầm lớn nhất / nhỏ nhất của chuỗi tuần, hoặc `None` khi
+    không đủ tuần suy ra được vốn ngầm để kết luận điều gì.
+
+    Trả về một con số để nơi gọi tự quyết định, và để câu giải thích cho
+    người đọc có được con số thật thay vì một lời khẳng định suông.
+    """
+    bases: List[float] = []
+    for row in rows:
+        pnl = _float(row.get("pnl", row.get("pnl_usdt")))
+        ratio = _float(row.get("pnlRatio", row.get("pnl_ratio")))
+        if pnl is None or ratio is None or abs(ratio) < _MIN_RATIO_FOR_IMPLIED_BASE:
+            continue
+        base = abs(pnl / ratio)
+        if base > 0.0:
+            bases.append(base)
+    if len(bases) < 2:
+        return None
+    return max(bases) / min(bases)
 
 
 def _run_monte_carlo_probe(
@@ -300,48 +595,53 @@ def _run_monte_carlo_probe(
     curve: EquityCurve,
     iterations: int,
     seed: Optional[int],
+    profile: Optional[Dict[str, Any]] = None,
+    stats: Optional[Dict[str, Any]] = None,
 ) -> Any:
-    """Feed the weekly PnL series to the REAL MonteCarloSimulationEngine so
-    its own MIN_SAMPLE_SIZE gate is what decides validity here -- never a
-    hand-rolled `len(weekly) < 20` check that could silently drift from the
-    engine's actual threshold.
+    """Mô phỏng cho bot giấu sổ lệnh, đi qua BƯỚC DỰNG MA TRẬN trước.
 
-    This is the single most important thing this module must get right (see
-    module docstring / the task this module was written for): a bot only
-    ever publishes a handful of weekly PnL points (12 is typical), and
-    MIN_SAMPLE_SIZE=20 means the engine legitimately refuses to run. That
-    refusal must be surfaced honestly (is_valid=False, mc=None, plain text
-    saying so) -- never smoothed over by lowering the threshold or dressing
-    up a 12-point bootstrap as if it were trade-level Monte Carlo.
+    Bản trước nạp thẳng chuỗi PnL TUYỆT ĐỐI theo tuần vào engine và chia cho
+    vốn của tuần ĐẦU TIÊN. Trên bot thật ED2DE1A47EEF62EC, cách đó cho trung
+    vị **+9.839%** trong khi lợi nhuận tích luỹ OKX công bố chỉ **+940%** --
+    sai gần 10 lần, vì vốn ngầm của các tuần chạy từ 1.020 tới 81.775 USDT
+    nên các tuần không đổi chỗ được cho nhau.
+
+    Nay việc chọn chuỗi giao cho `Agent/backend/analysis/limited_matrix.py`:
+    nó gom mọi luồng công khai, kiểm tiền đề đổi chỗ của từng chuỗi ứng
+    viên, rồi chọn chuỗi hợp lệ có nhiều quan sát nhất. Với cùng bot đó nó
+    chọn `ratio_delta` (18 kỳ, hiệu của lợi suất tích luỹ -- cùng một mẫu số
+    là vốn đầu tư, đã kiểm `pnlRatio x investAmt = pnl` lệch 0,0003%) và
+    loại `weekly_absolute`. Trung vị mô phỏng khi đó là **+903%**, nằm ngay
+    cạnh +940% quan sát được -- đúng thứ một bootstrap phát lại chính lịch
+    sử của bot trên đúng độ dài lịch sử đó phải cho ra.
+
+    `MIN_SAMPLE_SIZE`/`THIN_SAMPLE_SIZE` vẫn hoàn toàn do engine quyết định;
+    module này không tự kiểm độ dài lần nữa.
     """
-    rows = [r for r in (weekly or []) if isinstance(r, dict)]
-    trades: List[TradeLedgerItem] = []
-    for index, row in enumerate(rows):
-        pnl = _float(row.get("pnl", row.get("pnl_usdt")))
-        if pnl is None:
-            continue
-        week_ms = EquityCurveBuilder._timestamp_ms(
-            row.get("beginTs", row.get("week_start"))
-        )
-        open_time = week_ms if week_ms is not None else index * _WEEK_MS
-        trades.append(
-            TradeLedgerItem(
-                trade_id=f"WEEKLY_{index}",
-                symbol="AGGREGATED_WEEKLY",
-                side=PositionSide.NET,
-                open_time=open_time,
-                close_time=open_time + _WEEK_MS,
-                realized_pnl=pnl,
-                holding_time_minutes=float(_WEEK_MS / 60_000),
-            )
-        )
-    initial_equity = curve.start_equity if curve.is_usable else None
-    return MonteCarloSimulationEngine.run_simulation(
-        trades=trades,
-        initial_equity=initial_equity,
-        iterations=iterations,
-        horizon_trades=max(len(trades), 1),
-        seed=seed,
+    matrix = build_matrix(profile=profile, stats=stats, weekly=weekly)
+    result = simulate_matrix(matrix, iterations=iterations, seed=seed)
+    if result is not None:
+        return result
+
+    # Không chuỗi nào qua được tiền đề -> từ chối, kèm ĐÚNG lý do từng
+    # chuỗi bị loại thay vì một câu chung chung.
+    rejected = "; ".join(
+        f"{series.name}: {series.reason}"
+        for series in matrix.series
+        if not series.usable
+    )
+    return SimulationResults(
+        simulation_method="STATIONARY_BOOTSTRAP",
+        iterations=0,
+        sample_size=0,
+        horizon_trades=1,
+        return_basis="ABSOLUTE_PNL_RELATIVE_TO_EQUITY",
+        capital_basis="WEEKLY_EQUITY_CURVE",
+        is_valid=False,
+        warnings=[
+            "No usable return series to simulate"
+            + (f". Detail: {rejected}" if rejected else "")
+        ],
     )
 
 
@@ -350,19 +650,42 @@ def _monte_carlo_component_and_payload(
     curve: EquityCurve,
     iterations: int,
     seed: Optional[int],
-) -> "tuple[_Component, Optional[Dict[str, Any]], List[str]]":
-    result = _run_monte_carlo_probe(weekly, curve, iterations, seed)
+    profile: Optional[Dict[str, Any]] = None,
+    stats: Optional[Dict[str, Any]] = None,
+    data_dir: Optional[Path] = None,
+) -> "tuple[_Component, Optional[Dict[str, Any]], List[str], Any]":
+    result = _run_monte_carlo_probe(
+        weekly, curve, iterations, seed, profile=profile, stats=stats
+    )
     text: List[str] = []
     if not result.is_valid:
-        text.append(
-            "Không đủ mẫu để mô phỏng Monte Carlo: chỉ có "
-            f"{result.sample_size} điểm PnL tuần, trong khi engine yêu cầu tối "
-            f"thiểu {MonteCarloSimulationEngine.MIN_SAMPLE_SIZE} mẫu -- không "
-            "suy diễn phân phối rủi ro hay bịa số liệu từ 12 điểm tuần"
-        )
+        # Engine/chốt chặn từ chối vì NHIỀU lý do khác nhau, nên phải NÓI
+        # LẠI ĐÚNG lý do nó đưa ra thay vì đoán. Bản cũ mặc định "không đủ
+        # mẫu" cho mọi lần từ chối; sau khi `_implied_base_spread` xuất
+        # hiện, một chuỗi 12 tuần (thừa so với `MIN_SAMPLE_SIZE = 10`) bị
+        # từ chối vì quy mô vốn lệch nhau lại vẫn in ra câu "chỉ có 12
+        # điểm, trong khi engine yêu cầu tối thiểu 10" -- tự mâu thuẫn ngay
+        # trong một câu, và giấu mất lý do thật.
+        if result.sample_size < MonteCarloSimulationEngine.MIN_SAMPLE_SIZE:
+            # Ca THIẾU MẪU: giữ nguyên câu tiếng Việt cũ. KHÔNG chuyển tiếp
+            # cảnh báo của engine ở nhánh này vì câu đó là tiếng Anh ("At
+            # least N valid trades are required..."), không phải thứ để đưa
+            # thẳng ra cho người đọc bản tiếng Việt.
+            text.append(
+                "Not enough samples to run a Monte Carlo simulation: only "
+                f"{result.sample_size} weekly PnL points, while the engine requires "
+                f"at least {MonteCarloSimulationEngine.MIN_SAMPLE_SIZE} samples -- "
+                "no risk distribution is inferred or fabricated from that few points"
+            )
+        else:
+            # Ca ĐỦ MẪU MÀ VẪN TỪ CHỐI (quy mô vốn giữa các tuần lệch quá xa
+            # -- xem `_MAX_IMPLIED_BASE_SPREAD`): cảnh báo ở nhánh này do
+            # chính module này viết bằng tiếng Việt nên chuyển tiếp được.
+            reason = "; ".join(w for w in result.warnings if w) or "the engine rejected it"
+            text.append(f"Monte Carlo was not simulated for this bot. Reason: {reason}")
         component = _Component(
             MONTE_CARLO_KEY,
-            "Mô phỏng Monte Carlo",
+            "Monte Carlo simulation",
             _OPACITY_RISK_SCORE,
             _OPACITY_WEIGHT,
             "UNKNOWN_GAP",
@@ -373,32 +696,159 @@ def _monte_carlo_component_and_payload(
                 else "is_valid=False"
             ],
         )
-        return component, None, text
+        return component, None, text, result
 
-    # Rare (needs >= MIN_SAMPLE_SIZE weekly points, i.e. years of lead time),
-    # but if the real engine says the sample is big enough, this IS a
-    # legitimate -- if coarser-than-trade-level -- bootstrap over real OKX
-    # data, not a fabrication, so it is reported rather than discarded.
+    # Needs >= MIN_SAMPLE_SIZE weekly points -- with the engine's current
+    # threshold (10) a typical 60004 bot's ~12 published weeks already
+    # clears it, so this is the COMMON case now, not a rare one (it was rare
+    # back when MIN_SAMPLE_SIZE was 20). Either way, if the real engine says
+    # the sample is big enough, this IS a legitimate -- if
+    # coarser-than-trade-level -- bootstrap over real OKX data, not a
+    # fabrication, so it is reported rather than discarded. A sample between
+    # MIN_SAMPLE_SIZE and THIN_SAMPLE_SIZE still runs but comes back with
+    # `sample_is_thin=True` and its own warning on `result.warnings` (see
+    # monte_carlo.py's THIN_SAMPLE_WARNING_VI) -- that warning is surfaced
+    # by the presentation layer, not re-derived here.
     summary = (
-        "Đủ mẫu để chạy Monte Carlo trên PnL tuần (thô hơn mô phỏng theo từng lệnh)"
+        "Enough samples to run Monte Carlo on weekly PnL (coarser than a per-trade simulation)"
     )
     if result.p_mdd_gt_25 is not None:
-        summary += f": xác suất sụt vốn >25% là {result.p_mdd_gt_25:.1f}%"
+        summary += f": probability of drawdown >25% is {result.p_mdd_gt_25:.1f}%"
+    if getattr(result, "sample_is_thin", False):
+        summary += " -- THIN SAMPLE, read as a reference band (see the warning below)"
     text.append(summary)
-    score = result.p_mdd_gt_25 if result.p_mdd_gt_25 is not None else 50.0
+    findings = [f"Simulated over {result.sample_size} periods, {result.iterations} iterations"]
+    # ƯU TIÊN hạng phân vị của xác suất cháy tài khoản trong quần thể đã
+    # chấm -- một câu kiểm chứng được ("tệ hơn bao nhiêu % số bot"), thay
+    # cho con số 50.0 mặc định vô căn cứ ở bản cũ.
+    ranked = _percentile_scored(MONTE_CARLO_KEY, result, data_dir)
+    if ranked is not None:
+        score = float(ranked["score"])
+        findings.append(
+            f"Percentile: probability of ruin {ranked['value']:.1f}% — worse "
+            f"than {ranked['score']:.0f}% of {ranked['population_size']} scored bots "
+            f"(population median {ranked['population_median']:.1f}%)"
+        )
+    elif result.p_mdd_gt_25 is not None:
+        # Không phải ngưỡng tự đặt: đây là CHÍNH xác suất sụt vốn quá 25%
+        # do mô phỏng trả về, dùng thẳng làm điểm trên cùng thang 0-100.
+        score = result.p_mdd_gt_25
+        findings.append(
+            f"Not enough population to rank by percentile yet; using the probability of "
+            f"drawdown >25% directly ({result.p_mdd_gt_25:.1f}%) as the score"
+        )
+    else:
+        return (
+            _Component(
+                MONTE_CARLO_KEY,
+                "Monte Carlo simulation",
+                _UNKNOWN_GAP_SCORE,
+                _OPACITY_WEIGHT,
+                "UNKNOWN_GAP",
+                0.0,
+                findings
+                + ["The simulation ran but returned no risk parameter to score"],
+            ),
+            result.model_dump(),
+            text,
+            result,
+        )
     component = _Component(
         MONTE_CARLO_KEY,
-        "Mô phỏng Monte Carlo",
+        "Monte Carlo simulation",
         score,
         _OPACITY_WEIGHT,
         "AVAILABLE",
-        0.4,
-        [
-            f"Mô phỏng trên {result.sample_size} điểm PnL tuần, {result.iterations} lần lặp"
-        ],
+        _evidence_confidence(result.sample_size, _RETURN_PATH_SATURATION_POINTS, 0.4),
+        findings,
     )
     payload = result.model_dump()
-    return component, payload, text
+    return component, payload, text, result
+
+
+def _pnl_ratio_series(
+    profile: Optional[Dict[str, Any]],
+) -> Optional[List[Dict[str, Any]]]:
+    """Normalize `profile.pnlRatios` (public-lead-traders' own multi-point
+    return series, e.g. 19 `{beginTs, pnlRatio}` rows for a 754-lead-day
+    bot) into `[{ts_ms, pnl_ratio_pct}]`, sorted ascending by time.
+
+    This is a DIFFERENT series from the weekly PnL/equity curve (`weekly`
+    argument to `assess_limited_bot`, built into `weekly_series` below): it
+    is the ranking's own running PnL-ratio snapshot, sampled at whatever
+    cadence OKX publishes it at, not one point per calendar week. Reported
+    separately, never merged into `weekly_series`, so the report layer can
+    show both without implying they share an x-axis.
+
+    `pnlRatio` is treated as a fraction (consistent with
+    EquityCurveBuilder's own weekly `pnlRatio` handling, e.g. 0.0432 for
+    4.32%), so the stored value here is already multiplied by 100 into a
+    plain percentage -- the report layer draws it as-is, no further
+    conversion. Rows missing either field are dropped rather than
+    zero-filled (see module-level "no fabrication" rule); an all-dropped
+    input returns `None`, never `[]`, so callers can hide the chart with one
+    falsy check.
+    """
+    raw = (profile or {}).get("pnlRatios")
+    if not isinstance(raw, list):
+        return None
+    rows: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        ts_ms = EquityCurveBuilder._timestamp_ms(item.get("beginTs"))
+        ratio = _float(item.get("pnlRatio"))
+        if ts_ms is None or ratio is None:
+            continue
+        rows.append({"ts_ms": ts_ms, "pnl_ratio_pct": ratio * 100.0})
+    rows.sort(key=lambda r: r["ts_ms"])
+    return rows or None
+
+
+def _weekly_series(curve: EquityCurve) -> List[Dict[str, Any]]:
+    """`curve.points` (already built once by `EquityCurveBuilder.build` in
+    `assess_limited_bot`, never recomputed here) reshaped into the plain
+    `[{begin_ts, equity, pnl, pnl_ratio}]` contract the report layer's chart
+    builder reads. `equity` is `None` for a week the builder marked
+    unusable (imprecise ratio, zero PnL, ...) -- left `None`, never
+    substituted with 0 or the previous week's value, so the report layer
+    can tell "no equity reading this week" apart from "equity was zero".
+    Already sorted ascending: `EquityCurveBuilder.build` sorts `points` by
+    `week_start_ms` before returning.
+    """
+    return [
+        {
+            "begin_ts": point.week_start_ms,
+            "equity": point.start_equity,
+            "pnl": point.pnl,
+            "pnl_ratio": point.pnl_ratio,
+        }
+        for point in curve.points
+    ]
+
+
+def _drawdown_summary(curve: EquityCurve) -> Optional[Dict[str, Any]]:
+    """The three numbers `_drawdown_component`'s own findings string already
+    prints in prose ("Sụt vốn tối đa suy từ đường vốn tuần: 95.4% (trên
+    10/12 tuần có dữ liệu dùng được)") -- pulled out here as plain fields so
+    a report page can use them in a stat tile/table without re-parsing that
+    sentence. Read straight off `curve` (the SAME curve `_drawdown_component`
+    scored from), never recomputed, so this can never drift from the score
+    that was actually used.
+
+    `None` whenever `curve.max_drawdown_pct` is unavailable (basis is not
+    WEEKLY_EQUITY_CURVE, e.g. no week had a precise enough ratio) -- this is
+    the "not measured" case `_drawdown_component` itself scores as
+    UNKNOWN_GAP, so there is no honest percentage to report here either.
+    """
+    if curve.max_drawdown_pct is None:
+        return None
+    return {
+        "max_dd_pct": curve.max_drawdown_pct,
+        "usable_weeks": curve.usable_points,
+        "total_weeks": curve.coverage_weeks,
+        "wiped_out": curve.wiped_out,
+    }
 
 
 def _opacity_component(dimension: str, label_vi: str) -> _Component:
@@ -410,28 +860,111 @@ def _opacity_component(dimension: str, label_vi: str) -> _Component:
         "UNKNOWN_CONCEALED",
         0.0,
         [
-            "Cần dữ liệu từng lệnh (sổ lệnh) để tính, mà OKX không công khai "
-            "sổ lệnh của bot này"
+            "Requires individual trade data (the ledger) to compute, and OKX does "
+            "not publish this bot's ledger"
         ],
     )
 
 
 _ALWAYS_UNAVAILABLE_LABELS_VI = {
     "profit_factor": "Profit factor",
-    "deferred_loss": "Lỗ hoãn (deferred loss)",
-    "phase_analysis": "Phân tích theo pha thị trường",
+    "deferred_loss": "Deferred loss",
+    "phase_analysis": "Market phase analysis",
     PSR_DSR_KEY: "PSR / DSR",
 }
 
 
+# Hệ số chiết khấu cho MỖI nguồn tính từ nguồn thứ hai trở đi khi gộp bằng
+# quy tắc bằng chứng độc lập bên dưới. Bốn luồng public của một bot đều mô
+# tả CÙNG MỘT tài khoản, chỉ khác endpoint và khác nhịp lấy mẫu, nên chúng
+# KHÔNG độc lập hoàn toàn -- gộp thẳng như hai nhân chứng không quen biết
+# nhau sẽ thổi phồng độ tin cậy. 0,8 là mức chiết khấu thận trọng: nguồn
+# thứ hai chỉ được tính 80% giá trị, nguồn thứ ba 64%, và cứ thế.
+_SOURCE_DEPENDENCE_DISCOUNT = 0.8
+
+
+def _combine_measured_confidence(components: List["_Component"]) -> float:
+    """Gộp độ tin cậy của các chiều ĐO ĐƯỢC theo quy tắc bằng chứng độc lập.
+
+    VÌ SAO KHÔNG DÙNG TRUNG BÌNH CÓ TRỌNG SỐ: trung bình khiến việc thêm một
+    nguồn mới LÀM GIẢM độ tin cậy nếu nguồn đó yếu hơn mức trung bình hiện
+    có -- đo thật khi thêm chiều `return_path`: 12,8% tụt xuống 8,6%. Điều
+    đó trái ngược với cách bằng chứng vận hành: biết THÊM một điều không
+    bao giờ khiến ta biết ÍT đi.
+
+    Quy tắc dùng ở đây là dạng "noisy-OR" quen thuộc trong hợp nhất bằng
+    chứng: xác suất KHÔNG nguồn nào nói được gì là tích của các
+    `(1 - c_i)`, nên độ tin cậy gộp là `1 - Π(1 - c_i)`. Hệ quả đúng với
+    trực giác và đúng với yêu cầu của sản phẩm: mỗi nguồn thêm vào chỉ có
+    thể đẩy kết quả LÊN, nhưng mỗi nguồn riêng lẻ càng mỏng thì đóng góp
+    càng nhỏ.
+
+    Các nguồn được sắp giảm dần rồi chiết khấu luỹ tiến
+    (`_SOURCE_DEPENDENCE_DISCOUNT`) vì chúng cùng mô tả một tài khoản -- xem
+    hằng số đó. Chiều không đo được (confidence = 0) không đóng góp gì và
+    cũng không bị trừ gì ở đây; hình phạt cho việc che giấu nằm ở chỗ khác
+    (hệ số phủ sóng bên dưới và điểm rủi ro của các chiều bị che).
+    """
+    values = sorted(
+        (
+            c.confidence
+            for c in components
+            if c.status == "AVAILABLE" and c.confidence > 0
+        ),
+        reverse=True,
+    )
+    if not values:
+        return 0.0
+    remaining = 1.0
+    for index, value in enumerate(values):
+        discounted = value * (_SOURCE_DEPENDENCE_DISCOUNT**index)
+        remaining *= 1.0 - max(0.0, min(1.0, discounted))
+    return 1.0 - remaining
+
+
+def _independent_stream_count(
+    profile: Optional[Dict[str, Any]],
+    stats: Optional[Dict[str, Any]],
+    curve: EquityCurve,
+    return_path: _Component,
+) -> int:
+    """Đếm các LUỒNG DỮ LIỆU CÔNG KHAI thật sự có nội dung cho bot này.
+
+    Bốn luồng, mỗi luồng là một endpoint OKX riêng và sống sót độc lập qua
+    lỗi 60004: đường vốn tuần (public-weekly-pnl), chuỗi lợi nhuận tích luỹ
+    (pnlRatios trong public-lead-traders), thống kê ngày lãi/lỗ
+    (public-stats), và hồ sơ xếp hạng (public-lead-traders).
+
+    Chỉ đếm luồng CÓ DỮ LIỆU DÙNG ĐƯỢC, không đếm luồng gọi được nhưng rỗng
+    -- nếu không thì trần độ tin cậy sẽ nới ra nhờ những nguồn không đóng
+    góp gì, đúng kiểu tự thưởng điểm mà module này phải tránh.
+    """
+    streams = 0
+    if curve.is_usable:
+        streams += 1
+    if return_path.status == "AVAILABLE":
+        streams += 1
+    if (
+        stats
+        and any(_float(stats.get(key)) is not None for key in ("winRatio", "investAmt"))
+        or _int((stats or {}).get("profitDays")) is not None
+    ):
+        streams += 1
+    if profile and any(
+        _float(profile.get(key)) is not None for key in ("aum", "pnl", "pnlRatio")
+    ):
+        streams += 1
+    return streams
+
+
 def _verdict_for_risk(risk: float) -> str:
     if risk >= 80:
-        return "RỦI RO CAO (ĐÁNH GIÁ HẠN CHẾ)"
+        return "HIGH RISK (LIMITED ASSESSMENT)"
     if risk >= 60:
-        return "RỦI RO ĐÁNG CHÚ Ý (ĐÁNH GIÁ HẠN CHẾ)"
+        return "NOTABLE RISK (LIMITED ASSESSMENT)"
     if risk >= 40:
-        return "CẦN THẬN TRỌNG (ĐÁNH GIÁ HẠN CHẾ)"
-    return "CHƯA ĐỦ BẰNG CHỨNG ĐỂ YÊN TÂM (ĐÁNH GIÁ HẠN CHẾ)"
+        return "NEEDS CAUTION (LIMITED ASSESSMENT)"
+    return "NOT ENOUGH EVIDENCE TO BE CONFIDENT (LIMITED ASSESSMENT)"
 
 
 def assess_limited_bot(
@@ -445,6 +978,7 @@ def assess_limited_bot(
     weekly: Optional[List[Dict[str, Any]]] = None,
     monte_carlo_iterations: int = _MONTE_CARLO_ITERATIONS,
     monte_carlo_seed: Optional[int] = _MONTE_CARLO_SEED,
+    data_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Build the limited/not-found assessment contract for one uniqueCode.
 
@@ -466,12 +1000,12 @@ def assess_limited_bot(
 
     if status == STATUS_NOT_FOUND:
         text = [
-            f"Không đánh giá được mã {code}: đây là đánh giá hạn chế nhưng "
-            "ngay cả các endpoint dự phòng cũng không có dữ liệu.",
+            f"Could not assess code {code}: this is a limited assessment, but "
+            "even the fallback endpoints have no data.",
             reason,
-            "Không tìm thấy mã này ở bảng xếp hạng lead traders, weekly-pnl "
-            "hay public-stats của OKX -- nhiều khả năng đây là uniqueCode sai "
-            "hoặc không tồn tại, không phải một bot đang che giấu sổ lệnh.",
+            "This code was not found in the lead-trader ranking, weekly-pnl, "
+            "or OKX public-stats -- most likely this is a wrong or nonexistent "
+            "uniqueCode, not a bot hiding its ledger.",
         ]
         unavailable = list(ALWAYS_UNAVAILABLE) + [MONTE_CARLO_KEY, PSR_DSR_KEY]
         return {
@@ -480,7 +1014,7 @@ def assess_limited_bot(
             "name": display_name,
             "limited_reason": reason,
             "unavailable": unavailable,
-            "verdict": "KHÔNG TÌM THẤY",
+            "verdict": "NOT FOUND",
             "risk": None,
             "quality": None,
             "confidence": NOT_FOUND_CONFIDENCE,
@@ -491,30 +1025,60 @@ def assess_limited_bot(
 
     if status != STATUS_LIMITED:
         raise ValueError(
-            f"assess_limited_bot chỉ nhận LIMITED/NOT_FOUND, nhận '{status}'"
+            f"assess_limited_bot only accepts LIMITED/NOT_FOUND, got '{status}'"
         )
 
     curve = EquityCurveBuilder.build(weekly or [])
-    drawdown = _drawdown_component(curve)
-    stability = _stability_component(stats)
-    mc_component, mc_payload, mc_text = _monte_carlo_component_and_payload(
-        weekly, curve, monte_carlo_iterations, monte_carlo_seed
+    # Mô phỏng chạy TRƯỚC: chiều sụt vốn nay chấm bằng hạng phân vị của
+    # chính tham số mô phỏng (`p95_max_drawdown`) trong quần thể đã chấm,
+    # nên nó cần kết quả này chứ không thể dựng độc lập như trước.
+    mc_component, mc_payload, mc_text, mc_result = _monte_carlo_component_and_payload(
+        weekly,
+        curve,
+        monte_carlo_iterations,
+        monte_carlo_seed,
+        profile=profile,
+        stats=stats,
+        data_dir=data_dir,
     )
+    drawdown = _drawdown_component(curve, mc_result, data_dir)
+    stability = _stability_component(stats)
 
     opacity_components = [
         _opacity_component(name_, label_)
         for name_, label_ in _ALWAYS_UNAVAILABLE_LABELS_VI.items()
     ]
 
-    components = [drawdown, stability, mc_component] + opacity_components
+    return_path = _return_path_component(profile)
+    components = [drawdown, stability, return_path, mc_component] + opacity_components
     total_weight = sum(c.weight for c in components)
     risk = sum(c.score * c.weight for c in components) / total_weight
     risk = max(0.0, min(100.0, risk))
 
-    dimension_confidence = (
-        sum(c.confidence * c.weight for c in components) / total_weight
+    # Hai đại lượng KHÁC NHAU, trước đây bị gộp làm một:
+    #   * `measured_confidence` -- tin được bao nhiêu vào NHỮNG GÌ ĐÃ ĐO,
+    #     gộp theo quy tắc bằng chứng độc lập (xem
+    #     `_combine_measured_confidence`): kết hợp được nhiều nguồn thì cao
+    #     hơn, mỗi nguồn mỏng thì đóng góp ít hơn.
+    #   * `coverage` -- đo được bao nhiêu phần của bức tranh rủi ro, tính
+    #     bằng tỉ trọng các chiều đo được trên tổng trọng số. Đây mới là
+    #     chỗ việc che giấu bị phạt, và nó vẫn nguyên vẹn như trước.
+    # Nhân hai thứ lại: biết rõ một mẩu nhỏ vẫn chỉ là biết một mẩu nhỏ.
+    measured_confidence = _combine_measured_confidence(components)
+    coverage = (
+        sum(c.weight for c in components if c.status == "AVAILABLE") / total_weight
     )
-    confidence = min(LIMITED_CONFIDENCE_CEILING, dimension_confidence * 100.0)
+    dimension_confidence = measured_confidence * coverage
+    # Trần theo SỐ LUỒNG DỮ LIỆU thật sự có nội dung, không phải một con số
+    # phẳng cho mọi bot (xem `_CONFIDENCE_CEILING_*`): còn một luồng thì
+    # trần thấp, kết hợp được bốn luồng thì được phép tin hơn -- nhưng vẫn
+    # luôn dưới mức tin cậy thấp nhất của một bot công khai đầy đủ.
+    streams = _independent_stream_count(profile, stats, curve, return_path)
+    ceiling = min(
+        _CONFIDENCE_CEILING_ABSOLUTE,
+        _CONFIDENCE_CEILING_BASE + _CONFIDENCE_CEILING_PER_STREAM * streams,
+    )
+    confidence = min(ceiling, dimension_confidence * 100.0)
 
     quality = _quality_score(profile, stats, curve)
 
@@ -532,7 +1096,7 @@ def assess_limited_bot(
     verdict = _verdict_for_risk(risk)
 
     text: List[str] = [
-        f"Đây là ĐÁNH GIÁ HẠN CHẾ cho mã {code} ({display_name}): {reason}",
+        f"This is a LIMITED ASSESSMENT for code {code} ({display_name}): {reason}",
     ]
     profile_line = _profile_text(profile)
     if profile_line:
@@ -544,15 +1108,15 @@ def assess_limited_bot(
     )
     text.extend(mc_text)
     text.append(
-        "Không tính được (cần dữ liệu từng lệnh mà OKX không công khai): "
+        "Could not be computed (requires individual trade data OKX does not publish): "
         + ", ".join(_ALWAYS_UNAVAILABLE_LABELS_VI[d] for d in ALWAYS_UNAVAILABLE)
         + ", PSR/DSR"
-        + (", Mô phỏng Monte Carlo" if mc_component.status != "AVAILABLE" else "")
+        + (", Monte Carlo simulation" if mc_component.status != "AVAILABLE" else "")
     )
     text.append(
-        f"Kết luận: {verdict} -- điểm rủi ro {risk:.0f}/100, độ tin cậy "
-        f"{confidence:.0f}/100 (thấp hơn hẳn một đánh giá đầy đủ có sổ lệnh, vì "
-        "thiếu toàn bộ bằng chứng cấp độ từng lệnh)"
+        f"CONCLUSION: {verdict} — risk score {risk:.0f}/100, confidence "
+        f"{confidence:.0f}/100 (well below a full assessment with a visible ledger, "
+        "because every trade-level piece of evidence is missing)"
     )
 
     evidence = {
@@ -561,6 +1125,15 @@ def assess_limited_bot(
         "weekly_points": len(weekly or []),
         "equity_curve_basis": curve.basis,
         "components": [c.to_dict() for c in components],
+        # Added on top of the original contract above (see module's own
+        # task history) -- three keys the report layer needs to draw real
+        # charts/tables instead of the bare point COUNT `weekly_points`
+        # already gave it. Every one of these is read straight off data
+        # this function already computed above (`curve`, `profile`), never
+        # a new computation and never touching risk/quality/confidence.
+        "weekly_series": _weekly_series(curve),
+        "drawdown_summary": _drawdown_summary(curve),
+        "pnl_ratio_series": _pnl_ratio_series(profile),
     }
 
     return {
@@ -581,7 +1154,7 @@ def assess_limited_bot(
 
 def _profile_text(profile: Optional[Dict[str, Any]]) -> Optional[str]:
     if not profile:
-        return "Hồ sơ (bảng xếp hạng lead traders): không có (bot đã rớt hạng hoặc ngoài phạm vi bảng xếp hạng)"
+        return "Profile (lead-trader ranking): none (the bot has dropped off the ranking or is out of its scope)"
     aum = _float(profile.get("aum"))
     pnl = _float(profile.get("pnl"))
     lead_days = _int(profile.get("leadDays"))
@@ -590,13 +1163,13 @@ def _profile_text(profile: Optional[Dict[str, Any]]) -> Optional[str]:
     if aum is not None:
         parts.append(f"AUM {aum:,.0f} USDT")
     if pnl is not None:
-        parts.append(f"tổng PnL {pnl:,.0f} USDT")
+        parts.append(f"total PnL {pnl:,.0f} USDT")
     if lead_days is not None:
-        parts.append(f"{lead_days} ngày làm lead trader")
+        parts.append(f"{lead_days} days as a lead trader")
     if rank is not None:
-        parts.append(f"hạng #{rank} trên bảng xếp hạng lead traders")
-    return "Hồ sơ: " + (
-        ", ".join(parts) if parts else "có trong bảng xếp hạng nhưng thiếu chi tiết"
+        parts.append(f"rank #{rank} on the lead-trader ranking")
+    return "Profile: " + (
+        ", ".join(parts) if parts else "present in the ranking but missing detail"
     )
 
 

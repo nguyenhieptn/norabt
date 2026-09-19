@@ -7,7 +7,7 @@ verdict layer read them, so a bot judged "safe" at one arbitrary horizon (or
 at a horizon longer than any data ever observed) read no differently from one
 that is actually stable everywhere. `decide()` now appends plain-language
 context about this to `reason`, strictly additive: it must never move a bot
-between buckets, and a veto-driven NGUY HIỂM stays NGUY HIỂM.
+between states, and a veto-driven "SỤT VỐN: CAO · CHẤT LƯỢNG: YẾU" stays that way.
 """
 
 from __future__ import annotations
@@ -35,8 +35,8 @@ from Agent.backend.mcp.schemas.bot_result import (
     TradeStatistics,
 )
 from Agent.backend.qc.scoring.verdict import (
-    VERDICT_DANGEROUS,
-    VERDICT_PROMISING,
+    VERDICT_HIGH_DD_WEAK_Q,
+    VERDICT_LOW_DD_GOOD_Q,
     decide,
 )
 
@@ -145,7 +145,7 @@ def test_horizon_exceeding_observed_data_is_named_as_extrapolation():
     )
     verdict = decide(_bot(sim), risk_score=20.0, quality_score=80.0)
 
-    assert "ngoại suy" in verdict.reason
+    assert "extrapolation" in verdict.reason
 
 
 def test_horizon_within_observed_data_adds_no_extrapolation_warning():
@@ -157,12 +157,12 @@ def test_horizon_within_observed_data_adds_no_extrapolation_warning():
     verdict = decide(_bot(sim), risk_score=20.0, quality_score=80.0)
 
     assert "ngoại suy" not in verdict.reason
-    assert verdict.verdict == VERDICT_PROMISING
+    assert verdict.verdict == VERDICT_LOW_DD_GOOD_Q
 
 
 def test_a_veto_driven_dangerous_verdict_stays_dangerous_with_horizon_notes():
     """The absolute safety constraint: horizon commentary is context, never a
-    downgrade. A bot vetoed at NGUY HIỂM must still be NGUY HIỂM after this
+    downgrade. A bot vetoed into the high-drawdown/weak-quality state must still be there after this
     text is appended, whatever the horizon situation looks like.
     """
     sim = _sim(
@@ -183,10 +183,10 @@ def test_a_veto_driven_dangerous_verdict_stays_dangerous_with_horizon_notes():
         risk_drivers=["rủi ro đuôi mô phỏng cực đoan"],
     )
 
-    assert verdict.verdict == VERDICT_DANGEROUS
+    assert verdict.verdict == VERDICT_HIGH_DD_WEAK_Q
     assert "rủi ro đuôi mô phỏng cực đoan" in verdict.reason
     assert MonteCarloSimulationEngine.SHORT_ONLY_LABEL in verdict.reason
-    assert "ngoại suy" in verdict.reason
+    assert "extrapolation" in verdict.reason
 
 
 def test_bots_without_simulation_results_are_unaffected():

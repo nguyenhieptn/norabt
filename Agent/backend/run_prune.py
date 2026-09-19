@@ -11,18 +11,22 @@ from Agent.backend.qc.reporting.cohort import CohortAssessmentService
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Liệt kê (và tuỳ chọn xoá) các thư mục snapshot trùng nội dung, "
-            "giữ lại bản có provenance đầy đủ nhất cho mỗi bot"
+            "List (and optionally delete) duplicate-content snapshot folders, "
+            "keeping the copy with the fullest provenance for each bot"
         )
     )
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Thực sự xoá. Mặc định chỉ in ra những gì sẽ bị xoá.",
+        help="Actually delete. By default, only prints what would be deleted.",
     )
     args = parser.parse_args()
 
     data_dir = Path(config.DATA_DIR)
+    # 1/1 là CỐ Ý, không phải lệch khỏi tham số sản xuất: công cụ này chỉ
+    # cần `duplicate_snapshots` để tìm ảnh chụp trùng, không đọc một con số
+    # mô phỏng nào. Chạy 10.000 lượt ở đây là đốt vài phút cho kết quả bị
+    # vứt đi. Đừng "sửa" cho khớp `PRODUCTION_SIMULATION_*`.
     report = CohortAssessmentService(persist_history=False).scan(
         simulation_iterations=1, simulation_horizon=1
     )
@@ -36,12 +40,12 @@ def main() -> int:
                 removable.append((row.nick_name, location))
 
     if not removable:
-        print("Không có thư mục trùng nào để dọn.")
+        print("No duplicate folders to clean up.")
         return 0
 
-    print(f"{'CHẾ ĐỘ XOÁ' if args.apply else 'CHẠY THỬ — chưa xoá gì'}")
+    print(f"{'DELETE MODE' if args.apply else 'DRY RUN -- nothing deleted yet'}")
     print(
-        f"Sẽ {'xoá' if args.apply else 'xoá (nếu chạy --apply)'} {len(removable)} thư mục:\n"
+        f"Will {'delete' if args.apply else 'delete (if run with --apply)'} {len(removable)} folders:\n"
     )
     by_bot: dict[str, list[str]] = {}
     for nick, location in removable:
@@ -50,13 +54,13 @@ def main() -> int:
         selected = next(
             row.selected_snapshot for row in report.rows if row.nick_name == nick
         )
-        print(f"  {nick} — giữ lại {selected}")
+        print(f"  {nick} -- keeping {selected}")
         for location in locations:
-            print(f"      bỏ  {location}")
+            print(f"      drop  {location}")
 
     if not args.apply:
         print(
-            "\nChạy lại với --apply để xoá thật. Dữ liệu gốc vẫn còn ở /home/ubuntu/norabt/data."
+            "\nRe-run with --apply to actually delete. The original data is still at /home/ubuntu/norabt/data."
         )
         return 0
 
@@ -67,7 +71,7 @@ def main() -> int:
         if target.is_dir():
             shutil.rmtree(target)
             removed += 1
-    print(f"\nĐã xoá {removed} thư mục trùng.")
+    print(f"\nDeleted {removed} duplicate folders.")
     return 0
 
 

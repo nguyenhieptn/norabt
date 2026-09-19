@@ -69,13 +69,23 @@ from Agent.backend.mcp.service import BotDataUnavailableError
 from Agent.backend.payments import x402
 from Agent.backend.pipeline import RiskSupervisionPipeline
 from Agent.backend.qc.reporting import assessment_store
+from Agent.backend.qc.scoring.verdict import label_from_scores
 
 DATA_DIR = Path(config.DATA_DIR)
 VALID_VENUES = ("CEX", "DEX")
-# The four labels the QC narrative generator (reasons.py) actually emits.
-# Kept as a tuple, not derived from the index at call time, so a caller gets
-# the same error whether or not any bot has been assessed yet.
-VALID_VERDICTS = ("AN TOÀN", "TIỀM NĂNG", "TIỀM ẨN", "NGUY HIỂM")
+# The 6 two-axis labels the QC verdict layer (scoring/verdict.py) actually
+# emits: 4 combinations of drawdown (CAO/THẤP) x quality (TỐT/YẾU), plus the
+# full-override "HIDDEN RISK" and the no-score "INSUFFICIENT EVIDENCE". Kept as
+# a tuple, not derived from the index at call time, so a caller gets the
+# same error whether or not any bot has been assessed yet.
+VALID_VERDICTS = (
+    "DRAWDOWN: HIGH · QUALITY: GOOD",
+    "DRAWDOWN: HIGH · QUALITY: WEAK",
+    "DRAWDOWN: LOW · QUALITY: GOOD",
+    "DRAWDOWN: LOW · QUALITY: WEAK",
+    "HIDDEN RISK",
+    "INSUFFICIENT EVIDENCE",
+)
 
 # Every identifier below (asset ticker, bot folder, unique code) becomes a path
 # segment somewhere downstream. Whitelisting the character set is what makes
@@ -87,12 +97,14 @@ mcp = MCPServer(
     name="okx-risk-supervisor",
     title="OKX Copy-Trading Bot Risk Supervisor",
     instructions=(
-        "Chấm điểm rủi ro bot copy-trading OKX qua 3 bước: quan sát thị trường, "
-        "phân tích bot + Monte Carlo, và QC tổng hợp thành khuyến nghị tiếng Việt. "
-        "Dùng các tool tra cứu (list_assets, list_bots, list_assessed_bots, "
-        "get_assessment) trước -- chúng đọc cache có sẵn và trả lời tức thì. "
-        "Chỉ gọi assess_bot/get_market khi cần một con số mới chưa có trong cache; "
-        "hai tool này chạy pipeline thật nên chậm hơn."
+        "Scores the risk of an OKX copy-trading bot in 3 steps: observe the "
+        "market, analyze the bot with a Monte Carlo simulation, then run QC "
+        "to synthesize a recommendation. Use the lookup "
+        "tools first (list_assets, list_bots, list_assessed_bots, "
+        "get_assessment) -- they read from an existing cache and answer "
+        "instantly. Only call assess_bot/get_market when you need a fresh "
+        "figure that is not already in the cache; those two tools run the "
+        "real pipeline and are slower."
     ),
 )
 
@@ -105,12 +117,13 @@ def _require_token(value: Any, field_name: str) -> str:
     rule -- a value like "../../etc" or "cex/BTC" must never reach a path join.
     """
     if not isinstance(value, str) or not value.strip():
-        raise ToolError(f"{field_name} không được để trống")
+        raise ToolError(f"{field_name} must not be empty")
     token = value.strip()
     if token in (".", "..") or not _SAFE_TOKEN.match(token) or ".." in token:
         raise ToolError(
-            f"{field_name}={value!r} chứa ký tự không hợp lệ hoặc có dấu hiệu "
-            f"path traversal (chỉ cho phép chữ, số, '_', '-', '.')"
+            f"{field_name}={value!r} contains invalid characters or looks "
+            f"like a path traversal attempt (only letters, digits, '_', "
+            f"'-', '.' are allowed)"
         )
     return token
 
@@ -119,7 +132,7 @@ def _require_venue(venue_type: Any) -> str:
     venue = str(venue_type).strip().upper() if venue_type is not None else ""
     if venue not in VALID_VENUES:
         raise ToolError(
-            f"venue_type={venue_type!r} không hợp lệ; chỉ nhận CEX hoặc DEX"
+            f"venue_type={venue_type!r} is invalid; only CEX or DEX is accepted"
         )
     return venue
 
@@ -212,6 +225,13 @@ def _require_payment(ctx: Optional[Context], tool_name: str) -> None:
         return
     settings = x402.X402Settings.from_env()
 
+    # NOTE ON LANGUAGE: the four ToolError messages in this function are
+    # deliberately left in Vietnamese, unlike the rest of this file. Each one
+    # is asserted verbatim (via `pytest.raises(..., match=...)` on a
+    # Vietnamese substring) by Agent/test/test_agent_server.py, which is out
+    # of scope for this translation pass. Translating these strings without
+    # also updating that test file would silently break it. See this
+    # module's own translation task notes for the exact test lines.
     try:
         requirements = x402.build_payment_requirements(tool_name, settings)
     except ValueError as exc:
@@ -231,10 +251,10 @@ def _require_payment(ctx: Optional[Context], tool_name: str) -> None:
         )
         header_b64 = challenge["headers"][x402.PAYMENT_REQUIRED_HEADER]
         raise ToolError(
-            f"Cần thanh toán trước khi gọi tool '{tool_name}' (giá "
-            f"{challenge['usd_price']}). Gửi lại yêu cầu kèm header "
-            f"'{x402.PAYMENT_SIGNATURE_HEADER}' chứa bằng chứng thanh toán "
-            f"hợp lệ (chuẩn x402, xem Agent/docs/okx_marketplace.md). "
+            f"Payment is required before calling tool '{tool_name}' (price "
+            f"{challenge['usd_price']}). Resend the request with a "
+            f"'{x402.PAYMENT_SIGNATURE_HEADER}' header carrying valid proof "
+            f"of payment (x402 standard, see Agent/docs/okx_marketplace.md). "
             f"{x402.PAYMENT_REQUIRED_HEADER}={header_b64}"
         )
 
@@ -247,8 +267,8 @@ def _require_payment(ctx: Optional[Context], tool_name: str) -> None:
 
     if not result.is_valid:
         raise ToolError(
-            f"Thanh toán không hợp lệ cho tool '{tool_name}' "
-            f"(lý do: {result.invalid_reason}): {result.invalid_message}"
+            f"Invalid payment for tool '{tool_name}' "
+            f"(reason: {result.invalid_reason}): {result.invalid_message}"
         )
     # result.is_valid is True here: a facilitator-confirmed payment. Fall
     # through and let the tool body below run.
@@ -269,8 +289,9 @@ def _assessment_index() -> Dict[str, Any]:
     index = _read_json_or_none(index_path)
     if index is None:
         raise ToolError(
-            "Chưa có data/assessment/index.json -- bước 3 (QC chấm điểm) chưa "
-            "chạy lần nào, cần chạy pipeline chấm điểm trước khi tra cứu."
+            "data/assessment/index.json does not exist yet -- step 3 (QC "
+            "scoring) has never run; run the scoring pipeline before "
+            "looking anything up."
         )
     return index
 
@@ -289,8 +310,8 @@ def list_assets(ctx: Context) -> Dict[str, Any]:
                 assets.setdefault(asset_dir.name, []).append(venue_type)
     if not assets:
         raise ToolError(
-            f"Không tìm thấy dữ liệu asset nào dưới {DATA_DIR} (cex/, dex/ trống "
-            f"hoặc thiếu); cần crawl dữ liệu trước."
+            f"No asset data found under {DATA_DIR} (cex/, dex/ are empty or "
+            f"missing); crawl data before calling this tool."
         )
     return {
         "assets": [
@@ -308,8 +329,8 @@ def list_bots(asset: str, venue_type: str, ctx: Context) -> Dict[str, Any]:
     bot_root = DATA_DIR / venue.lower() / clean_asset / "bot"
     if not bot_root.is_dir():
         raise ToolError(
-            f"Asset {clean_asset} chưa có dữ liệu bot trên {venue} trong dataset "
-            f"(thiếu thư mục {bot_root}); cần crawl trước."
+            f"Asset {clean_asset} has no bot data on {venue} in the dataset "
+            f"(missing directory {bot_root}); crawl it first."
         )
     bots = []
     for bot_dir in sorted(p for p in bot_root.iterdir() if p.is_dir()):
@@ -327,8 +348,8 @@ def list_bots(asset: str, venue_type: str, ctx: Context) -> Dict[str, Any]:
         )
     if not bots:
         raise ToolError(
-            f"Asset {clean_asset} trên {venue} có thư mục bot nhưng không bot nào "
-            f"có overview.json hợp lệ; dữ liệu crawl có thể chưa hoàn tất."
+            f"Asset {clean_asset} on {venue} has a bot directory but no bot "
+            f"has a valid overview.json; the crawl may not have finished."
         )
     return {"asset": clean_asset, "venue_type": venue, "bots": bots}
 
@@ -337,23 +358,51 @@ def list_bots(asset: str, venue_type: str, ctx: Context) -> Dict[str, Any]:
 def list_assessed_bots(ctx: Context, verdict: Optional[str] = None) -> Dict[str, Any]:
     """List QC-scored bots from data/assessment/index.json, optionally filtered by verdict.
 
-    verdict: one of AN TOÀN / TIỀM NĂNG / TIỀM ẨN / NGUY HIỂM (case-insensitive).
+    verdict: one of the 6 labels in VALID_VERDICTS above (case-insensitive).
     Leave empty to list every scored bot.
+
+    Backward compatibility (task's own explicit requirement): `index.json`'s
+    own stored `verdict` field on each summary row may still be one of the 4
+    retired single-axis labels for a bot scored before the two-axis
+    relabeling. That summary row alone cannot recompute the new label (it
+    does not carry `hidden_risk_flags`), so every row's `verdict` is
+    recomputed here from that bot's own FULL assessment.json instead --
+    same rule `get_assessment` below and `Agent/backend/web/admin_page.py`'s
+    listing page already apply. This project's own dataset is at most a few
+    dozen assessed bots, so the extra small file read per row costs nothing
+    observable next to the index.json read this tool already does.
     """
     _require_payment(ctx, "list_assessed_bots")
     index = _assessment_index()
-    bots = index.get("bots", [])
+    bots = []
+    for entry in index.get("bots", []):
+        entry = dict(entry)
+        venue, _, symbol = str(entry.get("slot", "")).partition("/")
+        code = entry.get("unique_code")
+        payload = (
+            assessment_store.load_bot(DATA_DIR, venue, symbol, code)
+            if venue and symbol and code
+            else None
+        )
+        cham_diem = payload.get("scoring") if isinstance(payload, dict) else None
+        if isinstance(cham_diem, dict):
+            entry["verdict"] = label_from_scores(
+                cham_diem.get("risk_score"),
+                cham_diem.get("quality_score"),
+                cham_diem.get("hidden_risk_flags") or [],
+            )
+        bots.append(entry)
     matched_verdict = None
     if verdict is not None and verdict.strip():
         # Case-insensitive on input, but the result always echoes back one of
-        # the four canonical labels so a caller can't be misled into thinking
-        # a typo'd verdict is a real fifth category.
+        # the six canonical labels so a caller can't be misled into thinking
+        # a typo'd verdict is a real seventh category.
         matched_verdict = next(
             (v for v in VALID_VERDICTS if v.upper() == verdict.strip().upper()), None
         )
         if matched_verdict is None:
             raise ToolError(
-                f"verdict={verdict!r} không hợp lệ; chỉ nhận một trong: "
+                f"verdict={verdict!r} is invalid; must be one of: "
                 f"{', '.join(VALID_VERDICTS)}"
             )
         bots = [b for b in bots if b.get("verdict") == matched_verdict]
@@ -371,8 +420,8 @@ def get_assessment(unique_code: str, ctx: Context) -> Dict[str, Any]:
     )
     if entry is None:
         raise ToolError(
-            f"Không tìm thấy bot với unique_code={clean_code!r} trong "
-            f"data/assessment/index.json; bot này chưa được QC chấm điểm."
+            f"No bot found with unique_code={clean_code!r} in "
+            f"data/assessment/index.json; this bot has not been QC-scored yet."
         )
     venue, _, symbol = str(entry.get("slot", "")).partition("/")
     payload = (
@@ -382,9 +431,23 @@ def get_assessment(unique_code: str, ctx: Context) -> Dict[str, Any]:
     )
     if payload is None:
         raise ToolError(
-            f"Bot {clean_code!r} có trong index nhưng file assessment.json bị "
-            f"thiếu hoặc slot '{entry.get('slot')}' không đọc được; dữ liệu có "
-            f"thể đã bị xoá hoặc ghi dở."
+            f"Bot {clean_code!r} is in the index but its assessment.json is "
+            f"missing or slot '{entry.get('slot')}' could not be read; the "
+            f"data may have been deleted or only partially written."
+        )
+    # Backward compatibility (same rule as admin_page.py's listing page): a
+    # file written before the two-axis relabeling still carries one of the 4
+    # retired labels in khuyen_nghi.ket_luan. Unlike list_assessed_bots
+    # above, the FULL per-bot document is available here, with the scores
+    # and hidden_risk_flags the recompute needs -- so, unlike that tool,
+    # this one never has to hand back a stale label.
+    khuyen_nghi = payload.get("recommendation")
+    cham_diem = payload.get("scoring")
+    if isinstance(khuyen_nghi, dict) and isinstance(cham_diem, dict):
+        khuyen_nghi["verdict"] = label_from_scores(
+            cham_diem.get("risk_score"),
+            cham_diem.get("quality_score"),
+            cham_diem.get("hidden_risk_flags") or [],
         )
     return payload
 
@@ -411,7 +474,7 @@ def assess_bot(
         result = pipeline.run(clean_asset, clean_folder, venue_type=venue)
     except (BotDataUnavailableError, MarketDataUnavailableError, ValueError) as exc:
         raise ToolError(
-            f"Không thể chấm điểm bot {clean_folder!r} ({clean_asset}/{venue}): {exc}"
+            f"Could not score bot {clean_folder!r} ({clean_asset}/{venue}): {exc}"
         ) from exc
     assessment = result.risk_assessment
     decision = result.control_decision
@@ -455,7 +518,7 @@ def get_market(symbol: str, ctx: Context, venue_type: str = "CEX") -> Dict[str, 
         result = MarketService().get_market_result(clean_symbol, venue_type=venue)
     except (MarketDataUnavailableError, ValueError) as exc:
         raise ToolError(
-            f"Không thể lấy dữ liệu thị trường {clean_symbol}/{venue}: {exc}"
+            f"Could not fetch market data for {clean_symbol}/{venue}: {exc}"
         ) from exc
     return result.model_dump(mode="json")
 
@@ -472,24 +535,26 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python3 -m Agent.backend.agent_server",
         description=(
-            "MCP server cho Risk Supervisor. Mặc định stdio (dùng cho client "
-            "local như Claude Code/Claude Desktop); dùng --transport http để "
-            "phục vụ client ở xa (bắt buộc cho OKX AI Marketplace)."
+            "MCP server for the Risk Supervisor. Defaults to stdio (for a "
+            "local client such as Claude Code/Claude Desktop); use "
+            "--transport http to serve a remote client (required for the "
+            "OKX AI Marketplace)."
         ),
     )
     parser.add_argument(
         "--transport",
         choices=("stdio", "http"),
         default="stdio",
-        help="stdio (mặc định, local) hoặc http (streamable HTTP, cho phép gọi từ xa)",
+        help="stdio (default, local) or http (streamable HTTP, allows remote calls)",
     )
     parser.add_argument(
         "--host",
         default="127.0.0.1",
         help=(
-            "Chỉ dùng với --transport http. Mặc định 127.0.0.1 (chỉ máy này gọi "
-            "được). Dùng 0.0.0.0 để mở ra mọi interface mạng -- chỉ làm vậy sau "
-            "reverse proxy/tường lửa đáng tin cậy, vì server chưa có xác thực."
+            "Only used with --transport http. Defaults to 127.0.0.1 (only "
+            "this machine can call it). Use 0.0.0.0 to open every network "
+            "interface -- only do this behind a trusted reverse proxy/"
+            "firewall, since the server has no authentication of its own."
         ),
     )
     parser.add_argument(
@@ -497,9 +562,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_HTTP_PORT,
         help=(
-            "Chỉ dùng với --transport http. Mặc định "
-            f"{DEFAULT_HTTP_PORT}; dùng 0 để nhờ hệ điều hành cấp một cổng "
-            "trống (hữu ích khi chạy nhiều instance song song, ví dụ test)."
+            "Only used with --transport http. Defaults to "
+            f"{DEFAULT_HTTP_PORT}; use 0 to let the OS assign a free port "
+            "(useful when running several instances in parallel, e.g. tests)."
         ),
     )
     return parser
@@ -521,6 +586,11 @@ def main(argv: Optional[List[str]] = None) -> None:
         # A hard requirement from the plan: binding every interface must never
         # happen silently, because this server already returns risk verdicts
         # and will soon carry payments, and it has no auth of its own yet.
+        # NOTE ON LANGUAGE: this message is deliberately left in Vietnamese,
+        # unlike the rest of this file. Agent/test/test_agent_server.py
+        # asserts `"CẢNH BÁO" in out` verbatim on this printed text, and that
+        # test file is out of scope for this translation pass; translating
+        # this string would silently break it.
         print(
             "CẢNH BÁO: server đang lắng nghe trên MỌI interface mạng (0.0.0.0) "
             "và CHƯA có cơ chế xác thực -- bất kỳ máy nào truy cập được cổng "

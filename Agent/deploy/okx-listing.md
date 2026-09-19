@@ -15,32 +15,35 @@ OKX Bot Risk Supervisor
 
 ## Mô tả ngắn (dòng hiện trên thẻ)
 ```
-Chấm điểm rủi ro lead trader OKX từ dữ liệu công khai: mô phỏng 10.000 kịch bản
-trên sổ lệnh đã chốt, xếp 4 mức, kèm giải thích vì sao.
+Risk scoring for OKX lead traders from public data: 10,000 simulated scenarios
+on the closed trade book, a two-axis verdict, and a plain-English explanation
+of why.
 ```
 
 ## Mô tả đầy đủ
 ```
-Nhập uniqueCode của một lead trader OKX, nhận lại đánh giá rủi ro có cơ sở.
+Give it the uniqueCode of an OKX lead trader and get back a risk assessment you
+can check.
 
-Hệ thống chỉ dùng dữ liệu công khai của OKX, chỉ tính trên LỆNH ĐÃ CHỐT, và
-nói rõ những gì không đo được thay vì đoán.
+The system uses only OKX public data, computes only on CLOSED trades, and states
+plainly what it could not measure instead of guessing.
 
-Đo gì:
-- Mô phỏng 10.000 kịch bản bằng stationary bootstrap (Politis & Romano 1994)
-  trên chính sổ lệnh của bot, cho ra phân vị lãi/lỗ và rủi ro đuôi
-- Probabilistic Sharpe Ratio và Deflated Sharpe Ratio (Bailey & López de Prado)
-  để tách lợi thế thật khỏi may mắn do được chọn trong nhiều ứng viên
-- Khoảng cách giữa sổ đã chốt và sổ đang mở — phát hiện mẫu chốt lời sớm, ôm lỗ chờ gỡ
-- Phân tích hành vi theo pha thị trường
-- Xếp loại: AN TOÀN / TIỀM NĂNG / TIỀM ẨN / NGUY HIỂM, kèm điểm chất lượng và
-  điểm rủi ro riêng biệt, và một bản giải thích bằng văn bản
+What it measures:
+- 10,000 simulated scenarios with a stationary bootstrap (Politis & Romano, 1994)
+  on the bot's own trade book, producing profit/loss percentiles and tail risk
+- Probabilistic Sharpe Ratio and Deflated Sharpe Ratio (Bailey & Lopez de Prado)
+  to separate real edge from luck that comes from screening many candidates
+- The gap between the closed book and the open book — this is what exposes the
+  pattern of taking wins early and holding losses in the hope of a bounce
+- Behaviour across market phases (trend and volatility)
+- A two-axis verdict — drawdown high or low, quality good or weak — plus a
+  separate risk score, quality score, and a written explanation
 
-Nguyên tắc: thiếu dữ liệu không bao giờ được quy thành an toàn. Bot không công
-khai sổ lệnh vẫn đánh giá được ở mức hạn chế, nhưng điểm rủi ro CAO HƠN và độ
-tin cậy THẤP HƠN một bot minh bạch cùng số liệu bề mặt.
+Guiding rule: missing data is never scored as safe. A bot that does not publish
+its trade book can still be assessed, but with a HIGHER risk score and LOWER
+confidence than a transparent bot showing the same surface numbers.
 
-Không phải lời khuyên đầu tư. Không đặt lệnh, không truy cập tài khoản của ai.
+This is not investment advice. It places no orders and accesses no one's account.
 ```
 
 ## Danh mục
@@ -81,8 +84,12 @@ curl -X POST https://<DOMAIN>/api/analyze \
   -d '{"code":"EF1CC6F40E834D1A"}'
 ```
 
-Trả về điểm rủi ro, điểm chất lượng, xếp loại, kết quả mô phỏng Monte Carlo và
-bản giải thích bằng văn bản. 8-15 giây tuỳ số lệnh.
+Trả về BẢN TÓM TẮT gọn (điểm rủi ro, điểm chất lượng, xếp loại, các chỉ số
+chính từ mô phỏng Monte Carlo, và lý do điểm rủi ro là do bình quân hay do một
+veto quyết định) kèm `report_url` -- link tới trang HTML báo cáo đầy đủ (biểu
+đồ, sở cứ từng chiều, breakdown chi tiết). Bản tóm tắt này dưới 5 KB; toàn bộ
+dữ liệu chi tiết nằm ở trang `report_url`, không nằm trong JSON trả về. 8-15
+giây tuỳ số lệnh.
 
 ### `serviceDescription` đăng ký A2MCP (agentId 13753, serviceId
 `75cdccb8-939d-4347-84a9-ce7d38277065`)
@@ -95,7 +102,7 @@ endpoint không tự trả được `requestSpec` trong thân lỗi của nó (x
 chỉ đúng nội dung. Thay khối bốn dòng cũ bằng khối sau khi cập nhật listing:
 
 ```
-1. [Service Description] Returns a risk assessment for an OKX copy-trading lead trader, computed only from public closed-trade data.
+1. [Service Description] Returns a compact risk-assessment summary (score, verdict, key metrics) for an OKX copy-trading lead trader plus a report_url link to the full detailed report, computed only from public closed-trade data.
 2. [Parameter Spec] code(string, required): the lead trader uniqueCode on OKX, e.g. EF1CC6F40E834D1A
 3. [Request Method] POST
 4. [Request Example] curl -X POST https://agent.expsolution.io/api/analyze -H "Content-Type: application/json" -d '{"code":"EF1CC6F40E834D1A"}'

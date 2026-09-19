@@ -133,7 +133,7 @@ def test_a_bot_without_crawled_data_is_reported_as_an_error_not_skipped(tmp_path
 
     assert report.bots_failed == 1
     assert laggard.error
-    assert "Chưa đủ hai bot" in report.blocks[0].comparison[0]
+    assert "Not enough bots with data to compare" in report.blocks[0].comparison[0]
 
 
 def test_the_rendered_report_marks_a_capped_drawdown(tmp_path):
@@ -151,7 +151,7 @@ def test_the_rendered_report_marks_a_capped_drawdown(tmp_path):
     text = render_pair_report(report)
 
     assert "100.0%*" in text
-    assert "con số là sàn" in text
+    assert "is a floor" in text
 
 
 def test_the_report_states_it_is_not_a_verdict(tmp_path):
@@ -163,4 +163,4 @@ def test_the_report_states_it_is_not_a_verdict(tmp_path):
         selection_path=selection,
     )
 
-    assert any("chưa phải phán quyết" in note for note in report.notes)
+    assert any("not a risk verdict" in note for note in report.notes)

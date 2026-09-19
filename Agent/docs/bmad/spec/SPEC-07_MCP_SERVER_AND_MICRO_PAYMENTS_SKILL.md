@@ -1,0 +1,82 @@
+# SPEC-07: KỸ NĂNG MÁY CHỦ MCP & THANH TOÁN VI MÔ X402
+
+> **BMAD Document Standard**  
+> **Document ID:** SPEC-07  
+> **Skill Name:** MCP Server Protocol & x402 Micro-Payments Skill  
+> **Type:** TECHNICAL CAPABILITY SPECIFICATION  
+> **Status:** APPROVED / PRODUCTION  
+> **Version:** 2.1.0  
+> **Target Service:** `Agent/backend/agent_server.py`, `Agent/backend/payments/x402.py`  
+> **Updated:** 2026-09-18  
+
+---
+
+## 1. Tổng Quan & Bối Cảnh (Executive Summary)
+
+Trong bối cảnh nền kinh tế AI Agent (Agent Economy) trên OKX và các mạng blockchain, các dịch vụ không chỉ phục vụ người dùng qua trình duyệt mà còn phải đóng vai trò là một **Tool Provider** chuẩn mực cho các AI Agent khác truy vấn tự động thông qua giao thức mở **Model Context Protocol (MCP)** của Anthropic.
+
+Đồng thời, để đảm bảo tính thương mại và bù đắp chi phí tài nguyên máy tính (CPU/RAM khi chạy 10.000 mô phỏng Monte Carlo), hệ thống tích hợp chuẩn thanh toán **x402 (HTTP 402 Payment Required)** sử dụng token thanh toán onchain.
+
+---
+
+## 2. Danh Mục Công Cụ MCP (MCP Tool Registry)
+
+Máy chủ MCP chạy độc lập trên cổng **8000** (hoặc tích hợp qua backend web), tuân thủ đặc tả JSON-RPC 2.0:
+
+| Tên Công Cụ | Chi Phí (x402) | Tần Suất & Tốc Độ | Mô Tả Chức Năng |
+| :--- | :---: | :---: | :--- |
+| `check_readiness` | Miễn phí | Tức thì (< 5ms) | Kiểm tra trạng thái sẵn sàng của hệ thống, kết nối cơ sở dữ liệu và cache. |
+| `list_available_markets` | Miễn phí | Tức thì (< 10ms) | Trả về danh sách các thị trường CEX/DEX đang được hệ thống giám sát. |
+| `list_assessed_bots` | $0.001 USDC | Rất nhanh (< 20ms) | Liệt kê danh sách các bot đã có kết quả đánh giá kèm phân hạng rủi ro. |
+| `get_bot_assessment` | $0.002 USDC | Rất nhanh (< 30ms) | Trả về kết quả đánh giá định lượng chi tiết đã lưu trong bộ đệm Redis. |
+| `assess_bot` | $0.050 USDC | 1.5s – 4.8s | **Công cụ tính toán nặng nhất:** Cào sổ lệnh mới nhất từ OKX, chạy lại toàn bộ 10 lăng kính rủi ro và 10.000 kịch bản Monte Carlo. |
+
+---
+
+## 3. Kiến Trúc Luồng Thanh Toán x402 (x402 Flow Architecture)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Caller as AI Agent / Client
+    participant Web as NoraBT MCP Server
+    participant Redis as Redis Snapshot Cache
+    participant Chain as X Layer (USDC Contract)
+
+    Caller->>Web: POST /mcp (Gọi assess_bot với botCode)
+    Web-->>Caller: HTTP 402 Payment Required (Kèm X-402-Requirements & Địa chỉ ví nhận)
+    Caller->>Chain: Ký & Broadcast giao dịch thanh toán vi mô (Micro-tx)
+    Chain-->>Caller: Transaction Hash / EIP-712 Signature
+    Caller->>Web: POST /mcp (Kèm Header Authorization x402 Payment Proof)
+    Web->>Chain: Xác thực chữ ký / Tx receipt trên chuỗi
+    alt Thanh toán hợp lệ
+        Web->>Redis: Kiểm tra snapshot cache
+        alt Đã có trong cache
+            Redis-->>Web: Trả về kết quả lưu trữ
+        else Chưa có / Yêu cầu tính mới
+            Web->>Web: Chạy Pipeline: Sổ lệnh -> 10 Lăng kính -> Monte Carlo
+            Web->>Redis: Lưu kết quả vào Redis
+        end
+        Web-->>Caller: HTTP 200 OK (Kết quả thẩm định đầy đủ)
+    else Thanh toán không hợp lệ
+        Web-->>Caller: HTTP 403 Forbidden (Mã lỗi x402_INVALID_PROOF)
+    end
+```
+
+---
+
+## 4. Đặc Tả Khả Năng Chống Gian Lận & Giới Hạn Tần Suất
+
+- **Idempotency Key:** Mỗi chứng từ thanh toán x402 chỉ được sử dụng cho một lượt phân tích duy nhất, lưu mã hash vào Redis với TTL 24h để chống tấn công phát lại (Replay Attack).
+- **Rate-Limiting per Wallet:** Giới hạn tối đa 60 requests/phút trên mỗi địa chỉ ví để tránh bị tấn công từ chối dịch vụ (DoS).
+
+---
+
+## 5. Ma Trận Truy Vết Mã Nguồn (Traceability Matrix)
+
+- **Module thực thi:**
+  - [agent_server.py](file:///home/ubuntu/norabt/Agent/backend/agent_server.py): Máy chủ MCP Server và định tuyến JSON-RPC.
+  - [x402.py](file:///home/ubuntu/norabt/Agent/backend/payments/x402.py): Logic thanh toán x402 và xác thực chữ ký.
+- **Tệp kiểm thử:**
+  - `Agent/test/test_agent_server.py`: Kiểm thử gọi các công cụ MCP.
+  - `Agent/test/test_payments.py`: Kiểm thử luồng trả mã HTTP 402 và xác nhận thanh toán.

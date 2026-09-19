@@ -16,9 +16,9 @@ class PortfolioRiskLens:
     ):
         if not portfolio_bots:
             return unknown(
-                "Portfolio / Systemic Risk",
+                "Portfolio risk",
                 0.8,
-                "Cross-bot portfolio snapshot was not supplied",
+                "No multi-bot portfolio snapshot to compare against yet",
             )
         active = [
             item
@@ -28,19 +28,19 @@ class PortfolioRiskLens:
         ]
         if not active:
             return available(
-                "Portfolio / Systemic Risk",
+                "Portfolio risk",
                 5.0,
                 0.8,
-                ["Portfolio has no known open directional exposure"],
+                ["The portfolio has no open directional exposure"],
             )
         known = [
             item for item in active if item.current_state.current_notional is not None
         ]
         if len(known) != len(active):
             return unknown(
-                "Portfolio / Systemic Risk",
+                "Portfolio risk",
                 0.8,
-                "One or more active bots lack notional exposure",
+                "One or more active bots are missing a notional value",
             )
         gross = sum(item.current_state.current_notional or 0.0 for item in known)
         signed = []
@@ -60,6 +60,7 @@ class PortfolioRiskLens:
         concentration = max(by_asset.values()) / max(gross, 1e-12)
         score = 15.0 + directional * 35.0 + concentration * 25.0
         findings = [
-            f"Gross exposure ${gross:,.0f}; directional concentration {directional:.0%}; largest asset {concentration:.0%}"
+            f"Gross exposure ${gross:,.0f}; directional concentration {directional:.0%}; "
+            f"largest asset {concentration:.0%}"
         ]
-        return available("Portfolio / Systemic Risk", score, 0.8, findings)
+        return available("Portfolio risk", score, 0.8, findings)

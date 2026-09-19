@@ -291,22 +291,23 @@ class OrderflowFeatureExtractor:
         """
         if agg.tick_count < _MIN_TICKS_FOR_VALID_FLOW:
             return (
-                f"chỉ gộp được {agg.tick_count} tick hợp lệ "
-                f"(< {_MIN_TICKS_FOR_VALID_FLOW}), quá ít để suy ra thiên lệch "
-                "mua/bán đáng tin -- một vài lệnh lớn có thể lật ngược tỷ lệ"
+                f"only {agg.tick_count} valid ticks aggregated "
+                f"(< {_MIN_TICKS_FOR_VALID_FLOW}), too few to infer a reliable "
+                "buy/sell bias -- a few large orders could flip the ratio"
             )
         ratio = agg.coverage_ratio
         if ratio is not None and ratio < _MIN_COVERAGE_RATIO_FOR_VALID_FLOW:
             covered = agg.window_ms or 0
             target = agg.target_window_ms or 0
             return (
-                f"cửa sổ thực tế chỉ phủ {covered}ms trong khi cấu hình yêu cầu "
-                f"{target}ms ({ratio:.0%} < {_MIN_COVERAGE_RATIO_FOR_VALID_FLOW:.0%}); "
-                "có thể do trần số trang/thời gian cắt ngang, số liệu không đại "
-                "diện cho khung thời gian đã cấu hình"
+                f"the actual window only covers {covered}ms while the configured "
+                f"target is {target}ms ({ratio:.0%} < "
+                f"{_MIN_COVERAGE_RATIO_FOR_VALID_FLOW:.0%}); likely cut short by "
+                "a page/time cap, so the data is not representative of the "
+                "configured window"
             )
         if agg.total_notional <= 0:
-            return "không gộp được notional mua/bán nào từ dữ liệu tick"
+            return "could not aggregate any buy/sell notional from the tick data"
         return None
 
     @staticmethod

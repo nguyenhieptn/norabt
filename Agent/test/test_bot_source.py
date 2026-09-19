@@ -40,7 +40,7 @@ from Agent.backend.sources.bot_source import (
     LedgerUnavailableError,
     LiveBotDataSource,
 )
-from Agent.test.conftest import FIXED_AS_OF_MS, write_bot_dataset
+from Agent.test.conftest import FIXED_AS_OF_MS, write_bot_dataset, write_market_dataset
 
 
 def fast_bucket() -> TokenBucket:
@@ -815,6 +815,105 @@ def test_service_without_bot_source_behaves_exactly_as_before(tmp_path: Path):
     assert default_result == explicit_result
 
 
+def test_reference_data_dir_defaults_to_data_dir_unchanged_behaviour(tmp_path: Path):
+    """`reference_data_dir=None` (the default) must behave EXACTLY like
+    before this parameter existed: `_phase_timelines` still reads candles
+    from `data_dir` itself. Proven here by showing the default service and
+    one given `reference_data_dir=` the SAME directory as `data_dir`
+    produce identical results -- if the default ever silently changed which
+    directory `_phase_timelines` reads, this would catch it.
+    """
+    overview = {"uniqueCode": "TESTCODE", "nickName": "Test Bot", "aum": "10000"}
+    write_bot_dataset(tmp_path, overview=overview, closed_trades=[], open_positions=[])
+    write_market_dataset(tmp_path, asset="TEST", candle_count=300)
+
+    kwargs = dict(
+        venue_type="CEX",
+        seed=42,
+        as_of_ms=FIXED_AS_OF_MS,
+        simulation_iterations=200,
+        simulation_horizon=50,
+    )
+    default_service = BotObservationService(tmp_path)
+    explicit_same_dir_service = BotObservationService(
+        tmp_path, reference_data_dir=tmp_path
+    )
+
+    default_result = default_service.get_bot_result("TEST", "bot_TEST", **kwargs)
+    explicit_result = explicit_same_dir_service.get_bot_result(
+        "TEST", "bot_TEST", **kwargs
+    )
+
+    assert default_result == explicit_result
+
+
+def test_reference_data_dir_lets_phase_timelines_read_the_real_dataset(
+    tmp_path: Path,
+):
+    """The exact bug this parameter fixes (see BotObservationService's own
+    `__init__` docstring): a caller that isolates a bot's own read/write
+    side behind a private scratch `data_dir` (e.g.
+    `WebDataService._analyze_full`) used to ALSO starve `_phase_timelines`
+    of every reference candle, since that method only ever read
+    `self.data_dir` -- an empty scratch dir has none. Every trade then
+    resolved to `MarketPhase.UNKNOWN` and phase coverage silently came back
+    0%, even though the real dataset (kept in a separate directory here)
+    has everything needed to label it.
+
+    `reference_data_dir` splits the two: the bot's own files stay on the
+    scratch dir, phase labelling reads the real one, and phase coverage
+    recovers without moving the bot's own files anywhere.
+    """
+    real_root = tmp_path / "real"
+    scratch_root = tmp_path / "scratch"
+    last_candle_ms = 1_789_000_000_000
+    write_market_dataset(
+        real_root, asset="TEST", candle_count=300, last_candle_ms=last_candle_ms
+    )
+    # 5 hours before the last candle -- well past WARMUP_HOURS(200) into the
+    # dataset, so this timestamp resolves to a real (non-UNKNOWN) phase.
+    open_ms = last_candle_ms - 5 * 3_600_000
+    closed_trades = [
+        make_trade(
+            "1",
+            instId="TEST-USDT-SWAP",
+            open_time_ms=open_ms,
+            close_time_ms=open_ms + 600_000,
+            unique_code="TESTCODE",
+        )
+    ]
+    overview = {"uniqueCode": "TESTCODE", "nickName": "Test Bot", "aum": "10000"}
+    write_bot_dataset(
+        scratch_root,
+        overview=overview,
+        closed_trades=closed_trades,
+        open_positions=[],
+    )
+
+    kwargs = dict(
+        venue_type="CEX",
+        seed=42,
+        as_of_ms=FIXED_AS_OF_MS,
+        simulation_iterations=200,
+        simulation_horizon=50,
+    )
+
+    # Bug reproduction: scratch dir alone has no candles at all.
+    starved = BotObservationService(scratch_root).get_bot_result(
+        "TEST", "bot_TEST", **kwargs
+    )
+    assert starved.strategy_observations.phase_coverage_pct == 0.0
+    assert starved.strategy_observations.phase_breakdown == []
+
+    # Fix: same scratch bot dir, but phase timelines read the real dataset.
+    fixed = BotObservationService(
+        scratch_root, reference_data_dir=real_root
+    ).get_bot_result("TEST", "bot_TEST", **kwargs)
+    assert fixed.strategy_observations.phase_coverage_pct == 100.0
+    assert len(fixed.strategy_observations.phase_breakdown) == 1
+    assert fixed.strategy_observations.phase_breakdown[0].trades == 1
+
+
 def test_service_uses_bot_source_for_a_real_bot_and_reads_the_same_dataset(tmp_path):
     """Full seam check: point BotObservationService at a FileBotDataSource
     bound to a different (but identical-content) data_dir and confirm nothing
@@ -887,7 +986,7 @@ def test_60004_with_surviving_weekly_pnl_classifies_as_limited_not_a_raise():
     assert exc.code == "CODE1"
     assert exc.weekly == [make_weekly()]
     assert "60004" in str(exc)
-    assert "sổ lệnh" in str(exc)
+    assert "order book" in str(exc)
 
 
 def test_60004_with_surviving_leaderboard_row_classifies_as_limited():
@@ -954,7 +1053,7 @@ def test_garbage_code_nowhere_classifies_as_not_found_with_vietnamese_message():
     assert exc.profile is None
     assert exc.stats is None
     assert not exc.weekly
-    assert "không tồn tại" in str(exc) or "mã sai" in str(exc)
+    assert "was not found" in str(exc) or "nonexistent" in str(exc)
 
 
 def test_weekly_pnl_probe_swallows_its_own_okx_error_during_classification():

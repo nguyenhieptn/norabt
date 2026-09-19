@@ -206,6 +206,18 @@ thay vì tương quan Pearson trên giá trị thô.
 
 ### 3.5 Bảng đầy đủ 36 bot (sắp theo risk_score giảm dần)
 
+> **Ghi chú về cột `verdict`.** Bảng dưới đây chép nguyên nhãn mà hệ thống
+> SINH RA TẠI THỜI ĐIỂM CHẠY nghiên cứu này: thang một chiều bốn bậc
+> `NGUY HIỂM` / `TIỀM ẨN` / `TIỀM NĂNG` / `AN TOÀN`. Thang đó **đã bị thay**
+> bằng nhãn hai trục (`DRAWDOWN: LOW/HIGH × QUALITY: GOOD/WEAK`, cộng cờ
+> `HIDDEN RISK` và `INSUFFICIENT EVIDENCE`) — xem `VALID_VERDICTS` trong
+> `Agent/backend/agent_server.py`. Cột này KHÔNG được cập nhật theo thang
+> mới, và cố ý như vậy: sửa lại số liệu của một lượt đo đã chạy xong thì
+> bảng sẽ không còn là hồ sơ của chính lượt đo đó nữa. Mọi con số thống kê
+> trong báo cáo (Spearman, khoảng tin cậy, p-value) tính trên `risk_score`
+> — cột liên tục, không đổi qua lần đổi nhãn — nên kết luận không bị ảnh
+> hưởng.
+
 | Bot | train/test | risk_score | verdict | PnL% nửa sau | Sụt vốn% nửa sau | Sập? |
 |---|---|---|---|---|---|---|
 | CEX/BTC/bot_828556126433358780 | 300/198 | 100.0 | NGUY HIỂM | +5843.6% | 239.4% | CÓ |

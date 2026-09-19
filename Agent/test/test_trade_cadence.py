@@ -10,6 +10,8 @@ numbers. `MonteCarloSimulationEngine.run_simulation` now reports
 
 from __future__ import annotations
 
+import pytest
+
 from Agent.backend.mcp.analytics.simulation.monte_carlo import (
     MonteCarloSimulationEngine,
 )
@@ -154,3 +156,58 @@ def test_horizon_exceeds_observed_is_none_when_cadence_cannot_be_estimated():
     assert result.trades_per_day is None
     assert result.horizon_calendar_days is None
     assert result.horizon_exceeds_observed is None
+
+
+def test_default_horizon_equals_observed_span_up_to_float_noise_and_is_not_flagged():
+    """Regression for the real bug: with `--horizon` left blank, the horizon
+    is set to the bot's own trade count, so `horizon_calendar_days` (=
+    `horizon / trades_per_day`) and `observed_span_days` (the same
+    `len(trades) / observed_span_days` cadence computed the other way
+    round) are the SAME quantity by construction. They can only differ by
+    float rounding noise -- observed in production on bot BB3398A957270A39
+    as `horizon_calendar_days=56.58428614583334` vs
+    `observed_span_days=56.58428614583333`, a ~1e-14 day (sub-millisecond)
+    gap that a bare `>` comparison used to flag as "extrapolation" on every
+    bot using the default horizon. Exercised here via the exact production
+    numbers directly, and via a real `run_simulation` call with the default
+    horizon to prove the whole pipeline agrees.
+    """
+    assert (
+        MonteCarloSimulationEngine._horizon_exceeds_observed(
+            56.58428614583334, 56.58428614583333
+        )
+        is False
+    )
+
+    trades = _swing_ledger(n=30, days_per_trade=2)
+    result = MonteCarloSimulationEngine.run_simulation(
+        trades, 1_000.0, iterations=200, seed=1, block_bootstrap=True
+    )
+    assert result.is_valid
+    assert result.horizon_basis == "OWN_TRADE_COUNT"
+    assert result.horizon_calendar_days == pytest.approx(result.observed_span_days)
+    assert result.horizon_exceeds_observed is False
+
+
+def test_gap_of_one_day_but_under_two_percent_is_not_flagged():
+    """A ~100-day observed span with a ~1-day gap clears the absolute
+    (1-day) floor but not the relative (2%) floor -- must stay False, since
+    a long-lived bot's small relative overrun is not a meaningful
+    extrapolation.
+    """
+    assert MonteCarloSimulationEngine._horizon_exceeds_observed(101.0, 100.0) is False
+
+
+def test_gap_over_two_percent_and_over_one_day_is_flagged_as_real_extrapolation():
+    """A horizon several times the observed span (e.g. simulating 500 trades
+    for a bot with only ~72 trades on record) clears both floors comfortably
+    and must be flagged -- this is the genuine extrapolation case the flag
+    exists to catch.
+    """
+    assert MonteCarloSimulationEngine._horizon_exceeds_observed(400.0, 56.58) is True
+
+
+def test_horizon_exceeds_observed_is_none_when_either_input_is_missing():
+    assert MonteCarloSimulationEngine._horizon_exceeds_observed(None, 56.0) is None
+    assert MonteCarloSimulationEngine._horizon_exceeds_observed(56.0, None) is None
+    assert MonteCarloSimulationEngine._horizon_exceeds_observed(None, None) is None

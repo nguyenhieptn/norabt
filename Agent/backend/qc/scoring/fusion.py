@@ -19,23 +19,23 @@ from Agent.backend.qc.schemas.risk_assessment import (
 )
 
 DIMENSION_LABEL_VI = {
-    "market_alignment": "Đồng thuận thị trường",
-    "performance_quality": "Chất lượng hiệu suất",
-    "return_r_quality": "Chất lượng lợi nhuận / R",
-    "drawdown_risk": "Rủi ro sụt vốn",
-    "tail_risk": "Rủi ro đuôi",
-    "leverage_exposure": "Đòn bẩy / Exposure",
-    "behavioral_risk": "Hành vi giao dịch",
-    "strategy_drift": "Độ bền chiến lược qua các pha",
-    "liquidity_execution": "Thanh khoản / Khớp lệnh",
-    "portfolio_risk": "Rủi ro danh mục",
+    "market_alignment": "Market alignment",
+    "performance_quality": "Performance quality",
+    "return_r_quality": "Return / R quality",
+    "drawdown_risk": "Drawdown risk",
+    "tail_risk": "Tail risk",
+    "leverage_exposure": "Leverage / exposure",
+    "behavioral_risk": "Trading behaviour",
+    "strategy_drift": "Strategy durability across phases",
+    "liquidity_execution": "Liquidity / execution",
+    "portfolio_risk": "Portfolio risk",
 }
 
 VETO_LABEL_VI = {
-    "destructive behavioral pattern": "hành vi giao dịch hủy hoại",
-    "extreme simulated tail risk": "rủi ro đuôi mô phỏng cực đoan",
-    "directional conflict with high leverage": "ngược xu hướng kèm đòn bẩy cao",
-    "stress scenario liquidation": "kịch bản stress dẫn tới thanh lý",
+    "destructive behavioral pattern": "destructive trading behaviour",
+    "extreme simulated tail risk": "extreme simulated tail risk",
+    "directional conflict with high leverage": "against the trend with high leverage",
+    "stress scenario liquidation": "stress scenario ends in liquidation",
 }
 
 
@@ -99,13 +99,13 @@ class RiskFusionEngine:
             score = max(score, 70.0)
             if deferred.turns_unprofitable_when_marked:
                 veto_reasons.append(
-                    f"chốt hết sổ mở thì profit factor chỉ còn "
+                    f"closing the open book now would leave profit factor at only "
                     f"{deferred.marked_profit_factor:.2f}"
                 )
             else:
                 veto_reasons.append(
-                    f"lỗ chưa chốt bằng {deferred.open_loss_to_capital_pct:.0f}% vốn mà "
-                    f"chưa từng cho thấy sẵn sàng cắt"
+                    f"unrealised loss equal to {deferred.open_loss_to_capital_pct:.0f}% of capital "
+                    f"with no sign of willingness to cut it"
                 )
         if (
             bot.stress_results
@@ -133,21 +133,21 @@ class RiskFusionEngine:
         contributions.sort(key=lambda c: -c.contribution)
 
         raised = [
-            f"{c.label} {c.score:.0f}/100 (trọng số {c.weight:.1f}) đóng góp "
-            f"{c.contribution:.1f} điểm"
+            f"{c.label} {c.score:.0f}/100 (weight {c.weight:.1f}) contributes "
+            f"{c.contribution:.1f} points"
             for c in contributions
             if c.score >= 60 and c.status == "AVAILABLE"
         ]
         held_down = [
-            f"{c.label} chỉ {c.score:.0f}/100 (trọng số {c.weight:.1f}) kéo bình quân xuống"
+            f"{c.label} at only {c.score:.0f}/100 (weight {c.weight:.1f}) pulls the average down"
             for c in contributions
             if c.score <= 30 and c.status == "AVAILABLE"
         ]
         unknown_count = sum(1 for c in contributions if c.status == "UNKNOWN")
         if unknown_count:
             held_down.append(
-                f"{unknown_count} chiều thiếu bằng chứng được tính trung tính 50 điểm, "
-                f"không đẩy điểm lên cũng không kéo xuống"
+                f"{unknown_count} dimensions lacking evidence are scored a neutral 50 points, "
+                f"neither raising nor pulling down the score"
             )
         if veto_floor is not None and veto_floor > weighted_average:
             decided_by = "EMERGENCY_OVERRIDE" if emergency else "VETO_FLOOR"

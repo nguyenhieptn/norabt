@@ -58,7 +58,7 @@ free rather than restructuring an unrelated module for this change.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict
 
 
 @dataclass(frozen=True)
@@ -144,7 +144,3 @@ def swap_reference_inst_id(symbol: str) -> str:
     return f"{underlying_symbol(symbol)}-USDT-SWAP"
 
 
-def get_dex_asset(symbol: str) -> Optional[DexAssetInfo]:
-    """`DEX_ASSET_REGISTRY[symbol]`, or None for anything outside the 5
-    assets this static table covers."""
-    return DEX_ASSET_REGISTRY.get(symbol)

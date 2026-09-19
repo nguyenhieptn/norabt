@@ -10,24 +10,23 @@ class DrawdownRiskLens:
         dd = bot.drawdown_analysis
         if dd.wiped_out:
             return available(
-                "Drawdown Risk",
+                "Drawdown risk",
                 100.0,
                 1.1,
                 [
-                    "Weekly equity reached zero inside the observed window: this account "
-                    "has already been wiped out at least once",
-                    f"Maximum drawdown in currency: {dd.max_dd_abs:,.0f} USDT"
+                    "Weekly equity touched zero during the observed period: the "
+                    "account was wiped out at least once",
+                    f"Max drawdown in money terms: {dd.max_dd_abs:,.0f} USDT"
                     if dd.max_dd_abs is not None
-                    else "Drawdown amount unavailable",
+                    else "Could not measure the drawdown amount",
                 ],
                 0.9,
             )
         if dd.max_dd_pct is None or dd.current_dd_pct is None:
             return unknown(
-                "Drawdown Risk",
+                "Drawdown risk",
                 1.1,
-                "No capital basis supports a percentage drawdown; only the currency "
-                "amount is measurable",
+                "No capital basis to compute drawdown as a %; only the absolute amount could be measured",
             )
         score = 15.0
         findings = [
@@ -36,7 +35,7 @@ class DrawdownRiskLens:
         ]
         if dd.weekly_equity_max_dd_pct is not None:
             findings.append(
-                f"Weekly equity curve drawdown {dd.weekly_equity_max_dd_pct:.1f}%"
+                f"Drawdown on the weekly equity curve {dd.weekly_equity_max_dd_pct:.1f}%"
             )
         if dd.max_dd_pct > 30:
             score += 50
@@ -46,9 +45,11 @@ class DrawdownRiskLens:
             score += 25
         if dd.loss_clustering_index is not None and dd.loss_clustering_index > 0.35:
             score += 20
-            findings.append(f"Loss clustering {dd.loss_clustering_index:.2f}")
+            findings.append(
+                f"Loss clustering index {dd.loss_clustering_index:.2f}"
+            )
         if dd.time_underwater_hours is not None:
             findings.append(
-                f"Longest observed underwater duration {dd.time_underwater_hours:.1f} hours"
+                f"Longest time underwater observed {dd.time_underwater_hours:.1f} hours"
             )
-        return available("Drawdown Risk", score, 1.1, findings, 0.7)
+        return available("Drawdown risk", score, 1.1, findings, 0.7)
