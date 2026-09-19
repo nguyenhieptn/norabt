@@ -12,7 +12,14 @@ __pycache__/
 *$py.class
 .pytest_cache/
 
-# Node dependencies and build output
+# Node dependencies and build output -- these generic (no leading "/")
+# patterns already match at any depth, so they cover Agent/frontend/
+# node_modules/ (npm dependencies for the new Agent SPA project) and
+# Agent/web/dist/ (that project's `bash Agent/frontend/build.sh` output,
+# served by Agent/backend/web/app.py) without needing a separate, narrower
+# entry for either -- verified with `git check-ignore -v Agent/frontend/
+# node_modules Agent/web/dist` before relying on this comment instead of
+# duplicating the patterns.
 node_modules/
 dist/
 .vite/
