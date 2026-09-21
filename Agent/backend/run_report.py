@@ -585,6 +585,32 @@ def _fetch_bot_for_extras(
         return None
 
 
+def _simulation_full_evidence(bot: Any) -> Optional[Dict[str, Any]]:
+    """`bot.simulation_results` in full, for `build_assessment`'s
+    `simulation_full=`.
+
+    The stored `simulation` block was assembled field by field from
+    `BotEvaluationRow`, which carries only the subset the batch report needed.
+    Thirty-one measured fields (`capital_at_risk`, `expected_terminal_equity`,
+    `horizon_sensitivity`, `p10_outcome`, ...) were therefore computed on every
+    run and then thrown away, so a page rebuilt from disk was permanently
+    poorer than the live page for the same bot. Writing the engine's own dump
+    keeps the two in step, and keeps them in step when the schema grows.
+
+    `None` (never `{}`) when `bot` is absent -- same "absent, not fabricated"
+    contract the other evidence helpers follow.
+    """
+    if bot is None:
+        return None
+    simulation = getattr(bot, "simulation_results", None)
+    dump = getattr(simulation, "model_dump", None)
+    if not callable(dump):
+        # A stub or an older shape that is not the typed model: write nothing
+        # rather than half a block.
+        return None
+    return dump(mode="json")
+
+
 def _horizon_scenarios_evidence(bot: Any) -> Optional[List[Dict[str, Any]]]:
     """`bot.simulation_results.horizon_scenarios` (a `List[HorizonOutcome]`,
     Agent/backend/mcp/schemas/bot_result.py), reshaped to plain dicts for
@@ -863,6 +889,7 @@ def build_assessment_extras(
             "narrative": None,
             "closed_trade_series": _closed_trade_series_evidence(bot),
             "horizon_scenarios": _horizon_scenarios_evidence(bot),
+            "simulation_full": _simulation_full_evidence(bot),
             "assets": _assets_evidence(bot),
         }
         fetched.append((row, bot))

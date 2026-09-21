@@ -151,6 +151,7 @@ def build_assessment(
     narrative_text: Optional[str] = None,
     closed_trade_series: Optional[List[Dict[str, Any]]] = None,
     horizon_scenarios: Optional[List[Dict[str, Any]]] = None,
+    simulation_full: Optional[Dict[str, Any]] = None,
     assets: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """One bot's step-3 verdict as a document, text first.
@@ -238,7 +239,7 @@ def build_assessment(
     paragraphs = recommendation_vi(row)
     strategy_extra = strategy_extra or {}
     behavioral_extra = behavioral_extra or {}
-    return {
+    payload: Dict[str, Any] = {
         "step": "3_QC_ASSESSMENT",
         # v1 -> v2: thêm `bang_chung.closed_trade_series`,
         # `bang_chung.assets` và `mo_phong.horizon_scenarios` (xem docstring
@@ -462,6 +463,21 @@ def build_assessment(
             "horizon_scenarios": horizon_scenarios or [],
         },
     }
+    # Mọi trường của `SimulationResults` mà khối dựng-tay ở trên chưa có thì
+    # mang qua nốt, giữ nguyên tên engine dùng.
+    #
+    # Khối trên được ghép từ `BotEvaluationRow`, vốn chỉ mang đúng tập con báo
+    # cáo hàng loạt cần. 31 trường ĐÃ ĐO (`capital_at_risk`,
+    # `expected_terminal_equity`, `horizon_sensitivity`, `p10_outcome`, ...)
+    # vì thế bị bỏ lại mỗi lần chạy, khiến trang dựng từ đĩa vĩnh viễn nghèo
+    # hơn trang chạy sống của CÙNG một bot. Ghi thêm ở đây chứ không sửa khối
+    # trên: các khoá cũ (`psr`, `worst_drawdown`, `mc_iterations`...) đã được
+    # nhiều nơi đọc theo đúng tên đó, đổi đi là phá bản ghi đã lưu.
+    if isinstance(simulation_full, dict):
+        block = payload["simulation"]
+        for key, value in simulation_full.items():
+            block.setdefault(key, value)
+    return payload
 
 
 def _slot_index(data_dir: Path) -> Dict[str, tuple]:
@@ -548,6 +564,7 @@ def build_assessments(
             narrative_text=extra.get("narrative"),
             closed_trade_series=extra.get("closed_trade_series"),
             horizon_scenarios=extra.get("horizon_scenarios"),
+            simulation_full=extra.get("simulation_full"),
             assets=extra.get("assets"),
         )
         out.append((bot_dir / "assessment.json", payload))

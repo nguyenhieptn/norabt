@@ -363,16 +363,24 @@ def test_limited_result_has_the_same_section_ids_as_a_full_result(
         re.findall(r'<section class="card[^"]*" id="([^"]+)"', limited_out)
     )
     full_ids = set(re.findall(r'<section class="card[^"]*" id="([^"]+)"', full_out))
-    assert limited_ids == full_ids
+    # The insight sections need the bot's own closed-trade ledger, which a
+    # LIMITED record does not have. They are therefore not rendered at all
+    # rather than rendered empty -- four cards repeating "this needs a ledger"
+    # is noise, and the limitation is stated once in the data-limitations
+    # drawer instead. Every OTHER section keeps the original parity: a reader
+    # must not see a materially shorter page and wonder what broke.
+    insight_only = {"holdout", "scenario-lab", "market-compatibility"}
+    assert limited_ids == full_ids - insight_only
+    assert insight_only <= full_ids
     # 14 -> 17: three deterministic insight sections were added to both pages
     # ("In one look", "Did earlier results hold up later", "Scenario
     # laboratory"). A LIMITED record cannot compute any of them, so each one
     # renders its shell and states the reason -- which is exactly the invariant
     # this test exists to protect.
-    # 17 -> 18: "Market compatibility" was added to the market tab. The deep
-    # modules now sit in the two deep tabs (market, position) and the result
-    # tab keeps only the user-facing overview.
-    assert len(full_ids) == 18
+    # 17 -> 18 -> 17: "Market compatibility" was added to the market tab, and
+    # the extra "essence" card was removed from the result tab, which is back
+    # to its original five sections.
+    assert len(full_ids) == 17
 
 
 def test_limited_result_placeholder_sections_state_a_reason_not_a_bare_dash() -> None:

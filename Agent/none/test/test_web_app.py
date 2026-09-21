@@ -2402,7 +2402,15 @@ def test_analyze_background_task_writes_snapshot_so_first_bot_report_click_is_fa
     # probabilities). They are now one drawer for the whole section.
     # 13 -> 14: "Market compatibility" carries its own methodology drawer,
     # same as every other section.
-    assert report.text.count("<details") == 14
+    # 14 -> 13: the extra "essence" card and its methodology drawer were
+    # removed from the result tab.
+    # 13 -> 14: the result tab gained a footer accordion (data limitations and
+    # open questions). It is a <details> after the last card, NOT a new section,
+    # so the section count is unchanged.
+    # 14 -> 13: an insight section that cannot be computed is no longer
+    # rendered as an empty card. These fixtures have no market source, so
+    # "Market compatibility" has no cells and is absent along with its drawer.
+    assert report.text.count("<details") == 13
 
 
 def test_bot_report_while_background_analyze_still_running_still_renders_full(
@@ -4189,7 +4197,15 @@ def test_bot_report_html_keeps_every_chart_and_details_block_after_analyze_resha
     # probabilities). They are now one drawer for the whole section.
     # 13 -> 14: "Market compatibility" carries its own methodology drawer,
     # same as every other section.
-    assert resp.text.count("<details") == 14
+    # 14 -> 13: the extra "essence" card and its methodology drawer were
+    # removed from the result tab.
+    # 13 -> 14: the result tab gained a footer accordion (data limitations and
+    # open questions). It is a <details> after the last card, NOT a new section,
+    # so the section count is unchanged.
+    # 14 -> 13: an insight section that cannot be computed is no longer
+    # rendered as an empty card. These fixtures have no market source, so
+    # "Market compatibility" has no cells and is absent along with its drawer.
+    assert resp.text.count("<details") == 13
 
 
 # --------------------------------------------------------------------------- #
@@ -4368,7 +4384,15 @@ def test_bot_report_html_includes_narrative_section_with_disclosure() -> None:
     # probabilities). They are now one drawer for the whole section.
     # 13 -> 14: "Market compatibility" carries its own methodology drawer,
     # same as every other section.
-    assert resp.text.count("<details") == 14
+    # 14 -> 13: the extra "essence" card and its methodology drawer were
+    # removed from the result tab.
+    # 13 -> 14: the result tab gained a footer accordion (data limitations and
+    # open questions). It is a <details> after the last card, NOT a new section,
+    # so the section count is unchanged.
+    # 14 -> 13: an insight section that cannot be computed is no longer
+    # rendered as an empty card. These fixtures have no market source, so
+    # "Market compatibility" has no cells and is absent along with its drawer.
+    assert resp.text.count("<details") == 13
 
 
 def test_bot_report_narrative_generated_once_then_refresh_regenerates() -> None:
@@ -4700,7 +4724,15 @@ def test_bot_report_survives_redis_connection_error_below(
     # probabilities). They are now one drawer for the whole section.
     # 13 -> 14: "Market compatibility" carries its own methodology drawer,
     # same as every other section.
-    assert resp.text.count("<details") == 14
+    # 14 -> 13: the extra "essence" card and its methodology drawer were
+    # removed from the result tab.
+    # 13 -> 14: the result tab gained a footer accordion (data limitations and
+    # open questions). It is a <details> after the last card, NOT a new section,
+    # so the section count is unchanged.
+    # 14 -> 13: an insight section that cannot be computed is no longer
+    # rendered as an empty card. These fixtures have no market source, so
+    # "Market compatibility" has no cells and is absent along with its drawer.
+    assert resp.text.count("<details") == 13
     assert "Report could not be generated" not in resp.text
     assert any("read failed" in record.getMessage() for record in caplog.records), (
         "Redis outage must be logged as a warning, never silently invisible"
@@ -5510,7 +5542,17 @@ def test_bot_report_from_assessment_file_with_chart_fields_matches_live_counts(
     # probabilities). They are now one drawer for the whole section.
     # 13 -> 14: "Market compatibility" carries its own methodology drawer,
     # same as every other section.
-    assert resp.text.count("<details") == 14
+    # 14 -> 13: the extra "essence" card and its methodology drawer were
+    # removed from the result tab.
+    # 13 -> 14: the result tab gained a footer accordion (data limitations and
+    # open questions). It is a <details> after the last card, NOT a new section,
+    # so the section count is unchanged.
+    # 14 -> 11: a page rebuilt from a saved record can compute NO insight
+    # module (there is no trade ledger in that record), so holdout, the
+    # scenario laboratory and market compatibility are absent along with
+    # their drawers. The reason is stated once in the data-limitations
+    # drawer instead of once per empty card.
+    assert resp.text.count("<details") == 11
     assert "Traded assets" in resp.text
     # And the growth-curve/horizon section headers themselves, proving the
     # 2 extra `<svg>`/4 extra `<details>` over the base fixture (5/8, see

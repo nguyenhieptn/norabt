@@ -811,6 +811,14 @@ def _string_list(value: Any) -> List[str]:
     )
 
 
+# Tên trường của `SimulationResults`, dùng để mang qua mọi chỉ số mô phỏng
+# mà bản ghi đã lưu thật sự có -- xem vòng lặp trong
+# `assessment_to_analyze_result` bên dưới.
+from Agent.backend.mcp.schemas.bot_result import SimulationResults as _SimulationResults
+
+_SIMULATION_FIELDS = tuple(_SimulationResults.model_fields)
+
+
 def assessment_to_analyze_result(
     doc: Dict[str, Any],
     *,
@@ -918,6 +926,16 @@ def assessment_to_analyze_result(
         "selection_trials": mo_phong.get("selection_trials"),
         "inference_reliable": mo_phong.get("inference_reliable"),
     }
+    # Bất kỳ trường nào của `SimulationResults` CÓ trong file mà bảng ánh xạ
+    # tay ở trên chưa liệt kê thì mang qua nốt, tên giữ nguyên. Danh sách tay
+    # đã bỏ sót 4 chỉ số rủi ro thật sự nằm trong file (`var_95_pct`,
+    # `cvar_95_pct`, `mar_ratio_median`, `profit_factor_median`) -- trang đọc
+    # từ đĩa vì thế mất chúng trong khi trang chạy sống vẫn có. Vòng lặp này
+    # khiến mọi trường mới thêm vào schema tự đi qua, thay vì lặng lẽ rơi.
+    for _field in _SIMULATION_FIELDS:
+        if _field not in mc and _field in mo_phong:
+            mc[_field] = mo_phong[_field]
+
     # Việc mới: SHORT/MEDIUM/LONG comparison -- see this section's own module
     # comment above. Absent (older schema-v1 file, or the re-fetch that
     # would have produced it failed at write time) degrades to `[]`, same

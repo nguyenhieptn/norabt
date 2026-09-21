@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import threading
 from typing import Callable, List, Optional
 
 from pydantic import BaseModel, Field
@@ -168,6 +169,30 @@ class RiskSupervisionPipeline:
                     stage,
                 )
 
+        # Suy đoán trước thị trường CHÍNH bằng đúng cái tên gọi vào (`asset`),
+        # chạy song song với việc đọc sổ lệnh bên dưới -- không phải lúc nào
+        # cũng đúng (bot DEX được xếp theo slot, không theo instrument thật;
+        # `traded_symbol` chỉ biết chắc SAU khi đọc xong sổ lệnh, xem
+        # `BotObservationService`'s docstring cho ví dụ thật). Không đoán bừa
+        # kết quả: chỉ LÀM ẤM sẵn cache tiến trình 45s mà `MarketService` đã
+        # có cho `LiveMarketDataSource` (xem service.py's
+        # `_market_result_cache`) -- khi đoán đúng, `resolve_planned_markets`
+        # bên dưới đọc trúng cache thay vì gọi OKX lại; khi đoán sai thì kết
+        # quả bị bỏ, mọi thứ chạy TUẦN TỰ y hệt trước, không mất gì.
+        #
+        # Với đường `--source file` mặc định (không mạng, không cache) đây
+        # gần như không tốn gì: đọc file cục bộ vốn đã rẻ hơn phí khởi tạo
+        # một luồng.
+        speculative_market: Optional[threading.Thread] = None
+        if as_of_ms is None:
+            speculative_market = threading.Thread(
+                target=self.resolve_market,
+                args=(asset, None),
+                name="norabt-speculative-market",
+                daemon=True,
+            )
+            speculative_market.start()
+
         _notify("ledger")
         bot = self.bot_service.get_bot_result(
             asset,
@@ -179,6 +204,10 @@ class RiskSupervisionPipeline:
             simulation_horizon=simulation_horizon,
         )
         traded_symbol = bot.identity.symbol
+        if speculative_market is not None:
+            # Cache ấm hay không thì luồng này cũng phải join trước khi tiếp
+            # tục -- không để nó rơi vào nền qua khỏi đời `run()`.
+            speculative_market.join()
 
         # Phủ sóng theo mục tiêu (thay "luôn đúng 2 thị trường: chính + phụ"
         # ở bản trước) -- xem Agent/backend/market/coverage.py cho toàn bộ

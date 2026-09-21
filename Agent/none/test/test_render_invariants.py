@@ -92,6 +92,11 @@ class _NoMarketSource(MarketDataSource):
         return {}, "TEST_NO_DATA"
 
 
+# The result dict behind the rendered page, for tests that need to re-render a
+# variant of it (e.g. with the insight modules stripped, as a saved record is).
+_RESULT_CACHE: Dict[str, Any] = {}
+
+
 @pytest.fixture(scope="module")
 def html() -> str:
     overview = json.loads((_FIXTURE_BOT_DIR / "overview.json").read_text(encoding="utf-8"))
@@ -102,6 +107,7 @@ def html() -> str:
     )
     result = service.analyze(VALID_CODE)
     assert result["status"] == "FULL"
+    _RESULT_CACHE.update(result)
     return render_bot_report_html(result)
 
 
@@ -207,3 +213,114 @@ def test_document_declares_a_colour_scheme(html: str) -> None:
     """Without this the browser paints native form controls and scrollbars for
     the wrong theme even when the page itself is correct."""
     assert "color-scheme" in html
+
+
+# --------------------------------------------------------------------------- #
+# Tab roles: the result tab is the user-facing overview, the other two carry
+# the depth. Mixing them is what made the result tab unreadable.
+# --------------------------------------------------------------------------- #
+
+
+def _tab_ids(html_doc: str, panel_id: str) -> list:
+    panel = html_doc.split(f'id="{panel_id}"', 1)[1]
+    panel = panel.split('class="tab-panel', 1)[0]
+    return re.findall(r'<section class="card[^"]*" id="([^"]+)"', panel)
+
+
+def test_result_tab_stays_an_overview(html: str) -> None:
+    """The result tab is the one ordinary users see, so it stays an overview.
+
+    Deep modules were briefly rendered here as extra cards, and an extra
+    "essence" summary was added on top of Conclusion and Expert assessment --
+    a third card saying the same thing. Both are gone; the tab is back to the
+    five sections it had.
+    """
+    ids = _tab_ids(html, "panel-report")
+    for extra in ("in-one-look", "holdout", "scenario-lab", "market-compatibility"):
+        assert extra not in ids, f"{extra} does not belong on the result tab"
+    assert len(ids) == 5, f"the result tab has {len(ids)} sections, expected 5"
+
+
+def test_market_tab_carries_the_market_depth(html: str) -> None:
+    assert "market-compatibility" in _tab_ids(html, "panel-market")
+
+
+def test_position_tab_carries_the_bot_depth(html: str) -> None:
+    ids = _tab_ids(html, "panel-trades")
+    assert "holdout" in ids
+    assert "scenario-lab" in ids
+
+
+def test_expert_section_carries_the_deterministic_thesis(html: str) -> None:
+    """The thesis box used to be built only from the optional LLM narrative,
+    which is off by default, so on an ordinary page the engine's own summary
+    never reached a reader."""
+    assert "Core Strategy Thesis" in html
+    assert "Root causes on the evidence" in html
+    # Each root cause states the measurement that put it on the list.
+    assert "root-cause-support" in html
+
+
+def test_methodology_footer_is_an_accordion_not_a_new_card(html: str) -> None:
+    assert 'id="phuong-phap"' in html
+    ids = _tab_ids(html, "panel-report")
+    assert "phuong-phap" not in ids, "the footer must not become a section card"
+    assert len(ids) == 5
+
+
+def _section_of(html_doc: str, section_id: str) -> str:
+    part = html_doc.split(f'id="{section_id}"', 1)[1]
+    return part[: part.index("</section>")]
+
+
+def test_no_scenario_is_rendered_on_two_tabs(html: str) -> None:
+    """Execution-cost scenarios belong to the market (spread, depth) and are
+    shown there under "Cost sensitivity". They were also being rendered in the
+    position tab's scenario laboratory, putting the same rows on two tabs."""
+    market = _section_of(html, "market-compatibility")
+    lab = _section_of(html, "scenario-lab")
+    assert "Cost sensitivity" in market
+    assert "Spread 3x" in market
+    assert "Spread 3x" not in lab
+    assert "Liquidity halved" not in lab
+
+
+def test_every_scenario_reaches_exactly_one_tab(html: str) -> None:
+    """The split must lose nothing: a scenario the engine produced and no tab
+    renders is worse than one shown twice."""
+    market = _section_of(html, "market-compatibility")
+    lab = _section_of(html, "scenario-lab")
+    # Execution scenarios on the market tab, everything else in the laboratory.
+    assert "Observed book, resampled" in lab
+    market_rows = market.split("</table>")[-2].count("<tr>") - 1
+    assert market_rows >= 1, "the market tab lost its cost scenarios"
+
+
+def test_saved_record_page_states_its_limits_once_not_per_section(html: str) -> None:
+    """A page rebuilt from a saved record cannot compute ANY insight module.
+
+    It used to render an empty card per module, each repeating the same
+    sentence -- four cards in a row that pushed the real content down and
+    taught nothing after the first. The limitation is now stated once, in the
+    data-limitations drawer, and the sections that cannot be computed are
+    simply not rendered.
+    """
+    from Agent.backend.web.report_page import render_bot_report_html
+
+    stripped = {k: v for k, v in _RESULT_CACHE.items()}
+    stripped["evidence"] = dict(stripped.get("evidence") or {})
+    stripped["evidence"].pop("insights", None)
+    saved_page = render_bot_report_html(stripped)
+
+    # No empty insight cards at all.
+    for anchor in ("holdout", "scenario-lab", "market-compatibility"):
+        assert f'id="{anchor}"' not in saved_page
+
+    # And exactly one place says why.
+    assert saved_page.count("Data limitations") == 1
+    assert "closed-trade ledger" in saved_page
+    assert 'id="phuong-phap"' in saved_page
+
+    # The live page still carries them.
+    for anchor in ("holdout", "scenario-lab", "market-compatibility"):
+        assert f'id="{anchor}"' in html

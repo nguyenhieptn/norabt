@@ -2343,12 +2343,65 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
     # 4. Proof / Quantitative Evidence (Terminal View)
     if proof_items:
         quant_evidence_html = _render_quant_terminal_evidence(proof_items)
+
+        # ── Top scorecard: key scores + simulated drawdown ──────────────────
+        # Displayed as styled chips directly under the QUANTITATIVE EVIDENCE
+        # heading so the reader gets the bottom-line numbers at a glance
+        # before reading the detailed audit rows below.
+        _q = result.get("quality")
+        _r = result.get("risk")
+        _cf = result.get("confidence")
+        _mc = result.get("mc") if isinstance(result.get("mc"), dict) else {}
+        _p95_dd = _mc.get("p95_max_drawdown") or _mc.get("profit_pct_p95")
+        # Try to get a cleaner simulated drawdown value
+        _hz_scenarios = _mc.get("horizon_scenarios")
+        _med_dd = None
+        if isinstance(_hz_scenarios, list):
+            for _s in _hz_scenarios:
+                if isinstance(_s, dict) and _s.get("label") == "MEDIUM":
+                    _med_dd = _s.get("median_max_drawdown")
+                    break
+        _dd_val = _med_dd if _is_finite_number(_med_dd) else _mc.get("median_max_drawdown")
+
+        def _qe_chip(label: str, value: str, cls: str) -> str:
+            return (
+                f'<div class="qe-chip {cls}">'
+                f'<span class="qe-chip-label">{_esc(label)}</span>'
+                f'<span class="qe-chip-value">{_esc(value)}</span>'
+                f'</div>'
+            )
+
+        chips = []
+        if _is_finite_number(_q):
+            qv = float(_q)
+            q_cls = "qe-chip-good" if qv >= 60 else ("qe-chip-warn" if qv >= 35 else "qe-chip-bad")
+            chips.append(_qe_chip("Quality", f"{int(round(qv))}/100", q_cls))
+        if _is_finite_number(_r):
+            rv = float(_r)
+            r_cls = "qe-chip-bad" if rv >= 70 else ("qe-chip-warn" if rv >= 40 else "qe-chip-good")
+            chips.append(_qe_chip("Risk", f"{int(round(rv))}/100", r_cls))
+        if _is_finite_number(_dd_val):
+            dv = float(_dd_val)
+            dd_cls = "qe-chip-bad" if dv >= 20 else ("qe-chip-warn" if dv >= 10 else "qe-chip-good")
+            chips.append(_qe_chip("Sim. Max DD (med)", f"-{dv:.1f}%", dd_cls))
+        if _is_finite_number(_cf):
+            cfv = float(_cf) * 100.0 if float(_cf) <= 1.0 else float(_cf)
+            cf_cls = "qe-chip-good" if cfv >= 70 else ("qe-chip-warn" if cfv >= 45 else "qe-chip-bad")
+            chips.append(_qe_chip("Confidence", f"{int(round(cfv))}%", cf_cls))
+
+        scorecard_html = (
+            f'<div class="qe-scorecard">{"".join(chips)}</div>'
+            if chips else ""
+        )
+
         blocks.append(
             '<div class="conclusion-section-block conclusion-quant-evidence-block">'
             '<div class="conclusion-sub-title">QUANTITATIVE EVIDENCE</div>'
+            f'{scorecard_html}'
             f'{quant_evidence_html}'
             '</div>'
         )
+
 
     # 5. Hidden Warnings
     if warning_items:
@@ -2990,18 +3043,81 @@ def _format_expert_metric_highlights(text: str) -> str:
     )
 
 
+def _render_deterministic_thesis(result: Dict[str, Any]) -> str:
+    """Core Strategy Thesis and root causes, measured rather than written.
+
+    This section's thesis box used to be built only from the optional LLM
+    narrative, which is off by default -- so on an ordinary page the section
+    rendered nothing at all and the engine's own summary never reached a
+    reader. The deterministic `executive_essence` and `failure_modes` modules
+    fill exactly that role, and they belong HERE (design section III, tier 3:
+    "Hop nhat Nhan dinh chuyen gia & Ly do cot loi") rather than in a card of
+    their own beside the Conclusion.
+    """
+    insights = _insights(result)
+    essence = insights.get("executive_essence") or {}
+    modes = insights.get("failure_modes") or []
+    if not essence and not modes:
+        return ""
+
+    parts: List[str] = []
+    thesis = essence.get("what_it_appears_to_do")
+    if thesis:
+        extras = [
+            essence.get("dominant_behavior"),
+            essence.get("strongest_positive_evidence"),
+        ]
+        detail = " &middot; ".join(_esc(str(x)) for x in extras if x)
+        parts.append(
+            '<div class="expert-summary-box">'
+            '<div class="expert-summary-label">Core Strategy Thesis</div>'
+            f'<div class="expert-summary-text">{_esc(str(thesis))}</div>'
+            + (f'<div class="expert-summary-sub">{detail}</div>' if detail else "")
+            + "</div>"
+        )
+
+    if modes:
+        rows = "".join(
+            "<li><strong>"
+            + _esc(str(m.get("mechanism") or ""))
+            + "</strong><span class=\"root-cause-support\">"
+            + _esc(str(m.get("observed_support") or ""))
+            + "</span></li>"
+            for m in modes
+        )
+        parts.append(
+            '<div class="root-cause-block">'
+            f'<div class="root-cause-title">Root causes on the evidence ({len(modes)})</div>'
+            f'<ul class="root-cause-list">{rows}</ul>'
+            "</div>"
+        )
+
+    unknown = essence.get("most_important_unknown")
+    if unknown:
+        parts.append(
+            f'<p class="notice notice-neutral">Most important unknown: {_esc(str(unknown))}</p>'
+        )
+    return "".join(parts)
+
+
 def _render_narrative(result: Dict[str, Any]) -> str:
     text = result.get("narrative")
     if not isinstance(text, str) or not text.strip():
-        return ""
+        # No LLM narrative: the deterministic thesis carries this section.
+        body = _render_deterministic_thesis(result)
+        if not body:
+            return ""
+        return _section("Expert assessment", body, anchor="nhan-dinh")
 
     is_pending = _is_narrative_pending(text)
     bullets: List[str] = []
 
     if is_pending:
         # Khi đang chờ LLM nền, tuyệt đối không hiện câu note chờ vô nghĩa.
-        # Thay vào đó, tổng hợp ngay góc nhìn thứ ba khách quan từ dữ liệu định lượng đã đo được!
-        prose_html = _synthesize_3rd_person_narrative(result)
+        # Ưu tiên bản luận đề TẤT ĐỊNH (`executive_essence` + `failure_modes`)
+        # vì nó là tóm tắt của chính engine, có số liệu kiểm chứng kèm theo;
+        # chỉ khi module đó không dựng được mới rơi về bản văn tổng hợp từ số.
+        prose_html = _render_deterministic_thesis(result) or _synthesize_3rd_person_narrative(result)
     else:
         lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
         prose_lines: List[str] = []
@@ -3023,24 +3139,24 @@ def _render_narrative(result: Dict[str, Any]) -> str:
                 summary_text = sentences[0]
                 bullets = sentences[1:]
                 prose_html = (
-                    '<div class="expert-summary-box" style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.2);border-left:3px solid #38bdf8;border-radius:8px;padding:12px 16px;margin-top:0.5rem;margin-bottom:0.85rem;box-sizing:border-box;">'
-                    '<div class="expert-summary-label" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#38bdf8;margin-bottom:4px;">Core Strategy Thesis</div>'
-                    f'<div class="expert-summary-text" style="font-size:13.5px;line-height:1.55;color:var(--ink,#fff);font-weight:500;">{_esc(summary_text)}</div>'
+                    '<div class="expert-summary-box">'
+                    '<div class="expert-summary-label">Core Strategy Thesis</div>'
+                    f'<div class="expert-summary-text">{_esc(summary_text)}</div>'
                     '</div>'
                 )
             else:
                 prose_html = (
-                    '<div class="expert-summary-box" style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.2);border-left:3px solid #38bdf8;border-radius:8px;padding:12px 16px;margin-top:0.5rem;margin-bottom:0.85rem;box-sizing:border-box;">'
-                    '<div class="expert-summary-label" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#38bdf8;margin-bottom:4px;">Core Strategy Thesis</div>'
-                    f'<div class="expert-summary-text" style="font-size:13.5px;line-height:1.55;color:var(--ink,#fff);font-weight:500;">{_esc(full_prose)}</div>'
+                    '<div class="expert-summary-box">'
+                    '<div class="expert-summary-label">Core Strategy Thesis</div>'
+                    f'<div class="expert-summary-text">{_esc(full_prose)}</div>'
                     '</div>'
                 )
         else:
             summary_p = "".join(f"<div style='margin-bottom:4px;'>{_esc(p)}</div>" for p in prose_lines)
             prose_html = (
-                '<div class="expert-summary-box" style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.2);border-left:3px solid #38bdf8;border-radius:8px;padding:12px 16px;margin-top:0.5rem;margin-bottom:0.85rem;box-sizing:border-box;">'
-                '<div class="expert-summary-label" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#38bdf8;margin-bottom:4px;">Core Strategy Thesis</div>'
-                f'<div class="expert-summary-text" style="font-size:13.5px;line-height:1.55;color:var(--ink,#fff);font-weight:500;">{summary_p}</div>'
+                '<div class="expert-summary-box">'
+                '<div class="expert-summary-label">Core Strategy Thesis</div>'
+                f'<div class="expert-summary-text">{summary_p}</div>'
                 '</div>'
                 if summary_p else ""
             )
@@ -3694,34 +3810,67 @@ def _render_monte_carlo(result: Dict[str, Any]) -> str:
             )
             parts.append(f'<div class="mc-full-row">{_subsection("End-of-horizon outcome percentiles", chart, theory)}</div>')
 
-    # 2. Row 2: Multi-horizon comparison (left) & Key probabilities (right)
+    # 2. Row 2: Multi-Horizon Scenario Matrix
     horizon_comp_html = _render_horizon_comparison(mc)
+    if horizon_comp_html:
+        parts.append(f'<div class="mc-full-row">{horizon_comp_html}</div>')
+
+    # 3. Row 3: Outcome Percentile Spectrum (Full 9-tier confidence distribution)
+    spectrum_html = _render_percentile_spectrum(mc)
+    if spectrum_html:
+        parts.append(f'<div class="mc-full-row">{spectrum_html}</div>')
+
+    # 4. Row 4: Key Probabilities, Simulated Risk & Efficiency, Losing Streak Table
     key_prob_html = _render_key_probabilities(mc)
-    if horizon_comp_html and key_prob_html:
-        parts.append(
-            f'<div class="mc-pair-row">'
-            f'<div class="mc-pair-cell">{horizon_comp_html}</div>'
-            f'<div class="mc-pair-cell">{key_prob_html}</div>'
-            f'</div>'
-        )
-    elif horizon_comp_html or key_prob_html:
-        parts.append(f'<div class="mc-full-row">{horizon_comp_html or key_prob_html}</div>')
+    if key_prob_html:
+        parts.append(f'<div class="mc-full-row">{key_prob_html}</div>')
 
     body = "".join(p for p in parts if p)
     if not body:
         return ""
-    # One methodology drawer for the whole section, not one per sub-chart.
+    # One methodology drawer for the whole section -- covers all sub-sections.
     body += _theory(
-        "Outcome dispersion, drawdown and ruin probability across three trade "
-        "horizons. A median that falls from SHORT to LONG is expectancy decay; "
-        "a rising ruin probability is the same story told from the tail.",
-        "Stationary bootstrap (Politis &amp; Romano 1994), "
-        f"{_int_text(mc.get('iterations') or 10000)} resampled paths, re-run at "
-        "SHORT = 0.2x, MEDIUM = 1.0x and LONG = 3.0x the observed trade count. "
-        "P(profit) = terminal equity above starting equity. Percentiles deeper "
-        "than -100% are reported as -100%, the liquidation boundary. Streak "
-        "excess = max(0, observed &minus; analytical Markov-binomial baseline at "
-        "the observed loss rate), so only clustering beyond chance is counted.",
+        "<strong>Section overview.</strong> This section runs a stationary-bootstrap "
+        "Monte Carlo simulation across three trade horizons and reports the full "
+        "outcome distribution, tail risk, ruin probability, and streak risk in one "
+        "unified view. Every number here is a <em>simulated</em> statistic, not a "
+        "realised figure.<br><br>"
+        "<strong>Chart &mdash; Outcome distribution by horizon:</strong> "
+        "Box-and-whisker columns for SHORT / MEDIUM / LONG horizons. Each column shows the P05&ndash;P50 "
+        "downside band (red) and the P50&ndash;P95 upside band (green) with the P50 median marker (amber). "
+        "Whiskers extend to the full P05&ndash;P95 range. The Breakeven (0%) line and Drawdown indicator "
+        "are overlaid. <em>PoP</em> badge at the top = Probability of Profit. "
+        "<em>DD</em> = Median maximum drawdown for that horizon.<br><br>"
+        "<strong>Multi-horizon comparison table:</strong> "
+        "<em>Sample</em> = number of trades simulated. "
+        "<em>Profit Chance</em> = PoP (%). "
+        "<em>Median (P50)</em> = expected return at the middle scenario. "
+        "<em>Range (P05&rarr;P95)</em> = 90% confidence interval. "
+        "<em>Max DD</em> = median worst drawdown. "
+        "<em>Loss &middot; Ruin</em> = P(loss at horizon end) &middot; P(full ruin at &minus;100%).<br><br>"
+        "<strong>Detailed percentile spectrum:</strong> "
+        "Full 9-tier distribution from Worst to Best. "
+        "<em>P05</em> = Stress VaR (5th percentile, worst realistic scenario). "
+        "<em>P25/P75</em> = Interquartile range (Q1/Q3). "
+        "<em>Skew badge</em> = upside-to-downside span ratio; Positive Skew (&ge;1.4&times;) means "
+        "upside tail is disproportionately wider than downside tail.<br><br>"
+        "<strong>Key probabilities &amp; simulated risk:</strong> "
+        "<em>VaR (95%)</em> = Value at Risk &mdash; the 5th-pct return threshold (max expected loss at 95% confidence). "
+        "<em>CVaR (95%)</em> = Conditional VaR / Expected Shortfall &mdash; average loss across the worst 5% tail paths. "
+        "<em>MAR</em> = annualised return &divide; max drawdown (median across paths); &ge;2.0 = excellent, &ge;0.5 = acceptable. "
+        "<em>PF</em> = Profit Factor &mdash; gross wins &divide; gross losses (median); &ge;1.25 = healthy edge. "
+        "<em>Losing streak excess</em> = max(0, observed streak probability &minus; Binomial baseline); "
+        "positive excess signals loss clustering beyond random chance.",
+        "Stationary bootstrap (Politis &amp; Romano 1994): "
+        f"{_int_text(mc.get('iterations') or 10000)} resampled paths with random block lengths, "
+        "re-run at SHORT = 0.2&times;, MEDIUM = 1.0&times;, LONG = 3.0&times; the observed trade count. "
+        "Terminal return percentiles are computed from the empirical distribution of end-of-path equity; "
+        "any path reaching &minus;100% is absorbed at the liquidation boundary and reported as &minus;100%. "
+        "Drawdown = max peak-to-trough decline over the path; the reported value is the median across all paths. "
+        "Streak baseline = Markov-binomial model at observed loss rate; excess = observed minus analytical, "
+        "clamped at zero so only clustering above chance is counted. "
+        "VaR / CVaR are read directly from the simulated terminal return distribution (5th percentile / "
+        "expected value below 5th percentile). MAR and PF are computed per path then the median is reported.",
     )
     return _section("Monte Carlo simulation", body, anchor="monte-carlo")
 
@@ -3730,6 +3879,93 @@ def _subsection(title: str, chart: str, theory: str) -> str:
     if not chart:
         return ""
     return f"<h3>{_esc(title)}</h3>{chart}{theory}"
+
+
+def _render_percentile_spectrum(mc: Dict[str, Any]) -> str:
+    """Detailed percentile spectrum of terminal return distribution across 10,000 bootstrap paths.
+    Provides the full quantitative panorama: Worst, P05, P10, P25, P50, P75, P90, P95, Best.
+    """
+    p05 = mc.get("profit_pct_p05")
+    p50 = mc.get("profit_pct_p50")
+    p95 = mc.get("profit_pct_p95")
+    if not any(_is_finite_number(v) for v in (p05, p50, p95)):
+        return ""
+
+    p10 = mc.get("profit_pct_p10")
+    p25 = mc.get("profit_pct_p25")
+    p75 = mc.get("profit_pct_p75")
+    p90 = mc.get("profit_pct_p90")
+    worst = mc.get("profit_pct_worst")
+    best = mc.get("profit_pct_best")
+
+    tiers = [
+        ("Worst", worst, "Tail risk floor"),
+        ("P05", p05, "5th pct (Stress VaR)"),
+        ("P10", p10, "10th percentile"),
+        ("P25", p25, "1st Quartile (Q1)"),
+        ("P50", p50, "Median Expected"),
+        ("P75", p75, "3rd Quartile (Q3)"),
+        ("P90", p90, "90th percentile"),
+        ("P95", p95, "95th pct (Upside cap)"),
+        ("Best", best, "Maximum upside"),
+    ]
+
+    grid_cards = []
+    for label, val, sublabel in tiers:
+        if not _is_finite_number(val):
+            continue
+        v_num = float(val)
+        v_str = f"{v_num:+.1f}%" if v_num != 0 else "0.0%"
+        if v_num <= -100.0:
+            v_str = "-100% (Ruin)"
+        card_color = "var(--down, #ef4444)" if v_num < 0 else ("var(--up, #10b981)" if v_num > 0 else "var(--ink, #ffffff)")
+        grid_cards.append(
+            f'<div class="mc-spec-card">'
+            f'  <div class="mc-spec-top">'
+            f'    <span class="mc-spec-lbl">{label}</span>'
+            f'    <span class="mc-spec-sub">{sublabel}</span>'
+            f'  </div>'
+            f'  <div class="mc-spec-val" style="color:{card_color};">{v_str}</div>'
+            f'</div>'
+        )
+
+    if not grid_cards:
+        return ""
+
+    # Skew / Asymmetry calculation if P05, P50, P95 available
+    skew_badge = ""
+    if _is_finite_number(p05) and _is_finite_number(p50) and _is_finite_number(p95):
+        p05_f = float(p05)
+        p50_f = float(p50)
+        p95_f = float(p95)
+        upside_span = max(0.0, p95_f - p50_f)
+        downside_span = max(0.01, p50_f - max(-100.0, p05_f))
+        ratio = upside_span / downside_span if downside_span > 0 else 1.0
+        if ratio >= 1.4:
+            skew_badge = f'<span class="mc-skew-badge positive" title="Upside tail is {ratio:.1f}x wider than downside tail (positive return skew)">Positive Skew ({ratio:.1f}:1) ✔</span>'
+        elif ratio <= 0.7:
+            inv_ratio = 1.0 / ratio if ratio > 0 else 99.0
+            skew_badge = f'<span class="mc-skew-badge negative" title="Downside tail is {inv_ratio:.1f}x wider than upside tail (martingale / tail risk)">Negative Skew ({inv_ratio:.1f}:1) ⚠</span>'
+        else:
+            skew_badge = f'<span class="mc-skew-badge balanced" title="Outcome distribution is symmetric around median">Symmetric ({ratio:.1f}:1)</span>'
+
+    header_html = (
+        '<div class="mc-spec-header">'
+        '  <div>'
+        '    <h4 class="mc-spec-title">Detailed percentile spectrum</h4>'
+        '    <div class="mc-spec-subtitle">Quantitative outcome distribution across confidence percentiles (base horizon)</div>'
+        '  </div>'
+        f'  <div>{skew_badge}</div>'
+        '</div>'
+    )
+
+    body_content = (
+        f'<div class="mc-spec-panel">'
+        f'{header_html}'
+        f'<div class="mc-spec-grid">{"".join(grid_cards)}</div>'
+        f'</div>'
+    )
+    return _subsection("Outcome percentile spectrum", body_content, "")
 
 
 def _render_horizon_comparison(mc: Dict[str, Any]) -> str:
@@ -3749,6 +3985,10 @@ def _render_horizon_comparison(mc: Dict[str, Any]) -> str:
         pop = s.get("probability_of_profit")
         p_loss = s.get("p_loss_after_horizon")
         p_ruin = s.get("p_ruin")
+        p50 = s.get("profit_pct_p50")
+        p05 = s.get("profit_pct_p05")
+        p95 = s.get("profit_pct_p95")
+        dd = s.get("median_max_drawdown")
 
         pop_num = float(pop) if _is_finite_number(pop) else 0.0
         pop_pct_str = _format_prob_pct(pop)
@@ -3769,6 +4009,31 @@ def _render_horizon_comparison(mc: Dict[str, Any]) -> str:
         trades_str = f"{_int_text(trades)} trds"
         row_tooltip = f"Monte Carlo bootstrap across 10,000 scenarios over {_int_text(trades)} trades"
 
+        # P50 Median return
+        if _is_finite_number(p50):
+            p50_f = float(p50)
+            p50_str = f"{p50_f:+.1f}%" if p50_f != 0 else "0.0%"
+            p50_color = "var(--up, #10b981)" if p50_f > 0 else ("var(--down, #ef4444)" if p50_f < 0 else "var(--ink, #ffffff)")
+        else:
+            p50_str = "—"
+            p50_color = "var(--muted, #64748b)"
+
+        # P05 -> P95 Range
+        if _is_finite_number(p05) and _is_finite_number(p95):
+            p05_f = float(p05)
+            p95_f = float(p95)
+            p05_disp = "-100% (Ruin)" if p05_f <= -100.0 else f"{p05_f:+.1f}%"
+            p95_disp = f"{p95_f:+.1f}%"
+            range_str = f"{p05_disp} &rarr; {p95_disp}"
+        else:
+            range_str = "—"
+
+        # Max Drawdown
+        if _is_finite_number(dd):
+            dd_str = f"-{float(dd):.1f}%"
+        else:
+            dd_str = "—"
+
         rows_html.append(
             f'<tr class="hz-matrix-row" data-hz="{key.lower()}" title="{_esc(row_tooltip)}">'
             f'<td class="col-hz"><span class="hz-pill hz-pill-{key.lower()}">{key}</span></td>'
@@ -3779,6 +4044,9 @@ def _render_horizon_comparison(mc: Dict[str, Any]) -> str:
             f'    <span class="hz-progress-val" style="color:{color};">{pop_pct_str}</span>'
             f'  </div>'
             f'</td>'
+            f'<td class="col-med" style="color:{p50_color};font-weight:700;">{p50_str}</td>'
+            f'<td class="col-range"><span class="hz-range-val">{range_str}</span></td>'
+            f'<td class="col-dd" style="color:var(--down, #ef4444);font-family:var(--mono);font-weight:600;">{dd_str}</td>'
             f'<td class="col-loss-ruin">'
             f'  <span class="hz-loss-val" style="color:{loss_color};">{loss_pct_str}</span>'
             f'  <span class="hz-divider">&middot;</span>'
@@ -3797,6 +4065,9 @@ def _render_horizon_comparison(mc: Dict[str, Any]) -> str:
         '<th class="col-hz" title="Simulation horizon (Short / Medium / Long)">Horizon</th>'
         '<th class="col-sample" title="Sample size in trades for this horizon">Sample</th>'
         '<th class="col-pop" title="Probability of ending with profit (Profit &gt; 0)">Profit Chance</th>'
+        '<th class="col-med" title="Median simulated return across 10,000 paths">Median (P50)</th>'
+        '<th class="col-range" title="90% confidence outcome interval from 5th to 95th percentile">Range (P05 &rarr; P95)</th>'
+        '<th class="col-dd" title="Median maximum drawdown suffered">Max DD</th>'
         '<th class="col-loss-ruin" title="Probability of loss at horizon end &middot; Probability of ruin">Loss &middot; Ruin</th>'
         '</tr></thead>'
         f'<tbody>{"".join(rows_html)}</tbody>'
@@ -3878,7 +4149,7 @@ def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
       1. Phân vị kết cục (P05..P95) chặn sàn thanh lý -100.0%
       2. Mức độ sụt giảm tối đa (Median & Worst Drawdown)
       3. Diễn tiến xác suất có lãi & cháy vốn theo đa kỳ hạn (Short/Medium/Long)
-    trên một khung nhìn trực quan duy nhất chuẩn mực tài chính định lượng.
+    trên một khung nhìn trực quan chuẩn mực tài chính, hoàn toàn không đè chữ/nhãn.
     """
     scenarios = mc.get("horizon_scenarios")
     if not isinstance(scenarios, list) or not scenarios:
@@ -3892,22 +4163,16 @@ def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
     if not valid_scenarios:
         return ""
 
-    width = 720.0
-    height = 360.0
-    pad_l = 75.0
-    pad_r = 96.0
-    pad_t = 42.0
-    pad_b = 64.0
+    width = 800.0
+    height = 420.0
+    pad_l = 80.0
+    pad_r = 105.0
+    pad_t = 48.0
+    pad_b = 68.0
     plot_w = width - pad_l - pad_r
     plot_h = height - pad_t - pad_b
 
     # --- Y domain -------------------------------------------------------- #
-    # The axis follows the data, and the ruin floor is only part of the axis
-    # when the simulation actually reaches for it. Pinning every chart to
-    # -100% looked rigorous but spent roughly half the canvas drawing an empty
-    # liquidation zone for a bot whose worst percentile never went negative,
-    # squashing the boxes that carry the answer into the top half -- and it
-    # printed a red RUIN banner on a bot with a 0% ruin probability.
     lows: List[float] = []
     highs: List[float] = []
     ruin_risk = False
@@ -3934,12 +4199,11 @@ def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
     data_high = max(data_high, 0.0)
 
     if ruin_risk:
-        # A run that can be liquidated must show the floor it can hit.
         y_floor_val = -100.0
     else:
-        headroom = max(5.0, (data_high - data_low) * 0.12)
+        headroom = max(6.0, (data_high - data_low) * 0.12)
         y_floor_val = math.floor((data_low - headroom) / 10.0) * 10.0
-    y_ceil_val = math.ceil((data_high + max(5.0, (data_high - data_low) * 0.12)) / 10.0) * 10.0
+    y_ceil_val = math.ceil((data_high + max(6.0, (data_high - data_low) * 0.12)) / 10.0) * 10.0
     if y_ceil_val <= y_floor_val:
         y_ceil_val = y_floor_val + 10.0
     y_span = max(y_ceil_val - y_floor_val, 1.0)
@@ -3954,10 +4218,7 @@ def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
 
     svg_parts: List[str] = []
 
-    # 1. Background grid.
-    # Ticks are derived from the domain rather than hardcoded, so the same code
-    # draws a readable axis for a bot ranging +1%..+124% and for one pinned to
-    # the liquidation floor.
+    # 1. Background grid with dynamic step
     raw_step = y_span / 5.0
     magnitude = 10.0 ** math.floor(math.log10(raw_step)) if raw_step > 0 else 10.0
     for candidate in (1.0, 2.0, 2.5, 5.0, 10.0):
@@ -3968,22 +4229,22 @@ def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
     while tick <= y_ceil_val + 1e-9:
         y_t = to_y(tick)
         if abs(tick) > 1e-9 and pad_t + 6 <= y_t <= pad_t + plot_h - 6:
-            svg_parts.append(_line(pad_l, y_t, pad_l + plot_w, y_t, stroke="var(--line-2, #334155)", width=1.0, dash="4,4", extra='opacity="0.45"'))
-            svg_parts.append(_text(pad_l - 8, y_t + 4, f"{tick:+.0f}%", anchor="end", fill="var(--ink-3, #94a3b8)", extra='font-size="10"'))
+            svg_parts.append(_line(pad_l, y_t, pad_l + plot_w, y_t, stroke="var(--mc-grid-line, #334155)", width=1.0, dash="4,4", extra='opacity="0.6"'))
+            svg_parts.append(_text(pad_l - 8, y_t + 4, f"{tick:+.0f}%", anchor="end", fill="var(--mc-grid-text, #94a3b8)", extra='font-size="10" font-family="var(--mono)"'))
         tick += step
 
-    # The ruin floor is drawn only when the simulation can actually reach it.
-    # A red "LIQUIDATION FLOOR" banner on a bot with 0% ruin probability is a
-    # false alarm, and a false alarm costs the reader trust in the real ones.
+    # Ruin floor
     if ruin_risk:
         svg_parts.append(_line(pad_l, y_ruin, pad_l + plot_w, y_ruin, stroke="var(--down, #dc2626)", width=2.0, dash="6,4"))
         svg_parts.append(_text(pad_l - 8, y_ruin + 4, "-100%", anchor="end", fill="var(--down, #ef4444)", extra='font-size="10" font-weight="bold"'))
-        svg_parts.append(_text(pad_l + 8, y_ruin - 6, "RUIN / LIQUIDATION FLOOR", fill="var(--down, #ef4444)", extra='font-size="10" font-weight="bold"'))
+        svg_parts.append(_rect(pad_l + 4, y_ruin - 16, 175, 15, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--down, #dc2626)" stroke-width="0.75"'))
+        svg_parts.append(_text(pad_l + 8, y_ruin - 5, "RUIN / LIQUIDATION FLOOR", fill="var(--down, #ef4444)", extra='font-size="9.5" font-weight="bold"'))
 
-    # Breakeven line (0%) -- always present, it is the reference every reader uses.
-    svg_parts.append(_line(pad_l, y_zero, pad_l + plot_w, y_zero, stroke="var(--ink, #0f172a)", width=1.5, extra='opacity="0.55"'))
-    svg_parts.append(_text(pad_l - 8, y_zero + 4, "0%", anchor="end", fill="var(--ink, #0f172a)", extra='font-weight="bold" font-size="10"'))
-    svg_parts.append(_text(pad_l + plot_w - 4, y_zero - 6, "Breakeven", anchor="end", fill="var(--ink-3, #94a3b8)", extra='font-size="10"'))
+    # Breakeven line (0%) with anti-bleed pill
+    svg_parts.append(_line(pad_l, y_zero, pad_l + plot_w, y_zero, stroke="var(--mc-be-line, rgba(255, 255, 255, 0.35))", width=1.5, extra='opacity="0.5"'))
+    svg_parts.append(_text(pad_l - 8, y_zero + 4, "0%", anchor="end", fill="var(--mc-be-text, #94a3b8)", extra='font-weight="bold" font-size="10"'))
+    svg_parts.append(_rect(pad_l + 4, y_zero - 15, 68, 15, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--mc-pill-border, #334155)" stroke-width="0.75"'))
+    svg_parts.append(_text(pad_l + 8, y_zero - 4, "Breakeven", anchor="start", fill="var(--mc-be-text, #94a3b8)", extra='font-size="9.5" font-weight="600"'))
 
     n_cols = len(valid_scenarios)
     col_x_list = []
@@ -4017,7 +4278,7 @@ def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
         med_path = " ".join(f"{'M' if i == 0 else 'L'}{x:.1f},{y:.1f}" for i, (x, y) in enumerate(p50_points))
         svg_parts.append(f'<path d="{med_path}" fill="none" stroke="var(--amber, #f59e0b)" stroke-width="2" stroke-dasharray="4,3" />')
 
-    # 3. Render Columns
+    # 3. Render Columns with Zero-Collision Positioning Engine
     for i, (key, s) in enumerate(valid_scenarios):
         cx = col_x_list[i]
         trades = s.get("horizon_trades")
@@ -4037,10 +4298,10 @@ def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
         y_p05 = to_y(clamped_p05)
 
         # Whisker line
-        svg_parts.append(_line(cx, y_p05, cx, y_p95, stroke="var(--ink-3, #64748b)", width=2.0))
+        svg_parts.append(_line(cx, y_p05, cx, y_p95, stroke="var(--mc-whisker, #64748b)", width=2.0))
 
         # Upper box (P50 to P95)
-        box_w = 46.0
+        box_w = 48.0
         box_x = cx - box_w / 2.0
         h_upper = max(2.0, y_p50 - y_p95)
         svg_parts.append(_rect(box_x, y_p95, box_w, h_upper, fill="var(--up, #10b981)", rx=3.0, extra='opacity="0.85"'))
@@ -4049,54 +4310,82 @@ def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
         h_lower = max(2.0, y_p05 - y_p50)
         svg_parts.append(_rect(box_x, y_p50, box_w, h_lower, fill="var(--down, #ef4444)", rx=3.0, extra='opacity="0.85"'))
 
-        # Median marker line
-        svg_parts.append(_line(cx - box_w / 2.0 - 4, y_p50, cx + box_w / 2.0 + 4, y_p50, stroke="var(--panel, #ffffff)", width=2.5))
-        svg_parts.append(_text(cx, y_p50 - 4, f"{p50_val:+.1f}%", anchor="middle", fill="var(--panel, #ffffff)", extra='font-size="10" font-weight="bold"'))
-
-        # P95 label
-        svg_parts.append(_text(cx, y_p95 - 4, f"P95: {p95_val:+.1f}%", anchor="middle", fill="var(--up, #10b981)", extra='font-size="9.5"'))
-
-        # P05 label
-        if is_liquidated:
-            svg_parts.append(_rect(box_x - 3, y_ruin - 8, box_w + 6, 8.0, fill="var(--down, #dc2626)", rx=2.0))
-            svg_parts.append(_text(cx, y_ruin - 10, "P05: RUIN (-100%)", anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9" font-weight="bold"'))
+        # --- Median Marker & Label with Collision Protection ---
+        if min(h_upper, h_lower) < 18.0:
+            svg_parts.append(_line(cx - box_w / 2.0 - 2, y_p50, cx + box_w / 2.0 + 2, y_p50, stroke="var(--amber, #f59e0b)", width=2.5))
+            tag_w = 68.0
+            tag_h = 18.0
+            tag_x = cx - box_w / 2.0 - 8.0
+            svg_parts.append(_line(cx - box_w / 2.0, y_p50, tag_x, y_p50, stroke="var(--amber, #f59e0b)", width=1.2, dash="2,2"))
+            svg_parts.append(_rect(tag_x - tag_w, y_p50 - tag_h / 2.0, tag_w, tag_h, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--amber, #f59e0b)" stroke-width="1.0"'))
+            svg_parts.append(_text(tag_x - tag_w / 2.0, y_p50 + 4.0, f"P50 {p50_val:+.1f}%", anchor="middle", fill="var(--amber, #f59e0b)", extra='font-size="9" font-weight="700" font-family="var(--mono)"'))
         else:
-            svg_parts.append(_text(cx, y_p05 + 12, f"P05: {p05_val:+.1f}%", anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9.5"'))
+            svg_parts.append(_line(cx - box_w / 2.0 - 3, y_p50, cx + box_w / 2.0 + 3, y_p50, stroke="var(--amber, #f59e0b)", width=2.5))
+            lbl_w = 54.0
+            lbl_h = 16.0
+            svg_parts.append(_rect(cx - lbl_w / 2.0, y_p50 - lbl_h / 2.0, lbl_w, lbl_h, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--amber, #f59e0b)" stroke-width="0.85"'))
+            svg_parts.append(_text(cx, y_p50 + 4.0, f"{p50_val:+.1f}%", anchor="middle", fill="var(--mc-med-text, #ffffff)", extra='font-size="9.5" font-weight="700" font-family="var(--mono)"'))
 
-        # Drawdown marker on side
+        # --- P95 Label with Backdrop Pill ---
+        p95_lbl_y = y_p95 - 8.0
+        if p95_lbl_y < pad_t + 10.0:
+            p95_lbl_y = pad_t + 10.0
+        pill_w = 78.0
+        pill_h = 16.0
+        svg_parts.append(_rect(cx - pill_w / 2.0, p95_lbl_y - 12.0, pill_w, pill_h, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--up, #10b981)" stroke-width="0.85"'))
+        svg_parts.append(_text(cx, p95_lbl_y, f"P95: {p95_val:+.1f}%", anchor="middle", fill="var(--up, #10b981)", extra='font-size="9.5" font-weight="600" font-family="var(--mono)"'))
+
+        # --- P05 Label with Vertical Clearance Enforcement ---
+        p05_lbl_y = max(y_p05 + 14.0, y_p50 + 20.0)
+        if p05_lbl_y > pad_t + plot_h - 4.0:
+            p05_lbl_y = pad_t + plot_h - 4.0
+        p05_pill_w = 96.0 if is_liquidated else 78.0
+        p05_pill_h = 16.0
+        p05_text = "P05: RUIN (-100%)" if is_liquidated else f"P05: {p05_val:+.1f}%"
+        svg_parts.append(_rect(cx - p05_pill_w / 2.0, p05_lbl_y - 12.0, p05_pill_w, p05_pill_h, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--down, #ef4444)" stroke-width="0.85"'))
+        svg_parts.append(_text(cx, p05_lbl_y, p05_text, anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9.5" font-weight="600" font-family="var(--mono)"'))
+
+        # --- Drawdown Indicator with Stepped Leader Anti-Collision ---
         y_dd = to_y(-dd_val)
-        svg_parts.append(_line(cx + box_w / 2.0 + 2, y_dd, cx + box_w / 2.0 + 8, y_dd, stroke="var(--down, #ef4444)", width=1.5))
-        svg_parts.append(_text(cx + box_w / 2.0 + 10, y_dd + 3, f"DD: -{dd_val:.1f}%", fill="var(--down, #ef4444)", extra='font-size="9"'))
+        dd_txt_x = cx + box_w / 2.0 + 16.0
+        if abs(y_dd - p05_lbl_y) < 18.0:
+            dd_disp_y = p05_lbl_y + 18.0 if p05_lbl_y + 18.0 <= pad_t + plot_h - 4.0 else p05_lbl_y - 18.0
+            svg_parts.append(f'<path d="M {cx + box_w / 2.0 + 3.0:.1f} {y_dd:.1f} L {cx + box_w / 2.0 + 9.0:.1f} {y_dd:.1f} L {dd_txt_x - 3.0:.1f} {dd_disp_y - 3.0:.1f} H {dd_txt_x + 4.0:.1f}" fill="none" stroke="var(--down, #ef4444)" stroke-width="1.2" stroke-dasharray="2,2"/>')
+        else:
+            dd_disp_y = y_dd
+            svg_parts.append(_line(cx + box_w / 2.0 + 3.0, y_dd, dd_txt_x - 3.0, y_dd, stroke="var(--down, #ef4444)", width=1.2))
+        svg_parts.append(f'<circle cx="{_coord(cx + box_w / 2.0 + 3.0)}" cy="{_coord(y_dd)}" r="2.5" fill="var(--down, #ef4444)"/>')
+
+        dd_pill_w = 70.0
+        dd_pill_h = 15.0
+        svg_parts.append(_rect(dd_txt_x - 2.0, dd_disp_y - 11.0, dd_pill_w, dd_pill_h, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--down, #ef4444)" stroke-width="0.6"'))
+        svg_parts.append(_text(dd_txt_x + 2.0, dd_disp_y, f"DD: -{dd_val:.1f}%", anchor="start", fill="var(--down, #ef4444)", extra='font-size="9" font-family="var(--mono)" font-weight="600"'))
 
         # Probability of profit badge at top
         pop_num = float(pop) if _is_finite_number(pop) else 0.0
         pop_str = _format_prob_pct(pop)
         pop_bg = "var(--up, #10b981)" if pop_num >= 50.0 else ("var(--amber, #f59e0b)" if pop_num >= 20.0 else "var(--down, #ef4444)")
-        badge_w = 84.0
+        badge_w = 88.0
         badge_x = cx - badge_w / 2.0
-        badge_y = 12.0
+        badge_y = 14.0
         svg_parts.append(_rect(badge_x, badge_y, badge_w, 20.0, fill=pop_bg, rx=4.0))
-        svg_parts.append(_text(cx, badge_y + 14, f"PoP: {pop_str}", anchor="middle", fill="var(--panel, #ffffff)", extra='font-size="10" font-weight="bold"'))
+        svg_parts.append(_text(cx, badge_y + 14.0, f"PoP: {pop_str}", anchor="middle", fill="#ffffff", extra='font-size="10" font-weight="bold"'))
 
         # X-axis label
         label_y = pad_t + plot_h + 18.0
         svg_parts.append(_text(cx, label_y, key, anchor="middle", fill="var(--ink, #0f172a)", extra='font-size="11" font-weight="bold"'))
-        svg_parts.append(_text(cx, label_y + 14, f"{_int_text(trades)} trds", anchor="middle", fill="var(--ink-3, #94a3b8)", extra='font-size="10"'))
+        svg_parts.append(_text(cx, label_y + 14.0, f"{_int_text(trades)} trds", anchor="middle", fill="var(--ink-3, #94a3b8)", extra='font-size="10"'))
 
         # Ruin indicator
         if _is_finite_number(p_ruin) and float(p_ruin) > 0.05:
             ruin_str = f"Ruin: {_format_prob_pct(p_ruin)} ⚠"
-            svg_parts.append(_text(cx, label_y + 28, ruin_str, anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9.5" font-weight="bold"'))
+            svg_parts.append(_text(cx, label_y + 28.0, ruin_str, anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9.5" font-weight="bold"'))
         else:
-            svg_parts.append(_text(cx, label_y + 28, "Safe Floor ✔", anchor="middle", fill="var(--up, #10b981)", extra='font-size="9.5"'))
+            svg_parts.append(_text(cx, label_y + 28.0, "Safe Floor ✔", anchor="middle", fill="var(--up, #10b981)", extra='font-size="9.5"'))
 
     svg_content = "".join(svg_parts)
     chart_svg = _svg(width, height, svg_content, extra_class="mc-unified-svg")
 
-    # The title used to name the separate "probability of profit by horizon"
-    # chart that this one replaced, so the page advertised two charts and drew
-    # one. The subtitle and the ruin legend entry now describe what is actually
-    # on the axis for THIS bot.
     subtitle = (
         f"{_int_text(mc.get('iterations') or 10000)} bootstrap paths &middot; "
         + (
@@ -4126,8 +4415,26 @@ def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
         '</div>'
     )
 
-    # No theory drawer here: the section collects one at the end.
-    return f'<div class="mc-unified-panel">{header_html}{chart_svg}</div>'
+    # --- Parameter glossary (* notes) rendered as an aligned two-column grid
+    # matching the style of the existing score-basis notes in the rest of the report.
+    param_notes_html = (
+        '<div class="mc-param-notes">'
+        '<div class="mc-param-notes-grid">'
+        '<div class="mc-param-note-item"><span class="mc-param-star">PoP</span>'
+        '<span class="mc-param-desc">Probability of Profit &mdash; share of simulated paths ending with positive return (terminal equity &gt; starting equity).</span></div>'
+        '<div class="mc-param-note-item"><span class="mc-param-star">P05 / P50 / P95</span>'
+        '<span class="mc-param-desc">5th / 50th (median) / 95th percentile of terminal return across all bootstrap paths. P05 = stress scenario; P95 = upside scenario.</span></div>'
+        '<div class="mc-param-note-item"><span class="mc-param-star">DD</span>'
+        '<span class="mc-param-desc">Median maximum drawdown &mdash; the typical deepest peak-to-trough capital decline observed across simulated paths.</span></div>'
+        '<div class="mc-param-note-item"><span class="mc-param-star">Safe Floor ✔ / Ruin</span>'
+        '<span class="mc-param-desc">Safe Floor: no simulated path reached &minus;100% (liquidation boundary). Ruin %: fraction of paths that hit full liquidation.</span></div>'
+        '<div class="mc-param-note-item"><span class="mc-param-star">SHORT / MEDIUM / LONG</span>'
+        '<span class="mc-param-desc">Simulated horizons at 0.2&times;, 1.0&times;, and 3.0&times; the observed trade count. Horizon stability tests whether edge persists at scale.</span></div>'
+        '</div>'
+        '</div>'
+    )
+
+    return f'<div class="mc-unified-panel">{header_html}{chart_svg}{param_notes_html}</div>'
 
 
 def _render_horizon_probability_chart(mc: Dict[str, Any]) -> str:
@@ -4236,6 +4543,104 @@ def _render_key_probabilities(mc: Dict[str, Any]) -> str:
     body_parts = []
     if kpi_cards:
         body_parts.append(f'<div class="kp-kpi-row">{"".join(kpi_cards)}</div>')
+
+    # 3. Core Risk & Performance Metrics (unblocked schema fields: VaR 95%, CVaR 95%, MAR median, PF median)
+    var_95 = mc.get("var_95_pct")
+    cvar_95 = mc.get("cvar_95_pct")
+    mar_median = mc.get("mar_ratio_median")
+    pf_median = mc.get("profit_factor_median")
+
+    has_any_risk_stat = any(
+        _is_finite_number(v) for v in (var_95, cvar_95, mar_median, pf_median)
+    )
+    if has_any_risk_stat:
+        risk_cards = []
+        if _is_finite_number(var_95):
+            v = float(var_95)
+            v_str = f"{v:+.1f}%" if v != 0 else "0.0%"
+            c = "var(--down, #ef4444)" if v < 0 else "var(--up, #10b981)"
+            risk_cards.append(
+                f'<div class="kp-stat-item" title="Value at Risk (95% confidence): maximum expected loss threshold at 95% certainty">'
+                f'<div class="kp-stat-label">VaR (95%)</div>'
+                f'<div class="kp-stat-val" style="color:{c};">{_esc(v_str)}</div>'
+                f'<div class="kp-stat-sub">5th pct threshold</div>'
+                f'</div>'
+            )
+        else:
+            risk_cards.append(
+                '<div class="kp-stat-item" title="Value at Risk not measured">'
+                '<div class="kp-stat-label">VaR (95%)</div>'
+                '<div class="kp-stat-val" style="color:var(--ink-3, #94a3b8);">&mdash;</div>'
+                '<div class="kp-stat-sub">not measured</div>'
+                '</div>'
+            )
+
+        if _is_finite_number(cvar_95):
+            cv = float(cvar_95)
+            cv_disp = -abs(cv) if cv > 0 else cv
+            cv_str = f"{cv_disp:.1f}%"
+            risk_cards.append(
+                f'<div class="kp-stat-item" title="Conditional VaR (Expected Shortfall): expected average loss in the worst 5% tail outcomes">'
+                f'<div class="kp-stat-label">CVaR (95%)</div>'
+                f'<div class="kp-stat-val" style="color:var(--down, #ef4444);">{_esc(cv_str)}</div>'
+                f'<div class="kp-stat-sub">Tail shortfall</div>'
+                f'</div>'
+            )
+        else:
+            risk_cards.append(
+                '<div class="kp-stat-item" title="Conditional VaR not measured">'
+                '<div class="kp-stat-label">CVaR (95%)</div>'
+                '<div class="kp-stat-val" style="color:var(--ink-3, #94a3b8);">&mdash;</div>'
+                '<div class="kp-stat-sub">not measured</div>'
+                '</div>'
+            )
+
+        if _is_finite_number(mar_median):
+            m = float(mar_median)
+            m_str = f"{m:.2f}"
+            c = "var(--up, #10b981)" if m >= 2.0 else ("var(--amber, #f59e0b)" if m >= 0.5 else "var(--down, #ef4444)")
+            risk_cards.append(
+                f'<div class="kp-stat-item" title="MAR Ratio (Median): ratio of annualized return to maximum drawdown across simulations">'
+                f'<div class="kp-stat-label">MAR (med)</div>'
+                f'<div class="kp-stat-val" style="color:{c};">{_esc(m_str)}</div>'
+                f'<div class="kp-stat-sub">Return / Max DD</div>'
+                f'</div>'
+            )
+        else:
+            risk_cards.append(
+                '<div class="kp-stat-item" title="MAR ratio not measured">'
+                '<div class="kp-stat-label">MAR (med)</div>'
+                '<div class="kp-stat-val" style="color:var(--ink-3, #94a3b8);">&mdash;</div>'
+                '<div class="kp-stat-sub">not measured</div>'
+                '</div>'
+            )
+
+        if _is_finite_number(pf_median):
+            pf = float(pf_median)
+            pf_str = f"{pf:.2f}"
+            c = "var(--up, #10b981)" if pf >= 1.25 else ("var(--amber, #f59e0b)" if pf >= 1.0 else "var(--down, #ef4444)")
+            risk_cards.append(
+                f'<div class="kp-stat-item" title="Profit Factor (Median): median ratio of gross profits to gross losses across bootstrap paths">'
+                f'<div class="kp-stat-label">PF (med)</div>'
+                f'<div class="kp-stat-val" style="color:{c};">{_esc(pf_str)}</div>'
+                f'<div class="kp-stat-sub">Gross win / loss</div>'
+                f'</div>'
+            )
+        else:
+            risk_cards.append(
+                '<div class="kp-stat-item" title="Profit factor not measured">'
+                '<div class="kp-stat-label">PF (med)</div>'
+                '<div class="kp-stat-val" style="color:var(--ink-3, #94a3b8);">&mdash;</div>'
+                '<div class="kp-stat-sub">not measured</div>'
+                '</div>'
+            )
+
+        body_parts.append(
+            '<div class="kp-subhead-row">'
+            '<span class="kp-subhead-title">SIMULATED RISK &amp; EFFICIENCY</span>'
+            '</div>'
+            f'<div class="kp-stat-strip">{"".join(risk_cards)}</div>'
+        )
 
     if streak_rows:
         streak_meta = f'<span class="kp-subhead-meta">Horizon: {_int_text(horizon_trades)} trades</span>' if _is_finite_number(horizon_trades) else ''
@@ -5314,12 +5719,12 @@ def _render_limited_dimensions(result: Dict[str, Any]) -> str:
 
 def _render_tab_report_limited(result: Dict[str, Any]) -> str:
     sections = [
-        _render_executive_essence(result),
         _render_conclusion(result),
         _render_limited_growth(result),
         _render_limited_narrative(result),
         _render_limited_dimensions(result),
         _render_limited_monte_carlo(result),
+        _render_methodology_footer(result),
     ]
     return "".join(s for s in sections if s)
 
@@ -5378,12 +5783,6 @@ _NO_INSIGHT_REASON = (
 # and how, which is also what keeps the block counts identical across the live
 # and saved-record paths.
 _INSIGHT_THEORY: Dict[str, Tuple[str, str]] = {
-    "in-one-look": (
-        "A description of observed operating character, not a recommendation. "
-        "Each line is measured; none of them is advice to act.",
-        "Built from the closed-trade ledger, the phase breakdown and the "
-        "deferred-loss profile. See Agent/backend/qc/reporting/insights.py.",
-    ),
     "holdout": (
         "The ledger is split by time and the same metrics are measured on each "
         "part. A ratio near 1 means later trades behaved like earlier ones.",
@@ -5414,49 +5813,17 @@ def _insight_theory(anchor: str) -> str:
     return _theory(read_html, basis_html)
 
 
+# Insight sections that cannot be computed render NOTHING.
+#
+# They used to render an empty card carrying the reason, on the theory that a
+# visible "not measured" beats a silent omission. In practice a page rebuilt
+# from a saved record cannot compute ANY of them, so the reader got four cards
+# in a row repeating one sentence -- noise that pushed the real content down
+# and taught nothing the fourth time it was read. The limitation is now stated
+# once, in the data-limitations drawer at the foot of the result tab, which is
+# where a reader looks for exactly that.
 def _insight_placeholder(title: str, anchor: str) -> str:
-    return _section(
-        title,
-        f'<p class="notice notice-neutral">{_esc(_NO_INSIGHT_REASON)}</p>'
-        + _insight_theory(anchor),
-        anchor=anchor,
-    )
-
-
-def _render_executive_essence(result: Dict[str, Any]) -> str:
-    """The shortest accurate description of the bot, at the top of the tab.
-
-    Deliberately first: the rest of the page is dense by design, and a reader
-    who stops after one card should still leave with an accurate impression
-    rather than whichever number happened to be largest.
-    """
-    if not _insights(result):
-        return _insight_placeholder("In one look", "in-one-look")
-    essence = _insights(result).get("executive_essence") or {}
-    if not essence:
-        return _insight_placeholder("In one look", "in-one-look")
-    rows = [
-        ("What it appears to do", essence.get("what_it_appears_to_do")),
-        ("Dominant observed behaviour", essence.get("dominant_behavior")),
-        ("Strongest supporting evidence", essence.get("strongest_positive_evidence")),
-        ("Strongest fragility", essence.get("strongest_fragility")),
-        ("Evidence reliability", essence.get("evidence_reliability")),
-        ("Most important unknown", essence.get("most_important_unknown")),
-    ]
-    items = "".join(
-        f'<div class="essence-row"><span class="essence-key">{_esc(label)}</span>'
-        f'<span class="essence-val">{_esc(str(value))}</span></div>'
-        for label, value in rows
-        if value
-    )
-    if not items:
-        return _insight_placeholder("In one look", "in-one-look")
-    return _section(
-        "In one look",
-        f'<div class="essence-grid">{items}</div>'
-        + _insight_theory("in-one-look"),
-        anchor="in-one-look",
-    )
+    return ""
 
 
 def _render_validation_section(result: Dict[str, Any]) -> str:
@@ -5506,7 +5873,7 @@ def _render_validation_section(result: Dict[str, Any]) -> str:
         "</div>"
     )
     table = (
-        '<table class="score-basis-table"><thead><tr>'
+        '<table class="data-table"><thead><tr>'
         "<th>Window</th><th>Earlier trades</th><th>Earlier PF</th>"
         "<th>Later trades</th><th>Later PF</th><th>Later/Earlier</th><th>Grade</th>"
         f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
@@ -5532,7 +5899,12 @@ def _render_scenario_lab(result: Dict[str, Any]) -> str:
     if not _insights(result):
         return _insight_placeholder("Scenario laboratory", "scenario-lab")
     lab = _insights(result).get("scenario_laboratory") or {}
-    scenarios = lab.get("scenarios") or []
+    # Execution-cost scenarios are a property of the market the bot trades in
+    # and are shown on the market tab under "Cost sensitivity". Rendering them
+    # here as well put the same two rows on two tabs.
+    scenarios = [
+        s for s in (lab.get("scenarios") or []) if s.get("family") != "EXECUTION"
+    ]
     if not scenarios:
         return _insight_placeholder("Scenario laboratory", "scenario-lab")
     rows = []
@@ -5567,7 +5939,7 @@ def _render_scenario_lab(result: Dict[str, Any]) -> str:
     )
     return _section(
         "Scenario laboratory",
-        '<table class="score-basis-table"><thead><tr>'
+        '<table class="data-table"><thead><tr>'
         "<th>Scenario</th><th>Trades</th><th>Median</th><th>5th&ndash;95th</th>"
         "<th>Chance of loss</th><th>Status</th>"
         f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
@@ -5630,7 +6002,7 @@ def _render_market_compatibility(result: Dict[str, Any]) -> str:
         )
     exec_html = (
         '<h3>Cost sensitivity</h3>'
-        '<table class="score-basis-table"><thead><tr>'
+        '<table class="data-table"><thead><tr>'
         "<th>Scenario</th><th>Trades</th><th>Median</th><th>5th&ndash;95th</th><th>Status</th>"
         f'</tr></thead><tbody>{"".join(exec_rows)}</tbody></table>'
         if exec_rows
@@ -5645,7 +6017,7 @@ def _render_market_compatibility(result: Dict[str, Any]) -> str:
     )
     return _section(
         "Market compatibility",
-        '<table class="score-basis-table"><thead><tr>'
+        '<table class="data-table"><thead><tr>'
         "<th>Market phase</th><th>Trades</th><th>Win rate</th><th>Net PnL</th><th>Reliability</th>"
         f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
         + limit_html
@@ -5655,16 +6027,82 @@ def _render_market_compatibility(result: Dict[str, Any]) -> str:
     )
 
 
+def _render_methodology_footer(result: Dict[str, Any]) -> str:
+    """Data limitations and open questions, folded away at the foot of the tab.
+
+    Deliberately NOT a `<section class="card">`: the result tab is the
+    user-facing overview and must not grow another card. This is a closed
+    accordion after the last card, so an ordinary reader is not stopped by it
+    and an auditor can still open it.
+    """
+    insights = _insights(result)
+    if not insights:
+        # One statement, naming exactly which analyses are missing and why,
+        # instead of an empty card per analysis.
+        missing = (
+            "Behavioural DNA, holdout validation, the scenario laboratory and "
+            "market compatibility"
+        )
+        return (
+            '<details class="theory methodology-footer" id="phuong-phap">'
+            "<summary>Data limitations</summary>"
+            f'<div class="theory-body"><p class="notice notice-neutral">'
+            f"{_esc(missing)} need this bot's own closed-trade ledger. This page "
+            "was built from a saved record that does not carry it, so those "
+            "analyses were not run. They are available on a live analysis."
+            "</p></div></details>"
+        )
+    questions = insights.get("user_questions") or []
+    passport = insights.get("uncertainty") or {}
+    reasons = passport.get("abstention_reasons") or []
+    if not questions and not reasons:
+        return ""
+
+    blocks: List[str] = []
+    if reasons:
+        blocks.append(
+            '<div class="mf-group"><div class="mf-title">What the evidence does not settle</div>'
+            "<ul class=\"mf-list\">"
+            + "".join(f"<li>{_esc(str(r))}</li>" for r in reasons)
+            + "</ul></div>"
+        )
+    if questions:
+        items = []
+        for q in questions:
+            text = str(q.get("question") or "")
+            # The core keeps the machine phase key (it is an identifier for the
+            # API and MCP); this module owns the human label vocabulary, so the
+            # enum is translated here rather than leaked onto the page.
+            if q.get("answered_by") == "UNTESTED_REGIME_SCENARIO":
+                regime = str(q.get("question_id") or "").rsplit(".", 1)[-1]
+                text = text.replace(regime, _phase_label_vi(regime))
+            items.append(
+                f"<li><strong>{_esc(text)}</strong>"
+                f'<span class="mf-why">{_esc(str(q.get("why_it_is_open") or ""))}</span></li>'
+            )
+        blocks.append(
+            '<div class="mf-group"><div class="mf-title">Open questions</div>'
+            f'<ul class="mf-list">{"".join(items)}</ul></div>'
+        )
+    reliability = passport.get("overall_reliability") or "UNKNOWN"
+    return (
+        '<details class="theory methodology-footer" id="phuong-phap">'
+        f"<summary>Data limitations &amp; open questions &middot; evidence reliability: {_esc(str(reliability))}</summary>"
+        f'<div class="theory-body">{"".join(blocks)}</div>'
+        "</details>"
+    )
+
+
 def _render_tab_report(result: Dict[str, Any]) -> str:
     if result.get("status") == "LIMITED":
         return _render_tab_report_limited(result)
     sections = [
-        _render_executive_essence(result),
         _render_conclusion(result),
         _render_growth_section(result),
         _render_narrative(result),
         _render_dimensions_section(result),
         _render_monte_carlo(result),
+        _render_methodology_footer(result),
     ]
     return "".join(s for s in sections if s)
 
@@ -6112,6 +6550,14 @@ body {
   --text: var(--ink);
   --muted: var(--ink-2);
   --axis: #64748b;
+  --mc-pill-bg: #0b111e;
+  --mc-pill-border: #2b3954;
+  --mc-grid-line: #1e293b;
+  --mc-grid-text: #94a3b8;
+  --mc-be-line: rgba(255, 255, 255, 0.35);
+  --mc-be-text: #94a3b8;
+  --mc-whisker: #64748b;
+  --mc-med-text: #ffffff;
 }
 :root {
   --s1: #2563eb; --s2: #ea580c; --s3: #10b981;
@@ -6133,6 +6579,27 @@ body {
   --track: #F1F5F9;
   --header-bg: rgba(255, 255, 255, 0.88);
   --header-border: #E2E8F0;
+  --text: var(--ink);
+  --muted: var(--ink-2);
+  --axis: #94a3b8;
+  --mc-pill-bg: #ffffff;
+  --mc-pill-border: #cbd5e1;
+  --mc-grid-line: #e2e8f0;
+  --mc-grid-text: #64748b;
+  --mc-be-line: rgba(15, 23, 42, 0.35);
+  --mc-be-text: #475569;
+  --mc-whisker: #94a3b8;
+  --mc-med-text: #0f172a;
+}
+:root[data-theme="light"] {
+  --mc-pill-bg: #ffffff;
+  --mc-pill-border: #cbd5e1;
+  --mc-grid-line: #e2e8f0;
+  --mc-grid-text: #64748b;
+  --mc-be-line: rgba(15, 23, 42, 0.35);
+  --mc-be-text: #475569;
+  --mc-whisker: #94a3b8;
+  --mc-med-text: #0f172a;
 }
 
 /* --- Top Header (Shared Institutional OKX AI Design System) --- */
@@ -7130,6 +7597,54 @@ body {
   background: rgba(21, 128, 61, 0.12);
   box-shadow: 0 0 0 1px rgba(21, 128, 61, 0.3);
 }
+
+/* QUANTITATIVE EVIDENCE — top scorecard chips */
+.qe-scorecard {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.qe-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 16px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  min-width: 106px;
+}
+:root[data-theme="light"] .qe-chip {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.qe-chip-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+:root[data-theme="light"] .qe-chip-label {
+  color: var(--ink-2, #64748b);
+}
+.qe-chip-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--mono, 'SFMono-Regular', monospace);
+  letter-spacing: -0.01em;
+}
+/* color variants */
+.qe-chip-good .qe-chip-value  { color: var(--up, #10b981); }
+.qe-chip-good                  { border-color: rgba(16,185,129,0.25); }
+:root[data-theme="light"] .qe-chip-good { border-color: rgba(16,185,129,0.35); background: #f0fdf4; }
+.qe-chip-warn .qe-chip-value  { color: var(--amber, #f59e0b); }
+.qe-chip-warn                  { border-color: rgba(245,158,11,0.25); }
+:root[data-theme="light"] .qe-chip-warn { border-color: rgba(245,158,11,0.35); background: #fffbeb; }
+.qe-chip-bad  .qe-chip-value  { color: var(--down, #ef4444); }
+.qe-chip-bad                   { border-color: rgba(239,68,68,0.25); }
+:root[data-theme="light"] .qe-chip-bad  { border-color: rgba(239,68,68,0.35); background: #fff1f2; }
 
 /* QUANT TERMINAL / AUDIT LOG TEXT VIEW */
 .quant-audit-terminal {
@@ -8437,7 +8952,8 @@ details.theory[open] summary {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.score-basis-table {
+.score-basis-table,
+.data-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
@@ -8451,7 +8967,8 @@ details.theory[open] summary {
   background: #f8fafc;
   border-color: #e2e8f0;
 }
-.score-basis-table th {
+.score-basis-table th,
+.data-table th {
   text-align: left;
   padding: 6px 12px;
   background: rgba(255, 255, 255, 0.04);
@@ -8462,24 +8979,29 @@ details.theory[open] summary {
   text-transform: uppercase;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
-:root[data-theme="light"] .score-basis-table th {
+:root[data-theme="light"] .score-basis-table th,
+:root[data-theme="light"] .data-table th {
   background: #f1f5f9;
   color: #64748b;
   border-bottom-color: #e2e8f0;
 }
-.score-basis-table td {
+.score-basis-table td,
+.data-table td {
   padding: 6px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   color: #cbd5e1;
 }
-:root[data-theme="light"] .score-basis-table td {
+:root[data-theme="light"] .score-basis-table td,
+:root[data-theme="light"] .data-table td {
   border-bottom-color: #f1f5f9;
   color: #334155;
 }
-.score-basis-table tr:last-child td {
+.score-basis-table tr:last-child td,
+.data-table tr:last-child td {
   border-bottom: none;
 }
-.score-basis-table .row-unmeasured td {
+.score-basis-table .row-unmeasured td,
+.data-table .row-unmeasured td {
   opacity: 0.6;
 }
 .dim-col-name strong {
@@ -8605,7 +9127,7 @@ details.theory[open] summary {
 .expert-summary-box {
   background: rgba(56, 189, 248, 0.04);
   border: 1px solid rgba(56, 189, 248, 0.2);
-  border-left: 3px solid #38bdf8;
+  border-left: 3px solid var(--info, #38bdf8);
   border-radius: 8px;
   padding: 12px 16px;
   margin-top: 0.5rem;
@@ -8618,7 +9140,7 @@ details.theory[open] summary {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #38bdf8;
+  color: var(--info, #38bdf8);
   margin-bottom: 4px;
 }
 .expert-summary-text {
@@ -8626,6 +9148,78 @@ details.theory[open] summary {
   line-height: 1.55;
   color: var(--ink, #ffffff);
   font-weight: 500;
+}
+.methodology-footer {
+  margin-top: 1rem;
+}
+.mf-group + .mf-group {
+  margin-top: 0.85rem;
+}
+.mf-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3, #94a3b8);
+  margin-bottom: 6px;
+}
+.mf-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mf-list li {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2, #cbd5e1);
+}
+.mf-why {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--ink-3, #94a3b8);
+}
+.expert-summary-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2, #cbd5e1);
+}
+.root-cause-block {
+  margin-top: 0.85rem;
+}
+.root-cause-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3, #94a3b8);
+  margin-bottom: 6px;
+}
+.root-cause-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.root-cause-list li {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink, #0f172a);
+}
+/* The measurement that put the mechanism on the list, on its own line so a
+   reader can check the claim rather than take the sentence on trust. */
+.root-cause-support {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-3, #94a3b8);
 }
 .expert-points-wrap {
   margin-top: 0.5rem;
@@ -9481,6 +10075,16 @@ svg .bar-value.val-neg { fill: #ef4444 !important; }
   font-weight: 600;
   color: var(--ink, #ffffff);
 }
+:root[data-theme="light"] .mc-pair-cell,
+:root[data-theme="light"] .mc-full-row {
+  background: var(--panel, #ffffff);
+  border: 1px solid var(--line, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+:root[data-theme="light"] .mc-pair-cell h3,
+:root[data-theme="light"] .mc-full-row h3 {
+  color: var(--ink, #0f172a);
+}
 .mc-pair-cell .table-scroll {
   margin-top: 0.25rem;
   margin-bottom: 0.5rem;
@@ -9628,6 +10232,62 @@ svg .bar-value.val-neg { fill: #ef4444 !important; }
 }
 :root[data-theme="light"] .kp-table td {
   border-color: #f1f5f9;
+}
+.kp-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 0.35rem;
+  margin-bottom: 0.75rem;
+  width: 100%;
+}
+@media (max-width: 640px) {
+  .kp-stat-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.kp-stat-item {
+  background: var(--card-bg, #0e1526);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+}
+:root[data-theme="light"] .kp-stat-item {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+.kp-stat-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+:root[data-theme="light"] .kp-stat-label {
+  color: #64748b;
+}
+.kp-stat-val {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  margin-top: 3px;
+  margin-bottom: 3px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink, #ffffff);
+}
+:root[data-theme="light"] .kp-stat-val {
+  color: #0f172a;
+}
+.kp-stat-sub {
+  font-size: 10px;
+  color: var(--ink-3, #94a3b8);
+  line-height: 1.25;
+}
+:root[data-theme="light"] .kp-stat-sub {
+  color: #64748b;
 }
 @media (max-width: 900px) {
   .mc-pair-row {
@@ -10655,6 +11315,11 @@ footer.report-footer {
   border-radius: 8px;
   padding: 16px 18px;
 }
+:root[data-theme="light"] .mc-unified-panel {
+  background: var(--panel, #ffffff);
+  border: 1px solid var(--line, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
 .mc-unified-header {
   display: flex;
   flex-wrap: wrap;
@@ -10664,16 +11329,25 @@ footer.report-footer {
   border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
   padding-bottom: 10px;
 }
+:root[data-theme="light"] .mc-unified-header {
+  border-bottom-color: var(--line, #e2e8f0);
+}
 .mc-unified-title {
   margin: 0;
   font-size: 14px;
   font-weight: 700;
   color: var(--ink, #ffffff);
 }
+:root[data-theme="light"] .mc-unified-title {
+  color: var(--ink, #0f172a);
+}
 .mc-unified-subtitle {
   font-size: 11px;
   color: var(--muted, #94a3b8);
   margin-top: 3px;
+}
+:root[data-theme="light"] .mc-unified-subtitle {
+  color: var(--ink-3, #64748b);
 }
 .mc-unified-legend {
   display: flex;
@@ -10688,6 +11362,9 @@ footer.report-footer {
   font-size: 11px;
   color: var(--muted, #94a3b8);
 }
+:root[data-theme="light"] .mc-legend-item {
+  color: var(--ink-2, #475569);
+}
 .mc-legend-dot {
   width: 10px;
   height: 10px;
@@ -10696,10 +11373,220 @@ footer.report-footer {
 }
 .mc-unified-svg {
   width: 100%;
-  max-width: 760px;
+  max-width: 820px;
   height: auto;
   display: block;
   margin: 0 auto;
+}
+
+/* Parameter glossary (* notes) below the Outcome distribution chart */
+.mc-param-notes {
+  margin: 10px 0 4px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+}
+:root[data-theme="light"] .mc-param-notes {
+  border-top: 1px solid var(--line, #e2e8f0);
+}
+.mc-param-notes-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  align-items: baseline;
+}
+.mc-param-note-item {
+  display: contents; /* lets children sit in the parent grid */
+}
+.mc-param-star {
+  font-size: 10.5px;
+  font-family: var(--mono, 'SFMono-Regular', monospace);
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--accent, #818cf8);
+  padding-right: 4px;
+}
+:root[data-theme="light"] .mc-param-star {
+  color: var(--accent-dark, #4f46e5);
+}
+.mc-param-desc {
+  font-size: 10.5px;
+  color: var(--muted, #94a3b8);
+  line-height: 1.55;
+}
+:root[data-theme="light"] .mc-param-desc {
+  color: var(--ink-2, #475569);
+}
+
+/* Percentile Spectrum (Tầng Monte Carlo) */
+.mc-spec-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  background: var(--surface, rgba(255,255,255,0.02));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 8px;
+  padding: 16px 18px;
+}
+:root[data-theme="light"] .mc-spec-panel {
+  background: var(--panel, #ffffff);
+  border: 1px solid var(--line, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.mc-spec-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+  padding-bottom: 10px;
+}
+:root[data-theme="light"] .mc-spec-header {
+  border-bottom-color: var(--line, #e2e8f0);
+}
+.mc-spec-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink, #ffffff);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+:root[data-theme="light"] .mc-spec-title {
+  color: var(--ink, #0f172a);
+}
+.mc-spec-subtitle {
+  font-size: 11px;
+  color: var(--muted, #94a3b8);
+  margin-top: 3px;
+}
+:root[data-theme="light"] .mc-spec-subtitle {
+  color: var(--ink-3, #64748b);
+}
+.mc-skew-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--mono, monospace);
+}
+.mc-skew-badge.positive {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+:root[data-theme="light"] .mc-skew-badge.positive {
+  background: #ecfdf5;
+  color: #059669;
+  border-color: #a7f3d0;
+}
+.mc-skew-badge.negative {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+:root[data-theme="light"] .mc-skew-badge.negative {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+.mc-skew-badge.balanced {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+:root[data-theme="light"] .mc-skew-badge.balanced {
+  background: #fffbeb;
+  color: #d97706;
+  border-color: #fde68a;
+}
+.mc-spec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.mc-spec-card {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+:root[data-theme="light"] .mc-spec-card {
+  background: var(--panel-2, #f8fafc);
+  border: 1px solid var(--line, #e2e8f0);
+}
+.mc-spec-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+.mc-spec-lbl {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-2, #cbd5e1);
+  font-family: var(--mono, monospace);
+}
+:root[data-theme="light"] .mc-spec-lbl {
+  color: var(--ink-2, #475569);
+}
+.mc-spec-sub {
+  font-size: 9.5px;
+  color: var(--muted, #94a3b8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:root[data-theme="light"] .mc-spec-sub {
+  color: var(--ink-3, #64748b);
+}
+.mc-spec-val {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--mono, monospace);
+  letter-spacing: -0.02em;
+}
+/* Multi-horizon matrix expanded columns */
+.hz-matrix-table .col-med {
+  text-align: right;
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.hz-matrix-table .col-range {
+  text-align: center;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--ink-2, #cbd5e1);
+}
+:root[data-theme="light"] .hz-matrix-table .col-range {
+  color: var(--ink-2, #475569);
+}
+.hz-matrix-table .col-dd {
+  text-align: right;
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.hz-range-val {
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+:root[data-theme="light"] .hz-range-val {
+  background: var(--panel-2, #f1f5f9);
+  border-color: var(--line, #e2e8f0);
+  color: var(--ink, #0f172a);
 }
 """
 

@@ -92,3 +92,84 @@ def test_progress_receives_string_stage_names_only() -> None:
     _run_pipeline(progress=calls.append)
     assert all(isinstance(stage, str) for stage in calls)
     assert set(calls) <= {"ledger", "markets", "scoring", "decision"}
+
+
+# --------------------------------------------------------------------------- #
+# Speculative market pre-fetch (guess the primary market by the caller's own
+# `asset` while the ledger loads, warm the process cache; correct itself for
+# free when the guess is wrong).
+# --------------------------------------------------------------------------- #
+
+
+def test_speculative_prefetch_never_fires_under_pinned_as_of_ms():
+    """The process-wide market cache is deliberately scoped to `as_of_ms is
+    None` (live mode) only -- pinning a snapshot clock must stay fully
+    reproducible, so the speculative thread must not even start."""
+    import Agent.backend.pipeline as pipeline_module
+
+    calls = []
+    original = pipeline_module.RiskSupervisionPipeline.resolve_market
+
+    def spy(self, traded_symbol, as_of_ms=None):  # noqa: ANN001
+        calls.append(traded_symbol)
+        return original(self, traded_symbol, as_of_ms)
+
+    pipeline = RiskSupervisionPipeline(persist_history=False)
+    pipeline.resolve_market = spy.__get__(pipeline, RiskSupervisionPipeline)
+    pipeline.run(
+        "MU",
+        "bot_BB3398A957270A39",
+        as_of_ms=FIXED_AS_OF_MS,
+        simulation_iterations=10,
+        simulation_horizon=5,
+    )
+    # Exactly one resolve per planned symbol -- no extra speculative call
+    # sneaked in ahead of the ledger read.
+    assert calls.count("MU") == 1
+
+
+def test_speculative_prefetch_does_not_change_the_resolved_market():
+    """With `as_of_ms=None` the speculative thread DOES start (it only warms
+    the process cache). The result must be identical to the pinned-clock path:
+    the primary market is whatever the LEDGER says, never whatever the guess
+    happened to fetch."""
+    from Agent.backend.pipeline import RiskSupervisionResult
+
+    pipeline = RiskSupervisionPipeline(persist_history=False)
+    result = pipeline.run(
+        "MU",
+        "bot_BB3398A957270A39",
+        as_of_ms=None,
+        simulation_iterations=10,
+        simulation_horizon=5,
+    )
+    assert isinstance(result, RiskSupervisionResult)
+    # Primary market comes from the ledger's own symbol, and matches it.
+    assert result.traded_symbol == result.bot_result.identity.symbol
+    if result.market_result is not None:
+        assert result.market_result.symbol == result.traded_symbol
+
+
+def test_a_brand_new_never_crawled_market_never_gets_substituted():
+    """`CRCL` (real fixture) has a ledger but genuinely no crawled market
+    data anywhere -- exactly a bot trading a brand-new/unknown market. Must
+    fail closed (`market_available=False`, `market_result=None`), NEVER
+    silently substitute a different, available market. The speculative
+    pre-fetch thread must not change this: it is keyed on the EXACT symbol
+    string, so warming the cache for one symbol can never leak into the
+    resolution of a different, unrelated symbol."""
+    from Agent.backend.pipeline import RiskSupervisionResult
+
+    pipeline = RiskSupervisionPipeline(persist_history=False)
+    result = pipeline.run(
+        "CRCL",
+        "bot_ACE79CAACA13F8B9",
+        as_of_ms=None,  # speculative thread IS active for this call
+        simulation_iterations=10,
+        simulation_horizon=5,
+    )
+    assert isinstance(result, RiskSupervisionResult)
+    assert result.traded_symbol == "CRCL"
+    assert result.market_available is False
+    assert result.market_resolution == "NO_MARKET_DATA_FOR_TRADED_SYMBOL"
+    assert result.market_result is None

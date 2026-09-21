@@ -449,3 +449,111 @@ def test_page_payload_carries_every_published_module(dossier):
     ):
         assert f'"{module}"' in source, f"{module} never reaches the page layer"
         assert hasattr(dossier, module), f"{module} is not on the dossier"
+
+
+# --------------------------------------------------------------------------- #
+# Monte Carlo: the saved-record path must not silently drop measured fields
+# --------------------------------------------------------------------------- #
+
+
+def test_saved_record_carries_every_simulation_field_it_has():
+    """The persisted reader hand-listed the fields it copied, and the list had
+    drifted behind the schema: `var_95_pct`, `cvar_95_pct`, `mar_ratio_median`
+    and `profit_factor_median` were written to the record and then dropped on
+    the way out, so the page built from disk showed fewer risk metrics than the
+    live page for the same bot."""
+    from pathlib import Path
+
+    from Agent.backend.infra.config import config
+    from Agent.backend.mcp.schemas.bot_result import SimulationResults
+    from Agent.backend.web.data import (
+        assessment_to_analyze_result,
+        find_assessment_document,
+    )
+
+    document = find_assessment_document(Path(config.DATA_DIR), "811997770117827919")
+    assert document, "expected a committed assessment fixture"
+    stored = set(document.get("simulation") or {})
+    exposed = set((assessment_to_analyze_result(document) or {}).get("mc") or {})
+    schema = set(SimulationResults.model_fields)
+
+    dropped = (stored & schema) - exposed
+    assert not dropped, f"measured and stored, but never exposed: {sorted(dropped)}"
+
+
+def test_live_monte_carlo_payload_is_the_engine_output_verbatim():
+    """The live path must not re-map the simulation: any hand-built copy is a
+    second source of truth that drifts, which is exactly what happened to the
+    persisted one."""
+    import inspect
+
+    from Agent.backend.mcp.schemas.bot_result import SimulationResults
+    from Agent.backend.web import data
+
+    source = inspect.getsource(data._full_result)
+    assert '"mc": bot.simulation_results.model_dump(mode="json")' in source
+    # And it really is the whole schema, not a subset.
+    assert len(SimulationResults.model_fields) > 60
+
+
+def test_store_persists_every_simulation_field_the_engine_measured():
+    """The stored `simulation` block was assembled field by field from
+    `BotEvaluationRow`, which carries only the subset the batch report needed.
+    Thirty-one measured fields were computed on every run and then discarded,
+    so a page rebuilt from disk was permanently poorer than the live page for
+    the same bot -- and no test noticed, because both paths were only ever
+    checked against themselves."""
+    from Agent.backend.mcp.schemas.bot_result import SimulationResults
+    from Agent.backend.qc.reporting.assessment_store import build_assessment
+
+    measured = {name: None for name in SimulationResults.model_fields}
+
+    class _Row:
+        unique_code = "TEST"
+        nick_name = "t"
+        verdict = "CAUTION"
+        quality_score = 50.0
+        risk_score = 50.0
+        confidence = 50.0
+        risk_tier = "MEDIUM"
+        recommended_action = "MONITOR"
+        verdict_reason = ""
+
+        def __getattr__(self, name):  # noqa: ANN001
+            return None
+
+    document = build_assessment(_Row(), 1_758_326_400_000, simulation_full=measured)
+    stored = set(document["simulation"])
+    missing = set(SimulationResults.model_fields) - stored
+    assert not missing, f"measured by the engine but never persisted: {sorted(missing)}"
+
+
+def test_persisting_the_full_dump_keeps_the_legacy_key_names():
+    """Older keys (`psr`, `worst_drawdown`, ...) are read by name from records
+    already on disk. The carry-through must add fields, never rename them."""
+    from Agent.backend.qc.reporting.assessment_store import build_assessment
+
+    class _Row:
+        unique_code = "TEST"
+        nick_name = "t"
+        verdict = "CAUTION"
+        quality_score = 50.0
+        risk_score = 50.0
+        confidence = 50.0
+        risk_tier = "MEDIUM"
+        recommended_action = "MONITOR"
+        verdict_reason = ""
+        psr = 0.9
+        worst_drawdown = 12.0
+
+        def __getattr__(self, name):  # noqa: ANN001
+            return None
+
+    document = build_assessment(
+        _Row(), 1_758_326_400_000, simulation_full={"probabilistic_sharpe": 0.1}
+    )
+    simulation = document["simulation"]
+    # The legacy name keeps the row's value; the engine name is added beside it.
+    assert simulation["psr"] == 0.9
+    assert simulation["worst_drawdown"] == 12.0
+    assert simulation["probabilistic_sharpe"] == 0.1

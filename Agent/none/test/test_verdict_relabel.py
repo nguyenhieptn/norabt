@@ -524,6 +524,11 @@ def test_real_bot_page_keeps_seven_svg_and_eleven_details(full_result):
     # probabilities). They are now one drawer for the whole section.
     # 13 -> 14: "Market compatibility" carries its own methodology drawer,
     # same as every other section.
+    # 14 -> 13: the extra "essence" card and its methodology drawer were
+    # removed from the result tab.
+    # 13 -> 14: the result tab gained a footer accordion (data limitations and
+    # open questions). It is a <details> after the last card, NOT a new section,
+    # so the section count is unchanged.
     assert html.count("<details") == html.count("</details>") == 14
 
 
