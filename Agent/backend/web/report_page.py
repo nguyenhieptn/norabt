@@ -11009,9 +11009,17 @@ footer.report-footer {
 }
 #so-lieu table td:first-child .metric-label-row .formula-star-btn,
 #suy-luan table td:first-child .metric-label-row .formula-star-btn {
-  flex: 0 0 auto !important;
+  flex: 0 0 16px !important;
+  width: 16px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   margin-left: auto !important;
-  margin-right: 8px !important;
+  margin-right: 4px !important;
+  text-align: center !important;
+  color: var(--accent, #38BDF8) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
 }
 
 /* Drawdown vs. capital & Most recent closed trades full width */

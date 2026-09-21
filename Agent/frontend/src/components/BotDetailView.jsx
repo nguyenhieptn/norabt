@@ -435,6 +435,33 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
       });
     }
 
+    // 5. Statistical inference & Trade metrics tables -> star button vertical alignment
+    root.querySelectorAll("#so-lieu, #suy-luan").forEach((sec) => {
+      sec.querySelectorAll("table tr").forEach((tr) => {
+        const td = tr.querySelector("td:first-child");
+        if (td) {
+          const labelRow = td.querySelector(".metric-label-row");
+          if (labelRow) {
+            labelRow.style.setProperty("width", "100%", "important");
+            labelRow.style.setProperty("display", "flex", "important");
+            labelRow.style.setProperty("justify-content", "space-between", "important");
+            labelRow.style.setProperty("align-items", "center", "important");
+            const starBtn = labelRow.querySelector(".formula-star-btn");
+            if (starBtn) {
+              starBtn.style.setProperty("margin-left", "auto", "important");
+              starBtn.style.setProperty("margin-right", "4px", "important");
+              starBtn.style.setProperty("flex", "0 0 16px", "important");
+              starBtn.style.setProperty("width", "16px", "important");
+              starBtn.style.setProperty("display", "inline-flex", "important");
+              starBtn.style.setProperty("justify-content", "center", "important");
+              starBtn.style.setProperty("align-items", "center", "important");
+              starBtn.style.setProperty("text-align", "center", "important");
+            }
+          }
+        }
+      });
+    });
+
     // Formula star click handler (Supports click-to-pin formula tooltip)
     root.querySelectorAll(".formula-star-btn, .formula-star").forEach((star) => {
       star.addEventListener("click", (ev) => {
