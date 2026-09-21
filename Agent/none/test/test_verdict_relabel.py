@@ -532,7 +532,11 @@ def test_real_bot_page_keeps_seven_svg_and_eleven_details(full_result):
     # 14 -> 15: every card in the Analyst Result tab now carries exactly 1 unified
     # "Methodology & interpretation" drawer (added to Conclusion and Expert assessment,
     # and unified across Growth).
-    assert html.count("<details") == html.count("</details>") == 15
+    # 15 -> 18: every card in Tab 2 (market) and Tab 3 (trades/positions) now
+    # also carries exactly 1 unified "Methodology & interpretation" drawer
+    # (+1 dominant market, +1 open positions, +1 closed trades; market coverage
+    # keeps its always-visible methodology block per the explicit rule).
+    assert html.count("<details") == html.count("</details>") == 18
 
 
 def test_real_bot_page_has_no_stray_vietnamese(full_result):

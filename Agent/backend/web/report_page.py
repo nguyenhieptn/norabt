@@ -2762,11 +2762,9 @@ def _render_market_coverage(result: Dict[str, Any]) -> str:
                 '</div>'
             )
 
-    # Coverage is a representativeness warning, not optional methodology
-    # chrome: keep its interpretation visible beside the benchmark so a reader
-    # cannot mistake the covered slice for the whole bot.
     theory = (
         '<div class="theory theory-always-visible"><div class="theory-body">'
+        '<div class="theory-title" style="font-weight:700;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);margin-bottom:0.35rem;">Methodology &amp; interpretation</div>'
         '<p><strong>Interpretation:</strong> Market data coverage reflects how much of the bot\'s total trading volume has been'
         ' directly observed and validated against historical order book, candle series, and liquidity depth.'
         ' When a bot trades many symbols and coverage is below the 80% benchmark, dimensions dependent on'
@@ -2992,11 +2990,14 @@ def _render_strategy_section(result: Dict[str, Any]) -> str:
     table_block = _render_phase_breakdown_table(strategy)
 
     theory = _theory(
-        "Profit distribution across market regimes. Sample validity: "
-        f"<strong>{PHASE_CONFIDENCE_ENOUGH_VI}</strong> (≥10 trds) = statistically valid; "
-        f"<strong>{PHASE_CONFIDENCE_THIN_VI}</strong> (3-9 trds) = reference only; "
-        f"<strong>{PHASE_CONFIDENCE_INSUFFICIENT_VI}</strong> (<3 trds) = unrepresentative.",
-        "Inferred strategy bias and execution style mapped onto 1H OHLCV trend and volatility phases."
+        "Reconstructed trading style, directional bias, behavioral risk patterns, and performance across market regimes. "
+        "Identifies high-risk trading behaviors such as martingale escalation (raising size after losses), "
+        "averaging down into losing positions, leverage escalation, and rapid re-entry loops. "
+        "Market phase performance evaluates profit distribution across regimes. Sample validity: "
+        f"<strong>{PHASE_CONFIDENCE_ENOUGH_VI}</strong> (≥10 trades) = statistically valid; "
+        f"<strong>{PHASE_CONFIDENCE_THIN_VI}</strong> (3–9 trades) = reference only; "
+        f"<strong>{PHASE_CONFIDENCE_INSUFFICIENT_VI}</strong> (&lt;3 trades) = unrepresentative.",
+        "Inferred from transaction timing, position sizing changes, and entry intervals mapped onto 1H OHLCV trend and volatility phases.",
     )
     body = "".join(paragraphs) + table_block + theory
     return _section("How this bot trades", body, anchor="cach-choi")
@@ -4894,8 +4895,11 @@ def _render_statistical_inference(result: Dict[str, Any]) -> str:
     table = _table(["Metric", "Value"], rows)
 
     theory = _theory(
-        "Validates whether edge is genuine: PSR discounts non-normal skew/kurtosis; DSR discounts multiple-testing selection bias across candidate trials.",
-        "Bailey & López de Prado (2014): PSR(SR* = 0) and Deflated Sharpe accounting for variance and sample kurtosis."
+        "Statistical inference testing whether observed strategy profitability represents genuine skill or random luck / data mining: "
+        "Probabilistic Sharpe Ratio (PSR) accounts for non-normal return skewness and fat tails (PSR ≥ 95% indicates genuine statistical edge); "
+        "Deflated Sharpe Ratio (DSR) discounts selection bias across multiple strategy trials to avoid false discoveries; "
+        "MinTRL defines the minimum track record length (trades required) needed for 95% statistical confidence given the strategy's Sharpe, skewness, and kurtosis.",
+        "Methodology by Bailey &amp; López de Prado (2014): PSR(SR* = 0) adjusted for sample skewness and kurtosis; DSR adjusting for the variance of trials among candidate strategies.",
     )
     return _section(
         "Statistical inference",
@@ -4975,8 +4979,14 @@ def _render_trade_metrics(result: Dict[str, Any]) -> str:
         return ""
     table = _table(["Metric", "Value"], rows)
     theory = _theory(
-        "Closed-book trade metrics. Profit factor < 1.0 indicates cumulative net loss. Sharpe/Sortino measure return per unit of volatility.",
-        "Direct transaction ledger extraction: PF = GrossProfit / GrossLoss, Expectancy = TotalPnL / TradeCount."
+        "Core trading performance and risk-adjusted return metrics across the closed trade history. "
+        "Profit Factor (&lt;1.0 indicates cumulative net loss), Payoff Ratio (average win / average loss), "
+        "and Expectancy (expected value per trade) measure statistical profitability. "
+        "Sharpe, Sortino (penalizing downside volatility only), and Calmar (annualized return / max drawdown) "
+        "evaluate return efficiency per unit of risk, alongside drawdown depths, streaks, and trading cadence.",
+        "Extracted directly from closed order fill records: Profit Factor = Gross Profit / Gross Loss; "
+        "Payoff Ratio = Avg Win / Avg Loss; Expectancy = Total PnL / Total Trades. "
+        "Drawdown measures peak-to-trough decline in cumulative equity.",
     )
     return _section("Trade metrics", table + theory, pair=True, anchor="so-lieu")
 
@@ -5014,18 +5024,11 @@ def _render_assets(result: Dict[str, Any]) -> str:
         rows,
     )
     theory = _theory(
-        "<strong>TRADING</strong>: has a recently closed trade, the bot is still"
-        " actively trading this asset. <strong>HOLDING ONLY</strong>: still has an"
-        " open position but has not closed a trade in a long time -- this status by"
-        " itself is a risk signal, a common pattern being holding a loser and"
-        " waiting for the price to come back instead of cutting it."
-        " <strong>EXITED</strong>: has traded before but no longer has an open"
-        " position and has not closed a new trade either -- this asset no longer"
-        " represents the bot's current activity.",
-        "Inferred from open positions and the closed-trade history in the public"
-        " trade ledger: an asset with a trade closed within the recent activity"
-        " window is considered trading; an open position outside that window is"
-        " holding only; nothing at all means exited.",
+        "Activity audit across all traded symbols: "
+        "<strong>TRADING</strong>: has a recently closed trade, indicating active ongoing execution; "
+        "<strong>HOLDING ONLY</strong>: holds an open position without recent closed trades (signals holding losing trades open instead of cutting losses); "
+        "<strong>EXITED</strong>: historically traded asset with zero open exposure and no recent trades, no longer reflecting current bot operations.",
+        "Inferred from active open positions cross-referenced with chronological closed-trade history in the exchange ledger.",
     )
     return _section(
         "Traded assets", table + theory, pair=True, anchor="tai-san"
@@ -5152,8 +5155,14 @@ def _render_dominant_market_card(result: Dict[str, Any]) -> str:
         f"{hint}"
         f"</div>"
     )
+    theory = _theory(
+        "Primary trading market posture, regime classification (trend, volatility, liquidity), and order-book data quality. "
+        "Validates whether the bot's primary trading pair offers deep order book liquidity and fair spreads to avoid adverse execution slippage.",
+        "Real-time and historical order book depth plus candle telemetry from OKX/Binance. "
+        "Assesses two-way order flow balance, spread stability, and cross-bot peer performance comparison on the same asset.",
+    )
     return _section(
-        "Bot's primary trading market", body, anchor="thi-truong-chinh"
+        "Bot's primary trading market", body + theory, anchor="thi-truong-chinh"
     )
 
 
@@ -5263,7 +5272,17 @@ def _render_open_positions_audit(result: Dict[str, Any]) -> str:
         "</div>"
     )
 
-    body = f'<div class="param-horizontal-list">{rows_html}</div>{deferred_notice}{hint}'
+    theory = _theory(
+        "Audit of open positions, unrealized losses, and return distribution geometry. "
+        "Marked PF (mark-to-market) evaluates bot profitability if all open positions were closed immediately, "
+        "detecting hidden loss-holding patterns used to maintain an artificial win rate. "
+        "Skewness (&lt; -0.5) detects asymmetric downside risk (rare heavy losses vs small frequent wins); "
+        "kurtosis (&gt; 3.0) detects heavy fat-tail / black swan vulnerability.",
+        "Active positions marked against real-time order-book mid-prices; skewness and kurtosis computed "
+        "as third and fourth standardized central moments of the trade return distribution.",
+    )
+
+    body = f'<div class="param-horizontal-list">{rows_html}</div>{deferred_notice}{hint}{theory}'
     # LƯU Ý: chỉ viết MỘT dấu `&` thô ở đây -- `_section()` tự đưa `title` qua
     # `_esc()` một lần rồi mới in ra. Trước đây chỗ này viết sẵn "&amp;" nên
     # bị escape hai lần (& -> &amp; -> &amp;amp;), hiển thị sai thành literal
@@ -5363,9 +5382,17 @@ def _render_closed_trades_table(result: Dict[str, Any], limit: int = 200) -> str
         "and the time gaps between take-profit or stop-loss cycles."
         "</div>"
     )
+
+    theory = _theory(
+        "Detailed ledger of executed transactions showing realized PnL, running cumulative equity curve, "
+        "and outcome classification (WIN, LOSS, BREAK-EVEN). Used to verify trade cadence, cash flow regularity, "
+        "and the time intervals between take-profit or stop-loss executions.",
+        "Directly extracted from exchange execution records in reverse chronological order. "
+        "Cumulative PnL tracks running sum of realized profits and losses over the entire track record.",
+    )
     return _section(
         "Most recent closed trades",
-        subtitle + table + hint,
+        subtitle + table + hint + theory,
         anchor="danh-sach-lenh",
     )
 
@@ -5899,26 +5926,27 @@ _NO_INSIGHT_REASON = (
 # and saved-record paths.
 _INSIGHT_THEORY: Dict[str, Tuple[str, str]] = {
     "holdout": (
-        "The ledger is split by time and the same metrics are measured on each "
-        "part. A ratio near 1 means later trades behaved like earlier ones.",
-        "Holdout validation of observed performance -- not a re-optimised "
-        "strategy backtest. See Agent/backend/qc/reporting/validation.py.",
+        "Walk-forward holdout validation evaluates whether trading performance persists over time or suffers from curve-fitting and strategy decay. "
+        "Compares earlier in-sample performance against subsequent out-of-sample windows. "
+        "A Profit Factor Ratio (Later PF / Earlier PF) near or above 1.0 confirms consistency, while a ratio &lt;0.70 signals severe edge decay.",
+        "Time-partitioned fold validation splitting the historical closed transaction ledger chronologically. "
+        "Computes trade count, profit factors, fold-by-fold stability grade, and overall consistency across out-of-sample windows. See Agent/backend/qc/reporting/validation.py.",
     ),
     "market-compatibility": (
-        "Compatibility is stated per market phase, never as one verdict for the "
-        "bot. A phase with no observed trade carries no numbers rather than a "
-        "borrowed estimate.",
-        "Trades are labelled with the market phase they were opened in "
-        "(`TradeLedgerItem.market_phase`). Reliability follows the same "
-        "thresholds as the phase breakdown: >=10 trades valid, 3-9 reference "
-        "only, <3 unrepresentative.",
+        "Market compatibility evaluates bot performance across historical market phases (Bull, Bear, Sideways, High/Low Volatility) "
+        "and execution cost sensitivity (spread widening, order book depth degradation). "
+        "A regime or scenario with insufficient observed trades is displayed as unmeasured rather than estimated.",
+        "Trades are classified by the market regime active at entry time (`TradeLedgerItem.market_phase`). "
+        "Reliability follows statistical thresholds: ≥10 trades valid, 3–9 reference only, &lt;3 unrepresentative. "
+        "Cost sensitivity scenarios model slippage impact under stressed liquidity depth.",
     ),
     "scenario-lab": (
-        "Each row is a conditional what-if, never a forecast. A condition with "
-        "too few observed trades shows no numbers at all rather than a borrowed "
-        "estimate.",
-        "Stationary bootstrap (Politis &amp; Romano 1994) over this bot's own "
-        "closed trades. See Agent/backend/qc/reporting/scenarios.py.",
+        "Scenario stress-testing simulates bot performance under diverse conditioned market regimes "
+        "(e.g. persistent downtrends, extreme volatility spikes, liquidity droughts). "
+        "Median (P50) reflects the expected outcome, the 5th–95th percentile span defines tail risk bounds, "
+        "and Chance of Loss measures the probability of net capital impairment.",
+        "Stationary bootstrap resampling (Politis &amp; Romano 1994) applied in blocks across the bot's own historical trades. "
+        "Conditions lacking sufficient empirical observations are left unsimulated to prevent unsubstantiated extrapolation. See Agent/backend/qc/reporting/scenarios.py.",
     ),
 }
 
@@ -6390,8 +6418,13 @@ def _render_drawdown_vs_capital(result: Dict[str, Any]) -> str:
         )
 
     theory = _theory(
-        "Loss severity metrics: worst single trade loss, deepest drawdown duration, and recovery status. Quantifies capital stress under adverse conditions.",
-        "Closed trade ledger ordered by close_time: Drawdown = (Running Peak − Current Trough) / Reference Capital."
+        "Capital drawdown and downside severity analysis answering three critical risk questions: "
+        "the single worst loss relative to capital, the deepest peak-to-trough drawdown episode "
+        "(depth %, duration in hours, and whether equity recovered to its previous high), "
+        "and the most costly consecutive losing streak ranked by total money lost rather than trade count.",
+        "Reconstructed from chronological closed trade sequence against reference capital (Agent/backend/web/loss_analysis.py). "
+        "Drawdown depth = (Running Peak − Current Trough) / Reference Capital. "
+        "Losing streaks are ranked by cumulative dollar loss to highlight true capital destruction risk.",
     )
     return _section("Drawdown vs. capital", body + theory, anchor="sut-giam-von")
 

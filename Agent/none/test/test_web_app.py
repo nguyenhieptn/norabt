@@ -2410,7 +2410,8 @@ def test_analyze_background_task_writes_snapshot_so_first_bot_report_click_is_fa
     # 14 -> 13: an insight section that cannot be computed is no longer
     # rendered as an empty card. These fixtures have no market source, so
     # "Market compatibility" has no cells and is absent along with its drawer.
-    assert report.text.count("<details") == 13
+    # 13 -> 16: every card in Tab 2 and Tab 3 now has exactly 1 unified theory drawer.
+    assert report.text.count("<details") == 16
 
 
 def test_bot_report_while_background_analyze_still_running_still_renders_full(
@@ -4205,7 +4206,8 @@ def test_bot_report_html_keeps_every_chart_and_details_block_after_analyze_resha
     # 14 -> 13: an insight section that cannot be computed is no longer
     # rendered as an empty card. These fixtures have no market source, so
     # "Market compatibility" has no cells and is absent along with its drawer.
-    assert resp.text.count("<details") == 13
+    # 13 -> 16: every card in Tab 2 and Tab 3 now has exactly 1 unified theory drawer.
+    assert resp.text.count("<details") == 16
 
 
 # --------------------------------------------------------------------------- #
@@ -4392,7 +4394,8 @@ def test_bot_report_html_includes_narrative_section_with_disclosure() -> None:
     # 14 -> 13: an insight section that cannot be computed is no longer
     # rendered as an empty card. These fixtures have no market source, so
     # "Market compatibility" has no cells and is absent along with its drawer.
-    assert resp.text.count("<details") == 13
+    # 13 -> 17: every card in Tab 2 and Tab 3 now has exactly 1 unified theory drawer (+1 for narrative theory).
+    assert resp.text.count("<details") == 17
 
 
 def test_bot_report_narrative_generated_once_then_refresh_regenerates() -> None:
@@ -4732,7 +4735,8 @@ def test_bot_report_survives_redis_connection_error_below(
     # 14 -> 13: an insight section that cannot be computed is no longer
     # rendered as an empty card. These fixtures have no market source, so
     # "Market compatibility" has no cells and is absent along with its drawer.
-    assert resp.text.count("<details") == 13
+    # 13 -> 16: every card in Tab 2 and Tab 3 now has exactly 1 unified theory drawer.
+    assert resp.text.count("<details") == 16
     assert "Report could not be generated" not in resp.text
     assert any("read failed" in record.getMessage() for record in caplog.records), (
         "Redis outage must be logged as a warning, never silently invisible"
@@ -5551,8 +5555,8 @@ def test_bot_report_from_assessment_file_with_chart_fields_matches_live_counts(
     # module (there is no trade ledger in that record), so holdout, the
     # scenario laboratory and market compatibility are absent along with
     # their drawers. The reason is stated once in the data-limitations
-    # drawer instead of once per empty card.
-    assert resp.text.count("<details") == 11
+    # 14 -> 11 -> 15: unified theory drawers added across Tab 1, 2, and 3.
+    assert resp.text.count("<details") == 15
     assert "Traded assets" in resp.text
     # And the growth-curve/horizon section headers themselves, proving the
     # 2 extra `<svg>`/4 extra `<details>` over the base fixture (5/8, see
