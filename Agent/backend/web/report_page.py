@@ -10938,24 +10938,34 @@ footer.report-footer {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted, #9ca3af);
-  display: flex;
-  align-items: center;
-  flex: 0 0 clamp(280px, 50%, 350px);
-  max-width: 350px;
+  display: flex !important;
+  align-items: center !important;
+  flex: 0 0 340px !important;
+  max-width: 340px !important;
 }
 .param-horizontal-name .metric-label-row {
-  display: inline-flex !important;
-  align-items: baseline !important;
-  gap: 2px !important;
-  width: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
+  gap: 8px !important;
 }
 .param-horizontal-name .metric-label-row .param-label {
-  flex: 0 1 auto !important;
+  flex: 1 1 auto !important;
   text-align: left !important;
 }
 .param-horizontal-name .metric-label-row .formula-star-btn {
-  flex: 0 0 auto !important;
-  margin-left: 2px !important;
+  flex: 0 0 16px !important;
+  width: 16px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin-left: auto !important;
+  margin-right: 4px !important;
+  text-align: center !important;
+  color: var(--accent, #38BDF8) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
 }
 .param-horizontal-val {
   font-family: var(--mono, monospace);
@@ -10968,19 +10978,40 @@ footer.report-footer {
 
 /* Metric label row for inline alignment of formula stars */
 .metric-label-row {
-  display: inline-flex !important;
-  align-items: baseline !important;
-  gap: 2px !important;
-  width: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
+  gap: 4px !important;
 }
 .metric-label-row .param-label,
 .metric-label-row .metric-name {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   text-align: left;
 }
 .metric-label-row .formula-star-btn {
   flex: 0 0 auto;
-  margin-left: 2px;
+  margin-left: auto !important;
+  margin-right: 4px !important;
+}
+
+#so-lieu table td:first-child .metric-label-row,
+#suy-luan table td:first-child .metric-label-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
+}
+#so-lieu table td:first-child .metric-label-row .param-label,
+#suy-luan table td:first-child .metric-label-row .param-label {
+  flex: 1 1 auto !important;
+  text-align: left !important;
+}
+#so-lieu table td:first-child .metric-label-row .formula-star-btn,
+#suy-luan table td:first-child .metric-label-row .formula-star-btn {
+  flex: 0 0 auto !important;
+  margin-left: auto !important;
+  margin-right: 8px !important;
 }
 
 /* Drawdown vs. capital & Most recent closed trades full width */

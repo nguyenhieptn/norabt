@@ -352,6 +352,16 @@ Tắt mặc định (`X402_ENABLED=false`, xem `.env.example`) — bật thiếu
 thì mọi lời gọi tool bị từ chối (fail-closed), không âm thầm chạy miễn phí. Thanh toán chốt trên
 **X Layer** (`eip155:196`), ví nhận chỉ cần địa chỉ công khai, server không giữ private key của ai.
 
+**Trạng thái (22/09/2026): CÒN ĐANG PHÁT TRIỂN, cố ý giữ TẮT.** Đã gọi thử một lần thật tới
+facilitator OKX (`/api/v6/pay/x402/verify`) bằng credential thật lấy từ OKX Web3 Developer Portal —
+key/secret/passphrase được OKX xác thực đúng (lỗi trả về là `30001 invalid params` do payload test
+cố tình để trống, KHÁC hẳn mã lỗi xác thực sai `50111`) — nên phần *xác thực với facilitator* chạy
+được thật. Nhưng chưa test được một lượt thanh toán 402 → ký → retry → verify đầy đủ (cần client
+thật ký một payment payload hợp lệ), và địa chỉ hợp đồng USDC dùng cho `X402_ASSET_ADDRESS` mới tra
+chéo 2 nguồn cho 2 kết quả khác nhau (xem cảnh báo trong `Agent/.env`), chưa xác nhận chắc chắn.
+`X402_ENABLED` giữ nguyên `false` cho tới khi cả hai việc trên xong — mọi MCP tool hiện chạy
+**miễn phí, không bị chặn thanh toán**, kể cả khi các biến `X402_*`/`OKX_X402_*` khác đã điền sẵn.
+
 Chi tiết giao thức đầy đủ (đã xác minh bằng cách đọc trực tiếp SDK `okxweb3-app-x402` OKX công bố):
 [`docs/okx_marketplace.md`](docs/okx_marketplace.md).
 

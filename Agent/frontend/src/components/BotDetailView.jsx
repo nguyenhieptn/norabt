@@ -413,7 +413,13 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
             const starBtn = labelRow.querySelector(".formula-star-btn");
             if (starBtn) {
               starBtn.style.setProperty("margin-left", "auto", "important");
-              starBtn.style.setProperty("flex", "0 0 auto", "important");
+              starBtn.style.setProperty("margin-right", "4px", "important");
+              starBtn.style.setProperty("flex", "0 0 16px", "important");
+              starBtn.style.setProperty("width", "16px", "important");
+              starBtn.style.setProperty("display", "inline-flex", "important");
+              starBtn.style.setProperty("justify-content", "center", "important");
+              starBtn.style.setProperty("align-items", "center", "important");
+              starBtn.style.setProperty("text-align", "center", "important");
             }
           }
         }
