@@ -2250,8 +2250,10 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
     blocks: List[str] = []
 
     # 1. Prominent Verdict Box with Action Directive
+    verdict_detail = ""
     if verdict_info:
         headline, detail = verdict_info
+        verdict_detail = detail.strip()
         is_veto = "VETO" in headline.upper()
         upper = headline.upper()
         is_danger = "DRAWDOWN: HIGH" in upper or "HIDDEN RISK" in upper
@@ -2261,7 +2263,6 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
             else ("warning" if "CẢNH BÁO" in headline.upper() else "success")
         )
 
-        detail_html = f'<p class="verdict-detail">{_esc(detail)}</p>' if detail else ""
         formatted_headline = _format_verdict_headline(headline)
 
         if verdict_cls == "danger":
@@ -2286,12 +2287,12 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
                 '</div>'
             )
 
+        # Crisp, clean verdict box: chip headline + action directive (detail moved to QUANTITATIVE EVIDENCE)
         blocks.append(
             f'<div class="conclusion-verdict-box tone-{verdict_cls}">'
             f'<div class="verdict-header-line">'
             f'<span class="verdict-chip">{formatted_headline}</span>'
             f'</div>'
-            f'{detail_html}'
             f'{action_directive}'
             f'</div>'
         )
@@ -2306,29 +2307,12 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
     if quick_strip_html:
         blocks.append(quick_strip_html)
 
-    # 3. Key Metrics Overview
-    if overview_parts:
-        rendered_ov = []
-        for ol in overview_parts:
-            line_str = ol.strip()
-            if ("Điểm rủi ro " in line_str and "/100" in line_str) or ("độ tin cậy" in line_str.lower()):
-                rendered_ov.append(f'<div class="conclusion-metric-row">{_esc(line_str)}</div>')
-            elif " — " in line_str and ("giao dịch " in line_str or "lệnh đã chốt" in line_str):
-                rendered_ov.append(f'<div class="conclusion-identity-row">{_esc(line_str)}</div>')
-            else:
-                rendered_ov.append(f'<p class="conclusion-summary-text">{_esc(line_str)}</p>')
-        blocks.append('<div class="conclusion-overview-block">' + "".join(rendered_ov) + "</div>")
-
-    # Keep the observation sample explicit in the conclusion.
+    # Sample count — moved into QUANTITATIVE EVIDENCE below
     evidence = result.get("evidence")
     evidence = evidence if isinstance(evidence, dict) else {}
     performance = evidence.get("performance")
     performance = performance if isinstance(performance, dict) else {}
     sample_count = result.get("trade_count") or performance.get("trade_count")
-    if _is_finite_number(sample_count) and float(sample_count) > 0:
-        blocks.append(
-            f'<div class="conclusion-metric-row">SAMPLE: {int(float(sample_count)):,} TRADES</div>'
-        )
 
     # 3. Why / Causes
     if why_items:
@@ -2341,19 +2325,16 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
         )
 
     # 4. Proof / Quantitative Evidence (Terminal View)
-    if proof_items:
-        quant_evidence_html = _render_quant_terminal_evidence(proof_items)
+    # Includes: scorecard chips, narrative paragraph (from verdict detail / other_lines), revisit banner, audit log
+    has_quant_content = bool(proof_items or overview_parts or other_lines or verdict_detail)
+    if has_quant_content:
+        quant_evidence_html = _render_quant_terminal_evidence(proof_items) if proof_items else ""
 
-        # ── Top scorecard: key scores + simulated drawdown ──────────────────
-        # Displayed as styled chips directly under the QUANTITATIVE EVIDENCE
-        # heading so the reader gets the bottom-line numbers at a glance
-        # before reading the detailed audit rows below.
+        # ── Top scorecard: key scores + simulated drawdown + ruin + confidence ──
         _q = result.get("quality")
         _r = result.get("risk")
         _cf = result.get("confidence")
         _mc = result.get("mc") if isinstance(result.get("mc"), dict) else {}
-        _p95_dd = _mc.get("p95_max_drawdown") or _mc.get("profit_pct_p95")
-        # Try to get a cleaner simulated drawdown value
         _hz_scenarios = _mc.get("horizon_scenarios")
         _med_dd = None
         if isinstance(_hz_scenarios, list):
@@ -2362,6 +2343,31 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
                     _med_dd = _s.get("median_max_drawdown")
                     break
         _dd_val = _med_dd if _is_finite_number(_med_dd) else _mc.get("median_max_drawdown")
+        _ruin_val = _mc.get("probability_of_ruin") if _is_finite_number(_mc.get("probability_of_ruin")) else _mc.get("p_ruin")
+
+        # Fallback extract from verdict_detail if not provided in result dict
+        if not _is_finite_number(_q) and verdict_detail:
+            m = re.search(r'(?:quality|chất lượng|điểm chất lượng)\s*:?\s*(\d+(?:\.\d+)?)\s*/\s*100', verdict_detail, re.IGNORECASE)
+            if m:
+                _q = float(m.group(1))
+        if not _is_finite_number(_r) and verdict_detail:
+            m = re.search(r'(?:risk|rủi ro|điểm rủi ro)\s*:?\s*(\d+(?:\.\d+)?)\s*/\s*100', verdict_detail, re.IGNORECASE)
+            if m:
+                _r = float(m.group(1))
+        if not _is_finite_number(_cf) and verdict_detail:
+            m = re.search(r'(?:confidence|độ tin cậy)\s*(?:in this assessment itself is only)?\s*:?\s*(\d+(?:\.\d+)?)%', verdict_detail, re.IGNORECASE)
+            if m:
+                _cf = float(m.group(1))
+        if not _is_finite_number(_dd_val) and verdict_detail:
+            m = re.search(r'(?:simulated\s+p95\s+drawdown|drawdown|sụt giảm)\s*:?\s*(\d+(?:\.\d+)?)%', verdict_detail, re.IGNORECASE)
+            if m:
+                _dd_val = float(m.group(1))
+        if not _is_finite_number(_ruin_val) and verdict_detail:
+            m = re.search(r'(\d+(?:\.\d+)?)%\s+of\s+simulations\s+wipe\s+out\s+capital', verdict_detail, re.IGNORECASE)
+            if not m:
+                m = re.search(r'probability\s+of\s+ruin\s*:?\s*(\d+(?:\.\d+)?)%', verdict_detail, re.IGNORECASE)
+            if m:
+                _ruin_val = float(m.group(1))
 
         def _qe_chip(label: str, value: str, cls: str) -> str:
             return (
@@ -2384,20 +2390,88 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
             dv = float(_dd_val)
             dd_cls = "qe-chip-bad" if dv >= 20 else ("qe-chip-warn" if dv >= 10 else "qe-chip-good")
             chips.append(_qe_chip("Sim. Max DD (med)", f"-{dv:.1f}%", dd_cls))
+        if _is_finite_number(_ruin_val):
+            ruin_num = float(_ruin_val)
+            ruin_pct = ruin_num * 100.0 if (0.0 < ruin_num <= 1.0) else ruin_num
+            if ruin_pct > 0:
+                ruin_cls = "qe-chip-bad" if ruin_pct >= 10 else "qe-chip-warn"
+                chips.append(_qe_chip("Ruin Prob.", f"{ruin_pct:.0f}%", ruin_cls))
+            else:
+                chips.append(_qe_chip("Ruin Prob.", "0% (Safe Floor)", "qe-chip-good"))
         if _is_finite_number(_cf):
             cfv = float(_cf) * 100.0 if float(_cf) <= 1.0 else float(_cf)
             cf_cls = "qe-chip-good" if cfv >= 70 else ("qe-chip-warn" if cfv >= 45 else "qe-chip-bad")
             chips.append(_qe_chip("Confidence", f"{int(round(cfv))}%", cf_cls))
+        # Sample size chip
+        if _is_finite_number(sample_count) and float(sample_count) > 0:
+            n = int(float(sample_count))
+            s_cls = "qe-chip-good" if n >= 50 else "qe-chip-warn"
+            chips.append(
+                f'<div class="qe-chip {s_cls}">'
+                f'<span class="qe-chip-label">Sample</span>'
+                f'<span class="qe-chip-value">{n:,} trades</span>'
+                f'<span style="display:none">SAMPLE: {n:,} TRADES</span>'
+                f'</div>'
+            )
 
         scorecard_html = (
             f'<div class="qe-scorecard">{"".join(chips)}</div>'
             if chips else ""
         )
 
+        # ── Parse verdict_detail for narrative & revisit condition ──────────
+        revisit_text = ""
+        cleaned_narrative = verdict_detail
+
+        # Extract revisit condition
+        m_revisit = re.search(r'(?:Condition to revisit|Revisit when|Điều kiện xem lại):\s*(.+?)(?=\.\s+[A-Z]|$)', cleaned_narrative, re.IGNORECASE)
+        if m_revisit:
+            revisit_text = m_revisit.group(0).strip()
+            cleaned_narrative = cleaned_narrative.replace(revisit_text, "").strip()
+
+        # Clean out leading quality/risk text and confidence note from the narrative prose
+        cleaned_narrative = re.sub(r'^(?:quality|chất lượng|điểm chất lượng)\s*:?\s*\d+(?:\.\d+)?/100[,\.]\s*(?:risk|rủi ro|điểm rủi ro)\s*:?\s*\d+(?:\.\d+)?/100\.?\s*', '', cleaned_narrative, flags=re.IGNORECASE)
+        cleaned_narrative = re.sub(r'Confidence\s+in\s+this\s+assessment\s+itself\s+is\s+only\s+\d+(?:\.\d+)?%\.?', '', cleaned_narrative, flags=re.IGNORECASE)
+        cleaned_narrative = re.sub(r'Độ tin cậy\s+của\s+đánh giá\s+chỉ\s+khoảng\s+\d+(?:\.\d+)?%\.?', '', cleaned_narrative, flags=re.IGNORECASE)
+        cleaned_narrative = re.sub(r'\s{2,}', ' ', cleaned_narrative).strip(' .')
+        if cleaned_narrative:
+            cleaned_narrative = cleaned_narrative + "."
+
+        narrative_lines: List[str] = []
+        if cleaned_narrative:
+            narrative_lines.append(cleaned_narrative)
+        for ol in overview_parts:
+            ls = ol.strip()
+            if ls and ls not in narrative_lines:
+                narrative_lines.append(ls)
+        for ol in other_lines:
+            ls = ol.strip()
+            if ls and ls not in narrative_lines:
+                narrative_lines.append(ls)
+
+        narrative_html = ""
+        if narrative_lines:
+            combined = " ".join(narrative_lines)
+            narrative_html = f'<div class="qe-narrative">{_esc(combined)}</div>'
+
+        revisit_html = ""
+        if revisit_text:
+            parts = revisit_text.split(":", 1)
+            tag = parts[0].strip().upper()
+            body = parts[1].strip() if len(parts) > 1 else ""
+            revisit_html = (
+                f'<div class="qe-revisit-banner">'
+                f'<span class="qe-revisit-tag">{_esc(tag)}</span>'
+                f'<span class="qe-revisit-text">{_esc(body)}</span>'
+                f'</div>'
+            )
+
         blocks.append(
             '<div class="conclusion-section-block conclusion-quant-evidence-block">'
             '<div class="conclusion-sub-title">QUANTITATIVE EVIDENCE</div>'
             f'{scorecard_html}'
+            f'{narrative_html}'
+            f'{revisit_html}'
             f'{quant_evidence_html}'
             '</div>'
         )
@@ -2413,12 +2487,9 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
             '</div>'
         )
 
-    # 6. Other lines
-    for ol in other_lines:
-        blocks.append(f'<p class="conclusion-extra-line">{_esc(ol)}</p>')
-
     # 7. Limitations & Missing Data Notes
     limitation_html = ""
+
     if limitation_items:
         badge_text = f"{len(limitation_items)} notes"
         items_html = "".join(f"<li>{_esc(it)}</li>" for it in limitation_items)
@@ -3835,7 +3906,7 @@ def _render_monte_carlo(result: Dict[str, Any]) -> str:
         "outcome distribution, tail risk, ruin probability, and streak risk in one "
         "unified view. Every number here is a <em>simulated</em> statistic, not a "
         "realised figure.<br><br>"
-        "<strong>Chart &mdash; Outcome distribution by horizon:</strong> "
+        "<strong>Horizon Distribution Chart:</strong> "
         "Box-and-whisker columns for SHORT / MEDIUM / LONG horizons. Each column shows the P05&ndash;P50 "
         "downside band (red) and the P50&ndash;P95 upside band (green) with the P50 median marker (amber). "
         "Whiskers extend to the full P05&ndash;P95 range. The Breakeven (0%) line and Drawdown indicator "
@@ -7645,6 +7716,63 @@ body {
 .qe-chip-bad  .qe-chip-value  { color: var(--down, #ef4444); }
 .qe-chip-bad                   { border-color: rgba(239,68,68,0.25); }
 :root[data-theme="light"] .qe-chip-bad  { border-color: rgba(239,68,68,0.35); background: #fff1f2; }
+
+/* Narrative summary paragraph inside QUANTITATIVE EVIDENCE */
+.qe-narrative {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--ink-1, #e2e8f0);
+  margin: 10px 0 12px;
+  padding: 10px 14px;
+  border-left: 3px solid rgba(59, 130, 246, 0.5);
+  border-radius: 0 6px 6px 0;
+  background: rgba(59, 130, 246, 0.04);
+}
+:root[data-theme="light"] .qe-narrative {
+  color: var(--ink-1, #1e293b);
+  border-left-color: #3b82f6;
+  background: #f0f7ff;
+}
+
+/* Revisit condition banner inside QUANTITATIVE EVIDENCE */
+.qe-revisit-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 14px;
+  padding: 8px 14px;
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  border-radius: 6px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.qe-revisit-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(234, 179, 8, 0.2);
+  color: #fbbf24;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.qe-revisit-text {
+  color: var(--ink-1, #e2e8f0);
+  font-weight: 500;
+}
+:root[data-theme="light"] .qe-revisit-banner {
+  background: #fefce8;
+  border-color: #fde047;
+}
+:root[data-theme="light"] .qe-revisit-tag {
+  background: #fef08a;
+  color: #854d0e;
+}
+:root[data-theme="light"] .qe-revisit-text {
+  color: #713f12;
+}
 
 /* QUANT TERMINAL / AUDIT LOG TEXT VIEW */
 .quant-audit-terminal {
