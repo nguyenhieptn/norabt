@@ -340,6 +340,21 @@ Crawl 132 bot tốn khoảng **8 phút** (6 request/bot, delay 0.6s); Monte Carl
 - AUM của mọi bot nhỏ hơn PnL lũy kế sổ lệnh. Trên OKX copy trading, `aum` là tiền của người copy chứ không phải vốn của lead trader — vốn thật phải dựng từ weekly PnL.
 - `maomao12345` có tuần `pnlRatio = -1.0`: tài khoản **đã từng cháy sạch** rồi nạp lại lên 3.65 triệu USDT.
 
+## Bán qua MCP / OKX AI Marketplace (x402)
+
+`backend/agent_server.py` phơi 6 tool MCP (`assess_bot`, `get_market`...) qua chuẩn Model
+Context Protocol. Mỗi lời gọi tool có thể bị tính phí vi mô qua **x402** (`backend/payments/x402.py`):
+client gọi không kèm thanh toán → server trả HTTP 402 kèm yêu cầu giá → client ký thanh toán và
+gọi lại → server xác minh THẬT bằng một lệnh gọi HTTP tới facilitator của OKX
+(`web3.okx.com/api/v6/pay/x402/verify`), không tự nhận "đã trả tiền" nếu facilitator không xác nhận.
+
+Tắt mặc định (`X402_ENABLED=false`, xem `.env.example`) — bật thiếu cấu hình ví/token nhận tiền
+thì mọi lời gọi tool bị từ chối (fail-closed), không âm thầm chạy miễn phí. Thanh toán chốt trên
+**X Layer** (`eip155:196`), ví nhận chỉ cần địa chỉ công khai, server không giữ private key của ai.
+
+Chi tiết giao thức đầy đủ (đã xác minh bằng cách đọc trực tiếp SDK `okxweb3-app-x402` OKX công bố):
+[`docs/okx_marketplace.md`](docs/okx_marketplace.md).
+
 ## Giới hạn còn lại
 
 - Chưa có ingestion/reconciliation OKX REST + WebSocket; dữ liệu là snapshot crawl.

@@ -2507,7 +2507,28 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
             '</div>'
         )
 
-    body = '<div class="conclusion-body-wrap">' + "".join(blocks) + limitation_html + "</div>"
+    conclusion_theory = _theory(
+        "<strong>Section overview.</strong> Synthesises the bot's overall risk tier, operational directive, "
+        "and empirical quantitative proof into an actionable recommendation for copy-trading.<br><br>"
+        "<strong>Verdict Box &amp; Action Directive:</strong> "
+        "Clear risk classification (VETO / DRAWDOWN: HIGH / HIDDEN RISK / WATCH / SAFE) paired with an explicit capital allocation directive. "
+        "Veto verdicts strictly instruct followers not to allocate capital or to close positions.<br><br>"
+        "<strong>Hero Scores &amp; Quick Strip:</strong> "
+        "<em>Risk score (0-100)</em> &mdash; lower is safer; combines 10 independent risk dimensions with Veto Floors. "
+        "<em>Quality score (0-100)</em> &mdash; higher is better; evaluates risk-adjusted return and strategy edge. "
+        "<em>Confidence (%)</em> &mdash; measures sample adequacy (&ge;30 trades required for minimum statistical validity). "
+        "<em>Quick Strip</em> &mdash; snapshots reference capital, unrealised float loss, max drawdown, win rate, and observed trade count.<br><br>"
+        "<strong>Quantitative Evidence &amp; Scorecard:</strong> "
+        "Summarises simulated stress drawdown (P95), ruin probability, confidence, and sample size in high-visibility chips. "
+        "Accompanied by key cause analysis (Why), revisit conditions, and terminal audit logs.<br><br>"
+        "<strong>Hidden Warnings &amp; Testing Scope:</strong> "
+        "Highlights latent risks (e.g. untested in downtrends, thin track records, heavy regime dependence) that leaderboard returns conceal.",
+        "Deterministic multi-factor decision engine fusing OKX public order book records, open position exposure, "
+        "and 10,000-scenario stationary bootstrap simulations. Employs asymmetric risk-first evaluation: liquidation risk or extreme "
+        "tail loss triggers an immediate Veto Floor override that forces the final score and verdict to emergency status regardless of past profit.",
+    )
+
+    body = '<div class="conclusion-body-wrap">' + "".join(blocks) + limitation_html + conclusion_theory + "</div>"
     return _section("Conclusion and recommendation", body, tone="primary", anchor="ket-luan")
 
 
@@ -3254,6 +3275,20 @@ def _render_narrative(result: Dict[str, Any]) -> str:
             '</div>'
         )
 
+    narrative_theory = _theory(
+        "<strong>Section overview.</strong> Provides an independent analytical synthesis combining qualitative strategy archetypes "
+        "with key empirical findings extracted from trade ledger data.<br><br>"
+        "<strong>Core Strategy Thesis:</strong> "
+        "Executive summary identifying the bot's core trading mechanics (e.g. trend-following, mean reversion, scalp, grid), "
+        "market regime alignment, and structural behavioural characteristics.<br><br>"
+        "<strong>Key findings &amp; quantitative evidence:</strong> "
+        "Numbered audit points highlighting specific empirical risks: trade frequency cadence, tail risk exposure, "
+        "loss-holding behaviour, leverage scaling, and dependencies on specific market phases.",
+        "Synthesised deterministically from quantitative engine metrics (trade distribution, duration percentiles, "
+        "holding time skew, regime compatibility, and open float drag). Every finding is cross-referenced directly with "
+        "the underlying OKX order book and Monte Carlo simulation outputs.",
+    )
+
     body = (
         '<div class="narrative-body-wrap">'
         '<div class="narrative-meta-bar" style="display:flex;align-items:center;gap:10px;margin-bottom:0.75rem;flex-wrap:wrap;">'
@@ -3262,6 +3297,7 @@ def _render_narrative(result: Dict[str, Any]) -> str:
         '</div>'
         f'{prose_html}'
         f'{keypoints_html}'
+        f'{narrative_theory}'
         '</div>'
     )
     return _section("Expert assessment", body, tone="primary", anchor="nhan-dinh")
@@ -3290,8 +3326,25 @@ def _render_dimensions_section(result: Dict[str, Any]) -> str:
             return ""
 
     theory = _theory(
-        "10 independent risk dimensions scaled 0-100 (higher = riskier). Unmeasured dimensions default to neutral 50 without lowering the score.",
-        "Internal QC evaluation lenses fused via weighted average with exchange veto floors for critical risks."
+        "<strong>Section overview.</strong> Decomposes overall strategy risk into 10 orthogonal risk dimensions, "
+        "evaluating structural vulnerability across distinct operational axes.<br><br>"
+        "<strong>10 Risk Dimensions (0-100 scale, lower is safer, ≥70 indicates severe danger):</strong><br>"
+        "• <em>Market alignment</em>: Consistency of edge across trending, sideways, and volatile regimes.<br>"
+        "• <em>Trading behaviour</em>: Detection of high-risk toxic mechanics (martingale sizing, refusing to cut losses, wide grid spacing).<br>"
+        "• <em>Leverage exposure</em>: Effective margin utilization, leverage spikes, and borrowing risk.<br>"
+        "• <em>Drawdown control</em>: Historical peak-to-trough drawdown depth, recovery velocity, and underwater duration.<br>"
+        "• <em>Tail risk</em>: Extreme loss distribution, negative skewness, and catastrophic tail probabilities.<br>"
+        "• <em>Capital integrity</em>: Unrealised floating loss drag relative to capital (detects masked losses in open positions).<br>"
+        "• <em>Profit stability</em>: Consistency of monthly returns and Sharpe/Sortino ratios across rolling windows.<br>"
+        "• <em>Asset concentration</em>: Single-token concentration vs multi-asset diversification risk.<br>"
+        "• <em>Liquidity &amp; execution</em>: Slippage risk, order size relative to market depth, and execution friction.<br>"
+        "• <em>Sample validity</em>: Statistical significance based on track record length and trade sample size.<br><br>"
+        "<strong>Score Basis &amp; Weighting:</strong> "
+        "Each verified dimension carries an assigned weight. Unmeasured dimensions default to neutral 50 without penalizing the overall score.",
+        "Multi-dimensional fusion algorithm: Baseline score = ∑(w_i × Score_i) / ∑(w_i). "
+        "Critical risk dimensions enforce non-compensatory <em>Veto Floors</em>: if any critical dimension (e.g. liquidation risk, "
+        "extreme leverage, or unhedged float drag) breaches safety boundaries, the overall risk score is automatically overridden "
+        "and clamped to the veto level (up to 100) regardless of strong performance in other dimensions.",
     )
     return _section(
         "Score by risk dimension",
@@ -3697,15 +3750,10 @@ def _render_growth_curve(result: Dict[str, Any]) -> str:
     chart = _line_chart(cumulative, y_unit=" USDT")
     if not chart:
         return ""
-    theory = _theory(
-        "Tracks realized USDT capital trajectory over closed trades. Flags peak equity and deepest historical trough.",
-        "Direct cumulative sum of realized PnL: Equity(t) = Initial + ∑ PnL(i) directly from closed trades (excludes open positions)."
-    )
     return (
         '<div class="growth-curve-panel">'
         '<h3>Cumulative capital curve by closed trade</h3>'
         f'<div class="growth-chart-wrapper">{chart}</div>'
-        f'{theory}'
         '</div>'
     )
 
@@ -3779,23 +3827,7 @@ def _render_win_loss_composition(result: Dict[str, Any]) -> str:
         cells += f'<div class="pie-card-stacked"><h4>Gross profit/loss breakdown (USDT)</h4>{profit_pie}</div>'
     stacked = f'<div class="pie-stack-vertical">{cells}</div>'
 
-    theory = _theory(
-        "Placed SIDE BY SIDE because they answer two different questions. Left:"
-        " out of the total NUMBER OF TRADES, what share won versus lost. Right: out"
-        " of the total MONEY won/lost, what share is gross profit and what share is"
-        " gross loss. A high win rate (the left pie leaning heavily toward wins) but"
-        " gross loss still making up most of the right pie is the signature of a"
-        " skewed payoff: the bot wins many small trades and loses few, but each"
-        " losing trade hurts badly -- one loss can wipe out many wins combined.",
-        "The trade-count breakdown is computed directly from the win/loss rate"
-        " (win_rate/loss_rate) multiplied by the number of closed trades. The"
-        " gross profit/loss breakdown is derived from the average profit per"
-        " winning trade (average_win) times the number of wins, and the average"
-        " loss per losing trade (average_loss) times the number of losses -- the"
-        " same evidence.performance source already used for the trade metrics"
-        " table below, not a new measurement.",
-    )
-    return f'<div class="win-loss-composition-panel"><h3>Win/loss composition</h3>{stacked}{theory}</div>'
+    return f'<div class="win-loss-composition-panel"><h3>Win/loss composition</h3>{stacked}</div>'
 
 
 def _render_growth_section(result: Dict[str, Any]) -> str:
@@ -3804,15 +3836,31 @@ def _render_growth_section(result: Dict[str, Any]) -> str:
     if not curve_html and not composition_html:
         return ""
     if curve_html and composition_html:
-        body = (
+        dashboard_body = (
             '<div class="growth-dashboard-grid">'
             f'<div class="growth-dashboard-left">{curve_html}</div>'
             f'<div class="growth-dashboard-right">{composition_html}</div>'
             '</div>'
         )
     else:
-        body = curve_html or composition_html
-    return _section("Growth & outcome composition", body, anchor="tang-truong")
+        dashboard_body = curve_html or composition_html
+
+    growth_theory = _theory(
+        "<strong>Section overview.</strong> Evaluates capital trajectory and payoff distribution to verify whether profitability "
+        "stems from a consistent, repeatable edge or masks an asymmetric high-risk profile.<br><br>"
+        "<strong>Cumulative capital curve:</strong> "
+        "Chronological trajectory of realized USDT equity across all completed closed trades. "
+        "Highlights historical peak equity runs, drawdown valleys, and recovery duration. Excludes open positions to isolate closed-book execution.<br><br>"
+        "<strong>Win/loss composition &amp; Payoff asymmetry:</strong> "
+        "Displays trade count distribution (left) alongside gross dollar profit/loss distribution (right). "
+        "Reading both charts together reveals <em>payoff skew</em>: a high win rate (e.g. 90%+) paired with gross loss dominating "
+        "the profit pie is the definitive signature of an asymmetric strategy (such as martingale or grid holding losers) where occasional "
+        "severe losses wipe out dozens of accumulated small wins.",
+        "Equity curve: Equity(t) = Initial + ∑ PnL(i) directly calculated from verified OKX closed trades. "
+        "Gross profit = N_wins × Average_Win; Gross loss = N_losses × |Average_Loss|. "
+        "Profit Factor = Gross Profit / Gross Loss. All metrics reflect actual ledger timestamps.",
+    )
+    return _section("Growth & outcome composition", dashboard_body + growth_theory, anchor="tang-truong")
 
 
 # --------------------------------------------------------------------------- #
@@ -3875,11 +3923,7 @@ def _render_monte_carlo(result: Dict[str, Any]) -> str:
         ]
         chart = _diverging_bars(fan_rows)
         if chart:
-            theory = _theory(
-                "Simulated terminal return distribution across capital percentiles. Spread between Median (P50) and Stress (P05) measures downside tail risk.",
-                f"Stationary bootstrap (Politis & Romano 1994): {_int_text(mc.get('iterations', 10000))} resampled paths over {_int_text(mc.get('horizon_trades', 50))} trades."
-            )
-            parts.append(f'<div class="mc-full-row">{_subsection("End-of-horizon outcome percentiles", chart, theory)}</div>')
+            parts.append(f'<div class="mc-full-row">{_subsection("End-of-horizon outcome percentiles", chart)}</div>')
 
     # 2. Row 2: Multi-Horizon Scenario Matrix
     horizon_comp_html = _render_horizon_comparison(mc)
@@ -3946,7 +3990,7 @@ def _render_monte_carlo(result: Dict[str, Any]) -> str:
     return _section("Monte Carlo simulation", body, anchor="monte-carlo")
 
 
-def _subsection(title: str, chart: str, theory: str) -> str:
+def _subsection(title: str, chart: str, theory: str = "") -> str:
     if not chart:
         return ""
     return f"<h3>{_esc(title)}</h3>{chart}{theory}"

@@ -529,7 +529,10 @@ def test_real_bot_page_keeps_seven_svg_and_eleven_details(full_result):
     # 13 -> 14: the result tab gained a footer accordion (data limitations and
     # open questions). It is a <details> after the last card, NOT a new section,
     # so the section count is unchanged.
-    assert html.count("<details") == html.count("</details>") == 14
+    # 14 -> 15: every card in the Analyst Result tab now carries exactly 1 unified
+    # "Methodology & interpretation" drawer (added to Conclusion and Expert assessment,
+    # and unified across Growth).
+    assert html.count("<details") == html.count("</details>") == 15
 
 
 def test_real_bot_page_has_no_stray_vietnamese(full_result):
