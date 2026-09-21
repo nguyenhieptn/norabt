@@ -16,8 +16,15 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
     setLoading(true);
     setError(null);
 
-    const sep = isRefresh ? "&" : "?";
-    const url = `/bot/${code}${isRefresh ? "?refresh=1" : ""}${sep}_t=${Date.now()}`;
+    // Role scoping is decided by the server (see backend/qc/reporting/view_policy.py).
+    // The SPA asks for the user-scoped document instead of deleting panels out
+    // of an admin document after the fact -- stripping client-side made
+    // "withheld from you" look identical to "never measured".
+    const params = new URLSearchParams();
+    if (isRefresh) params.set("refresh", "1");
+    if (isUserView) params.set("view", "user");
+    params.set("_t", String(Date.now()));
+    const url = `/bot/${code}?${params.toString()}`;
     fetch(url, { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Bot report not found`);
@@ -44,18 +51,18 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
         if (snapshotEl) {
           const strong = snapshotEl.querySelector("strong");
           if (strong) {
-            snapshotTime = strong.textContent.trim() + " (Vietnam time, GMT+7)";
+            snapshotTime = strong.textContent.trim() + " (GMT+7)";
           } else {
-            const match = snapshotEl.textContent.match(/Snapshot taken at\s+([^\.\-]+)/i);
+            const match = snapshotEl.textContent.match(/(?:Snapshot taken at|Analysis time:|Thời gian phân tích:)\s+([^\.\-]+)/i);
             if (match) {
-              snapshotTime = match[1].trim();
+              snapshotTime = match[1].trim() + " (GMT+7)";
             }
           }
           hasRefresh = !!snapshotEl.querySelector('a[href*="refresh=1"]');
         }
 
         // 2. Dọn dẹp các thanh điều hướng rời rạc cũ từ SSR và các nút radio tab
-        doc.querySelectorAll(".admin-banner, .snapshot-banner, .report-subnav-bar, .tab-nav-radio, input[name='main_tabs'], .report-header, .report-hero-card").forEach((el) => el.remove());
+        doc.querySelectorAll(".admin-banner, .snapshot-banner, .report-subnav-bar, .tab-nav-radio, input[name='main_tabs'], .report-header, .report-hero-card, #formula-modal, .formula-modal-backdrop").forEach((el) => el.remove());
         doc.querySelectorAll(".report-hero-identity .crumb").forEach((el) => el.remove());
         doc.querySelectorAll(".report-hero-top").forEach((el) => el.remove());
         // Unwrap .tabs-control-wrapper: giữ lại các children (.tabs-header-container),
@@ -68,23 +75,25 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
         });
         if (nameEl) nameEl.remove();
 
-        // 3. Phân quyền và tách biệt chế độ xem:
-        // Người dùng (User role): CHỈ xem phần Kết quả phân tích (Overview Report), không xem thị trường hay sổ lệnh.
-        if (isUserView) {
-          const marketPanel = doc.querySelector("#panel-market");
-          if (marketPanel) marketPanel.remove();
-          const tradesPanel = doc.querySelector("#panel-trades");
-          if (tradesPanel) tradesPanel.remove();
-          const tabsHeader = doc.querySelector(".tabs-header-container");
-          if (tabsHeader) tabsHeader.remove();
-          const tabRadios = doc.querySelectorAll(".tab-nav-radio");
-          tabRadios.forEach((r) => r.remove());
-
+        // 3. Chế độ xem theo vai trò:
+        // Máy chủ đã quyết định panel nào thuộc về vai trò này và gửi kèm
+        // `data-hidden-panels`. SPA chỉ trình bày, không tự xoá dữ liệu.
+        const wrapper = doc.querySelector(".tabs-control-wrapper");
+        const hiddenPanels = (wrapper?.getAttribute("data-hidden-panels") || "")
+          .split(" ")
+          .filter(Boolean);
+        if (hiddenPanels.length) {
+          hiddenPanels.forEach((panelId) => {
+            const label = doc.querySelector(`#label-tab-${panelId.replace("panel-", "")}`);
+            if (label) label.remove();
+          });
           const reportPanel = doc.querySelector("#panel-report");
           if (reportPanel) {
             reportPanel.classList.add("active-tab-panel");
             reportPanel.style.display = "block";
           }
+          const tabsHeader = doc.querySelector(".tabs-header-container");
+          if (tabsHeader && hiddenPanels.length >= 2) tabsHeader.remove();
         } else {
           // Admin: Mặc định bật active-tab-panel trên panel-report
           const reportPanel = doc.querySelector("#panel-report");
@@ -121,6 +130,11 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
           snapshotTime,
           hasRefresh,
         });
+        if (botName && botName !== code) {
+          document.title = `Nora - Risk Management · ${botName}`;
+        } else if (code) {
+          document.title = `Nora - Risk Management · ${code}`;
+        }
         setHtmlContent({ styles, bodyContent });
         setLoading(false);
       })
@@ -339,18 +353,133 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
       renderPage(1);
     });
 
-    // Formula star click handler
-    root.querySelectorAll(".formula-star").forEach((star) => {
-      star.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        const tip = star.querySelector(".formula-tooltip");
-        if (tip) {
-          const isVisible = tip.style.visibility === "visible" && tip.style.opacity === "1";
-          tip.style.visibility = isVisible ? "hidden" : "visible";
-          tip.style.opacity = isVisible ? "0" : "1";
+    // Enforce value colors & alignment for Drawdown vs. capital and Open-position audit
+    // 1. Drawdown vs. capital -> Five worst losing trades SVG values
+    root.querySelectorAll("#sut-giam-von svg .bar-value, .bar-chart .bar-value").forEach((el) => {
+      const txt = (el.textContent || "").trim();
+      if (txt.startsWith("+")) {
+        el.style.setProperty("fill", "#10b981", "important");
+      } else if (txt.startsWith("-") || txt.includes("-")) {
+        el.style.setProperty("fill", "#ef4444", "important");
+      }
+    });
+
+    // 2. Drawdown vs. capital -> Deepest drawdown episode table values
+    root.querySelectorAll("#sut-giam-von table tbody tr").forEach((tr) => {
+      const tds = tr.querySelectorAll("td");
+      if (tds.length >= 2) {
+        const valSpan = tds[1].querySelector("span") || tds[1];
+        const txt = (valSpan.textContent || "").trim();
+        if (txt.startsWith("+")) {
+          valSpan.style.setProperty("color", "#10b981", "important");
+          valSpan.style.fontWeight = "600";
+        } else if (txt.startsWith("-") || txt.includes("-")) {
+          valSpan.style.setProperty("color", "#ef4444", "important");
+          valSpan.style.fontWeight = "600";
+        }
+      }
+    });
+
+    // 3. Drawdown vs. capital -> Top parameter rows
+    const drawdownSec = root.querySelector("#sut-giam-von");
+    if (drawdownSec) {
+      drawdownSec.querySelectorAll(".param-horizontal-row").forEach((row) => {
+        const valEl = row.querySelector(".param-horizontal-val");
+        if (valEl) {
+          const txt = (valEl.textContent || "").trim();
+          if (txt.startsWith("-") || txt.includes("-")) {
+            valEl.style.setProperty("color", "#ef4444", "important");
+          } else if (txt.startsWith("+")) {
+            valEl.style.setProperty("color", "#10b981", "important");
+          }
         }
       });
+    }
+
+    // 4. Open-position audit & return distribution -> Value colors & star button vertical alignment
+    const openPosSec = root.querySelector("#vi-the-mo");
+    if (openPosSec) {
+      openPosSec.querySelectorAll(".param-horizontal-row").forEach((row) => {
+        const nameEl = row.querySelector(".param-horizontal-name");
+        if (nameEl) {
+          nameEl.style.setProperty("flex", "0 0 340px", "important");
+          nameEl.style.setProperty("max-width", "340px", "important");
+          const labelRow = nameEl.querySelector(".metric-label-row");
+          if (labelRow) {
+            labelRow.style.setProperty("width", "100%", "important");
+            labelRow.style.setProperty("display", "flex", "important");
+            labelRow.style.setProperty("justify-content", "space-between", "important");
+            labelRow.style.setProperty("align-items", "center", "important");
+            const starBtn = labelRow.querySelector(".formula-star-btn");
+            if (starBtn) {
+              starBtn.style.setProperty("margin-left", "auto", "important");
+              starBtn.style.setProperty("flex", "0 0 auto", "important");
+            }
+          }
+        }
+        const valEl = row.querySelector(".param-horizontal-val");
+        if (valEl) {
+          const txt = (valEl.textContent || "").trim();
+          if (txt.startsWith("-") || txt.includes("-")) {
+            valEl.style.setProperty("color", "#ef4444", "important");
+          } else {
+            valEl.style.setProperty("color", "#10b981", "important");
+          }
+        }
+      });
+    }
+
+    // Formula star click handler (Supports click-to-pin formula tooltip)
+    root.querySelectorAll(".formula-star-btn, .formula-star").forEach((star) => {
+      star.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const data = getTooltipData(star);
+        if (!data || !richTip) return;
+
+        const isCurrentlyPinned = richTip._pinnedBtn === star && richTip.classList.contains("is-visible");
+        if (isCurrentlyPinned) {
+          richTip.classList.remove("is-visible", "is-pinned");
+          richTip._pinnedBtn = null;
+          return;
+        }
+
+        const isLight = document.documentElement.getAttribute("data-theme") === "light";
+        richTip.className = isLight ? "theme-light is-visible is-pinned" : "theme-dark is-visible is-pinned";
+        richTip.setAttribute("data-theme", isLight ? "light" : "dark");
+        richTip._pinnedBtn = star;
+
+        richTip.innerHTML = `
+          <div class="rich-tip-header">
+            <span class="rich-tip-icon">📐</span>
+            <span class="rich-tip-title">${data.title || "Formula"}</span>
+          </div>
+          ${data.formula ? `<div class="rich-tip-formula-box"><strong class="rich-tip-formula-label">Formula:</strong> <span class="rich-tip-formula-code">${data.formula}</span></div>` : ""}
+          ${data.desc ? `<div class="rich-tip-desc">${data.desc}</div>` : ""}
+        `;
+
+        const rect = star.getBoundingClientRect();
+        const tipW = richTip.offsetWidth || 340;
+        const tipH = richTip.offsetHeight || 120;
+        let x = rect.right + 12;
+        let y = rect.top;
+        if (x + tipW > window.innerWidth - 10) {
+          x = rect.left - tipW - 12;
+        }
+        if (y + tipH > window.innerHeight - 10) {
+          y = Math.max(10, window.innerHeight - tipH - 12);
+        }
+        richTip.style.left = Math.max(10, x) + "px";
+        richTip.style.top = Math.max(10, y) + "px";
+      });
     });
+
+    const handleDocClick = (e) => {
+      if (richTip && richTip._pinnedBtn && !e.target.closest(".formula-star-btn, #rich-formula-tooltip")) {
+        richTip.classList.remove("is-visible", "is-pinned");
+        richTip._pinnedBtn = null;
+      }
+    };
+    document.addEventListener("click", handleDocClick);
 
     // Rich Formula Hover Tooltips
     let richTip = document.getElementById("rich-formula-tooltip");
@@ -379,7 +508,7 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
     }
 
     function positionTip(e) {
-      if (!richTip) return;
+      if (!richTip || richTip._pinnedBtn) return;
       const pad = 14;
       const tipW = richTip.offsetWidth || 340;
       const tipH = richTip.offsetHeight || 120;
@@ -397,26 +526,47 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
     }
 
     const handleMouseOver = (e) => {
+      if (richTip && richTip._pinnedBtn) return;
       const data = getTooltipData(e.target);
-      if (!data || !richTip) return;
+      if (!data) return;
+
+      const isLight = document.documentElement.getAttribute("data-theme") === "light";
+      richTip.className = isLight ? "theme-light is-visible" : "theme-dark is-visible";
+      richTip.setAttribute("data-theme", isLight ? "light" : "dark");
+
       richTip.innerHTML = `
-        <div class="rich-tip-header"><span>📐</span><span>${data.title || "Formula"}</span></div>
-        ${data.formula ? `<div class="rich-tip-formula-box"><strong>Formula:</strong> ${data.formula}</div>` : ""}
+        <div class="rich-tip-header">
+          <span class="rich-tip-icon">📐</span>
+          <span class="rich-tip-title">${data.title || "Formula"}</span>
+        </div>
+        ${data.formula ? `<div class="rich-tip-formula-box"><strong class="rich-tip-formula-label">Formula:</strong> <span class="rich-tip-formula-code">${data.formula}</span></div>` : ""}
         ${data.desc ? `<div class="rich-tip-desc">${data.desc}</div>` : ""}
       `;
-      richTip.classList.add("is-visible");
       positionTip(e);
     };
 
     const handleMouseMove = (e) => {
-      if (richTip && richTip.classList.contains("is-visible")) {
-        positionTip(e);
+      if (richTip && !richTip._pinnedBtn) {
+        if (!richTip.classList.contains("is-visible")) {
+          handleMouseOver(e);
+        } else {
+          positionTip(e);
+        }
       }
     };
 
     const handleMouseOut = (e) => {
-      const data = getTooltipData(e.target);
-      if (data && richTip) {
+      if (richTip && richTip._pinnedBtn) return;
+      if (
+        e.relatedTarget &&
+        e.relatedTarget.closest &&
+        e.relatedTarget.closest(
+          "[data-formula], [data-metric-key], .param-label, .bar-label, .formula-star-btn"
+        )
+      ) {
+        return;
+      }
+      if (richTip) {
         richTip.classList.remove("is-visible");
       }
     };
@@ -429,7 +579,11 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
       root.removeEventListener("mouseover", handleMouseOver);
       root.removeEventListener("mousemove", handleMouseMove);
       root.removeEventListener("mouseout", handleMouseOut);
-      if (richTip) richTip.classList.remove("is-visible");
+      document.removeEventListener("click", handleDocClick);
+      if (richTip) {
+        richTip.classList.remove("is-visible", "is-pinned");
+        richTip._pinnedBtn = null;
+      }
     };
   }, [htmlContent, onBack]);
 
@@ -537,22 +691,14 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
               {botMeta.marketTag && (
                 <span className="venue-symbol-badge">{botMeta.marketTag}</span>
               )}
-              {botMeta.verdict && (
-                <span
-                  className="verdict-badge"
-                  style={{ background: botMeta.verdictColor || "var(--accent)" }}
-                >
-                  {botMeta.verdict}
-                </span>
-              )}
             </div>
           </div>
 
           {botMeta.snapshotTime ? (
             <div className="report-snapshot-notice">
-              <span className="notice-icon">ℹ️</span>
+              <span className="notice-icon">⏱️</span>
               <span>
-                Snapshot saved at <strong>{botMeta.snapshotTime}</strong>. All quantitative results (OKX order book, 10-dimension risk, 10,000 Monte Carlo simulations) are loaded instantly from the saved snapshot.
+                Analysis time: <strong>{botMeta.snapshotTime}</strong>
               </span>
             </div>
           ) : (

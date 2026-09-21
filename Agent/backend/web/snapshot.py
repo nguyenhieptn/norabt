@@ -25,7 +25,7 @@ are enforced everywhere in this module, not just at the edges:
      a hung/unreachable Redis must fail fast, not hang the page.
 
 DEPLOYMENT CONTEXT this module was written against (see
-`Agent/deploy/docker-compose.yml`/README for the full picture): this
+`Agent/docker/docker-compose.yml`/README for the full picture): this
 connects to `agent-redis`, a Redis instance DEDICATED to this project alone
 (its own `docker-compose.yml` service, not reachable from the host, no
 persistence, 128MB `maxmemory`). It is deliberately NOT the same Redis as
@@ -193,7 +193,7 @@ def _get_client() -> Optional["aioredis.Redis"]:
     failed Redis call: no snapshot, no crash.
 
     This is the one seam tests patch to inject a fake async client (see
-    Agent/test/test_web_app.py's snapshot tests) instead of talking to a
+    Agent/none/test/test_web_app.py's snapshot tests) instead of talking to a
     real Redis server.
     """
     url = _redis_url()

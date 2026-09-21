@@ -20,7 +20,7 @@ from Agent.backend.okx.credentials import OkxCredentials
 # OKX's edge answers a request carrying Python's default urllib User-Agent
 # ("Python-urllib/x.y") with a bare HTTP 403 before any OKX business logic
 # runs -- confirmed by sending the identical request with only this header
-# changed. Matches the value Agent/scripts/crawl_bots.py already sends via
+# changed. Matches the value Agent/none/scripts/crawl_bots.py already sends via
 # curl; the exact string doesn't matter to OKX, only that it isn't the
 # Python default.
 DEFAULT_USER_AGENT = "Mozilla/5.0"

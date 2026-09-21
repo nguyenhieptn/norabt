@@ -45,3 +45,7 @@ dist/
 *id_ed25519*
 *.pem
 *.key
+
+# BMAD
+_bmad/config.user.toml
+_bmad/custom/config.user.toml

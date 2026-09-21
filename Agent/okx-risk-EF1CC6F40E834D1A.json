@@ -1,0 +1,146 @@
+{
+  "generated_at": "2026-09-21T08:16:05Z",
+  "okx": {
+    "agent_id": "13753",
+    "contract_id": "a2free_5795375b1a25496981b654e10690a634",
+    "endpoint": "https://agent.expsolution.io/api/analyze",
+    "status_code": 200
+  },
+  "bot_id": "EF1CC6F40E834D1A",
+  "report": {
+    "code": "EF1CC6F40E834D1A",
+    "confidence": 92.87702265372168,
+    "hidden_risk_flags": [
+      "has never run through a downtrend phase"
+    ],
+    "key_metrics": {
+      "closed_trades": 300,
+      "horizon_stability": "STABLE ACROSS HORIZONS",
+      "inference_reliable": true,
+      "max_drawdown_pct": 0.22618120517238988,
+      "p95_max_drawdown_pct": 0.2132909659603165,
+      "p_loss_after_horizon_pct": 0.0,
+      "p_ruin_pct": 0.0,
+      "probability_of_profit_pct": null,
+      "profit_factor": 41.51916338566713,
+      "roi_pct": null,
+      "simulation_iterations": 10000,
+      "total_pnl": 172313.310969609,
+      "win_rate_pct": 93.33333333333333
+    },
+    "limited_reason": null,
+    "name": "RuiJie",
+    "narrative": "This bot buys into rising price trends and adds to losing positions, exposing capital to severe market reversals. Across 300 closed trades, that trend-following approach achieved a win rate of 93.3%. The profit factor on closed trades is 41.52, meaning gains vastly exceeded losses on positions the bot actually finished. However, the strategy shows signs of holding losers, currently carrying an unrealised loss of 0.9% on open positions. Marking those open positions to market reduces the profit factor to 13.5. The Sharpe ratio reaches 27.2, reflecting smooth returns relative to variability because unprofitable trades stayed open. Simulations across 10,000 scenarios show a 0% probability of ruin, but the simulation sees closed trades only without that open loss. The risk score of 42.4 reflects that real probability of losing capital.\n\nPerformance data shows heavy reliance on rising markets, where volatile uptrends generated 49% of total profit using 18x leverage. Calm uptrends contributed 21% of total profit at 19.8x leverage, further demonstrating that upward bias. The bot has never traded through an extended downtrend, leaving its long-biased stacking behaviour untested in market drops. Closed trades recorded a max drawdown of 0.2%, describing the deepest equity dip experienced during those favourable historical rallies. A longest losing streak of 4 closed trades helped keep recorded dips shallow. That smooth closed history masks the danger of adding to losing trades when crypto trends turn downward.",
+    "quality": 79.1,
+    "report_markdown": "# RuiJie (`EF1CC6F40E834D1A`)\n\n**Verdict: HIDDEN RISK · Risk score: 42.4 · Quality score: 79.1 · Confidence: 92.9**\n\n## Key metrics\n\n| Metric | Value |\n|---|---|\n| Closed trades | 300 |\n| Win rate | 93.3% |\n| Profit factor | 41.52 |\n| Max drawdown | 0.2% |\n| Sharpe ratio | 27.20 |\n\n## Why\n\n- RuiJie — ETH/CEX, 300 closed trades, reference capital 1,024,810 USDT, 5.0 trades/day.\n- WHY THIS HAPPENED: RuiJie currently has a good track record \\(win rate 93%, profit factor 41.52, max drawdown 0.2%\\), but the whole thing was built without a single trade during a downtrend phase. This does not mean the bot will lose on the way down — nobody knows yet — only that there is no basis for saying it can handle exactly the regime it has never faced.\n- EVIDENCE:\n- • Profit factor 41.52 \\(closed book\\) → 13.50 \\(open book closed too\\) — closing the open book would cost 67% of the edge\n- • Unrealised loss 8,837 USDT = 1% of capital, across 10 open positions\n- • Risk score 42 is the weighted average across 10 dimensions; heaviest: Market alignment 80, Trading behaviour 66\n- • Monte Carlo 10,000 scenarios × 300 trades: median +16.7% of capital, p05 +13.4%, worst +9.0%\n- • Simulated tail risk: worst 5% tail still profit 12.6%, probability of loss 0%\n- • Never tested on the way down — no trades during a downtrend phase\n- CONCLUSION: HIDDEN RISK — quality 79/100, risk 42/100. Simulated P95 drawdown 0%, a watch zone. Whether to withdraw or hold is your call. Condition to revisit: the bot runs through a downtrend phase and holds its result.\n\n## Simulation\n\nSimulated scenarios: 10000, horizon 300 trades\nSimulated profit percentile (P05 / P50 / P95): 13.4% / 16.7% / 20.4%\nProbability of ruin (p_ruin): 0.0%\nMedian simulated max drawdown: 0.2%\n\n---\nData source: OKX copy-trading public order book, scored automatically by the norabt system.\nSimulated scenarios: 10000.\nReport generated at: 2026-09-21T08:16:05+00:00.\n\n*This is an automated risk assessment based on OKX's public data, NOT investment advice. The reader is solely responsible for their own decisions.*\n\nView the full visual detail (charts, complete metrics, per-item evidence): https://agent.expsolution.io/ev3gupmixp_EF1CC6F40E834D1A",
+    "report_url": "https://agent.expsolution.io/ev3gupmixp_EF1CC6F40E834D1A",
+    "risk": 42.38220612327172,
+    "schema": "bot_assessment_summary.v1",
+    "score_decided_by": "WEIGHTED_AVERAGE",
+    "scored_at_ms": 1789838267895,
+    "status": "FULL",
+    "strategy_profile": {
+      "behavioral_risk_tier": "CRITICAL",
+      "best_phase": "UPTREND_VOLATILE",
+      "directional_bias": "LONG_TILTED",
+      "entry_style": "TREND_FOLLOWING",
+      "observed_profile": "Grid/Martingale-like",
+      "phase_breakdown": [
+        {
+          "average_leverage": 10.0,
+          "expectancy": 2341.9930729077423,
+          "long_share_pct": 100.0,
+          "median_hold_minutes": 5643.9212333333335,
+          "phase": "DOWNTREND_CALM",
+          "profit_share_pct": 2.6528252973975146,
+          "total_pnl": 4683.986145815485,
+          "trades": 2,
+          "win_rate": 100.0
+        },
+        {
+          "average_leverage": 40.0,
+          "expectancy": 418.94611749066667,
+          "long_share_pct": 100.0,
+          "median_hold_minutes": 12.754666666666667,
+          "phase": "DOWNTREND_VOLATILE",
+          "profit_share_pct": 0.7118237484873378,
+          "total_pnl": 1256.838352472,
+          "trades": 3,
+          "win_rate": 100.0
+        },
+        {
+          "average_leverage": 24.0,
+          "expectancy": 1331.812576977338,
+          "long_share_pct": 100.0,
+          "median_hold_minutes": 1193.0635833333333,
+          "phase": "RANGE_CALM",
+          "profit_share_pct": 11.31429295138067,
+          "total_pnl": 19977.18865466007,
+          "trades": 15,
+          "win_rate": 100.0
+        },
+        {
+          "average_leverage": 20.0,
+          "expectancy": 387.52044555875,
+          "long_share_pct": 100.0,
+          "median_hold_minutes": 33.34315,
+          "phase": "RANGE_VOLATILE",
+          "profit_share_pct": 2.1947631979129794,
+          "total_pnl": 3875.2044555875,
+          "trades": 10,
+          "win_rate": 100.0
+        },
+        {
+          "average_leverage": 19.759036144578314,
+          "expectancy": 449.17856889227505,
+          "long_share_pct": 97.59036144578313,
+          "median_hold_minutes": 356.52203333333335,
+          "phase": "UPTREND_CALM",
+          "profit_share_pct": 21.192753927224217,
+          "total_pnl": 37281.82121805883,
+          "trades": 83,
+          "win_rate": 95.18072289156626
+        },
+        {
+          "average_leverage": 17.975,
+          "expectancy": 690.4478981886706,
+          "long_share_pct": 85.83333333333333,
+          "median_hold_minutes": 421.9118666666667,
+          "phase": "UPTREND_VOLATILE",
+          "profit_share_pct": 49.15705847966192,
+          "total_pnl": 82853.74778264046,
+          "trades": 120,
+          "win_rate": 89.16666666666667
+        }
+      ],
+      "phase_coverage_pct": 77.66666666666666,
+      "tested_in_downtrend": false,
+      "untested_phases": [],
+      "worst_phase": "RANGE_VOLATILE"
+    },
+    "text": [
+      "RuiJie — ETH/CEX, 300 closed trades, reference capital 1,024,810 USDT, 5.0 trades/day.",
+      "WHY THIS HAPPENED: RuiJie currently has a good track record (win rate 93%, profit factor 41.52, max drawdown 0.2%), but the whole thing was built without a single trade during a downtrend phase. This does not mean the bot will lose on the way down — nobody knows yet — only that there is no basis for saying it can handle exactly the regime it has never faced.",
+      "EVIDENCE:",
+      "• Profit factor 41.52 (closed book) → 13.50 (open book closed too) — closing the open book would cost 67% of the edge",
+      "• Unrealised loss 8,837 USDT = 1% of capital, across 10 open positions",
+      "• Risk score 42 is the weighted average across 10 dimensions; heaviest: Market alignment 80, Trading behaviour 66",
+      "• Monte Carlo 10,000 scenarios × 300 trades: median +16.7% of capital, p05 +13.4%, worst +9.0%",
+      "• Simulated tail risk: worst 5% tail still profit 12.6%, probability of loss 0%",
+      "• Never tested on the way down — no trades during a downtrend phase",
+      "CONCLUSION: HIDDEN RISK — quality 79/100, risk 42/100. Simulated P95 drawdown 0%, a watch zone. Whether to withdraw or hold is your call. Condition to revisit: the bot runs through a downtrend phase and holds its result.",
+      "View the full visual detail (charts, complete metrics, per-item evidence): https://agent.expsolution.io/ev3gupmixp_EF1CC6F40E834D1A"
+    ],
+    "traded_symbol": "ETH",
+    "unavailable": [],
+    "usage_contract_id": "ev3gupmixp",
+    "verdict": "HIDDEN RISK",
+    "verdict_basis": "Method: 10,000 scenarios simulated with a stationary bootstrap (Politis and Romano, 1994) on the closed trades of the bot itself — this preserves the autocorrelation of the sequence and assumes no normal distribution. Tail risk is measured with VaR at the 95% level and CVaR (expected shortfall). Sharpe quality is measured with the Probabilistic Sharpe Ratio and the Deflated Sharpe Ratio (Bailey and López de Prado, 2012 and 2014) — which strip out the edge that appears by luck alone when many candidates are screened — together with the Minimum Track Record Length, which states how many trades are needed before a Sharpe ratio means anything. Out-of-sample validation on 36 bots: the Spearman rank correlation between the risk score and later drawdown is 0.64 (95% confidence interval [0.39–0.80]). This score does NOT predict profit or loss — the confidence interval for its correlation with return contains zero.",
+    "verdict_reason": "Risk that has not yet shown up in the surface numbers. The published result has not been marked to market -- meaning the unrealised loss on open positions is not yet counted in -- or the order book has not been through enough market cycles to be tested. In that case neither the drawdown probability nor the quality score is trustworthy yet. Specifically: has never run through a downtrend phase.",
+    "veto_reasons": [],
+    "warnings": [
+      "This scored data is more than 24 hours old -- it may not reflect the bot's latest trading state."
+    ]
+  },
+  "detail_url": "https://agent.expsolution.io/ev3gupmixp_EF1CC6F40E834D1A"
+}

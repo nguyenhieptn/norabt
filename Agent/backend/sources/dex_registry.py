@@ -1,7 +1,7 @@
 """Static lookup table for the 5 DEX assets LiveMarketDataSource can serve.
 
-Why this exists: `Agent/scripts/crawl_pool_liquidity.py`'s live equivalent
-(`crawl_pool_liquidity()` in `Agent/scripts/crawl_market_data.py`) reads the
+Why this exists: `Agent/none/scripts/crawl_pool_liquidity.py`'s live equivalent
+(`crawl_pool_liquidity()` in `Agent/none/scripts/crawl_market_data.py`) reads the
 token contract address it needs from *the crawl's own previous output*
 (`existing["base_token"]["address"]` in `pool_liquidity.json`) -- there is no
 way to derive an ERC-20/SPL contract address from an asset's ticker the way
@@ -14,7 +14,7 @@ deliberate, safe choice rather than a shortcut: a token's on-chain contract
 address is an immutable constant of the token itself (redeploying PEPE at a
 new address would mean it is a different token), exactly the same category of
 fact this project already hardcodes elsewhere for a fixed, small universe
-(e.g. `_CT_VALS` in Agent/test/test_market_source.py stands in for OKX's own
+(e.g. `_CT_VALS` in Agent/none/test/test_market_source.py stands in for OKX's own
 per-instrument `ctVal` table in tests -- a fixed physical/contractual fact
 about the instrument, safe to pin down for a known, closed set of assets).
 DEX_ASSETS in crawl_market_data.py is exactly such a closed set: 5 named
@@ -72,7 +72,7 @@ class DexAssetInfo:
 
 
 # Source for every field: see module docstring above. One entry per asset in
-# `Agent/scripts/crawl_market_data.py::DEX_ASSETS`.
+# `Agent/none/scripts/crawl_market_data.py::DEX_ASSETS`.
 DEX_ASSET_REGISTRY: Dict[str, DexAssetInfo] = {
     "PEPE": DexAssetInfo(
         chain="ETHEREUM",

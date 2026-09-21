@@ -49,7 +49,7 @@ evidence either way" -- which would let a bot that hides its ledger end up
 looking as good as, or better than, an equally-performing bot that publishes
 one. That is the one outcome this module must never produce (see
 `test_limited_bot_never_scores_better_than_an_equivalent_transparent_bot` in
-Agent/test/test_limited_assessment.py). So every dimension this module
+Agent/none/test/test_limited_assessment.py). So every dimension this module
 cannot compute is scored as an ELEVATED risk contributor with zero
 confidence (see _OPACITY_RISK_SCORE below), never a neutral 50 and never
 weight-0 -- "unknown pushes risk up," not "unknown falls back to safe."
@@ -117,7 +117,7 @@ _STABILITY_WEIGHT = 1.0
 # reach the confidence a FULL one can -- it has zero trade-level evidence by
 # construction. This hard ceiling makes that true regardless of how the
 # weighted components below land (see the "same surface stats" test in
-# Agent/test/test_limited_assessment.py, which checks this against a real
+# Agent/none/test/test_limited_assessment.py, which checks this against a real
 # QCCoreService.assess_bot confidence for a comparably clean bot).
 LIMITED_CONFIDENCE_CEILING = 40.0
 
@@ -991,7 +991,7 @@ def assess_limited_bot(
     one or two.
 
     Returns the plain-dict contract other layers depend on (see module
-    docstring and Agent/test/test_limited_assessment.py): status/code/name/
+    docstring and Agent/none/test/test_limited_assessment.py): status/code/name/
     limited_reason/unavailable/verdict/risk/quality/confidence/evidence/mc/
     text. Never raises for the inputs above being None/empty -- absence is
     exactly the case this function exists to describe, not fail on.

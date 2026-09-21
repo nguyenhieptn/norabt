@@ -18,6 +18,6 @@ numpy>=1.26,<3
 # which needs redis-py>=4.2; installed environment runs 8.x.
 redis>=5.0,<9
 
-# Test suite (Agent/test/): not imported by application code, needed to run
-# `pytest Agent/test`.
+# Test suite (Agent/none/test/): not imported by application code, needed to run
+# `pytest Agent/none/test`.
 pytest>=8.0,<9

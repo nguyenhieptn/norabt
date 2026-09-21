@@ -78,7 +78,7 @@ class PhaseTimeline:
     def phases_present(self, since_ms: Optional[int] = None) -> Dict[MarketPhase, int]:
         """How many hours of each phase the market itself went through."""
         counts: Dict[MarketPhase, int] = {}
-        for ts, phase in zip(self.timestamps, self.phases):
+        for ts, phase in zip(self.timestamps, self.phases, strict=False):
             if since_ms is not None and ts < since_ms:
                 continue
             if phase is MarketPhase.UNKNOWN:

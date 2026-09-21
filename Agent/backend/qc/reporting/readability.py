@@ -20,7 +20,7 @@ giới từ hoạt động khác hẳn), nên trước đây không thể đo.
 Hai công thức là CỐ ĐỊNH, không có gì để tinh chỉnh. Thứ duy nhất phải tự
 cài -- và do đó là thứ duy nhất có thể sai -- là bộ đếm âm tiết. Nên nó được
 kiểm riêng trên một danh sách từ có số âm tiết theo từ điển
-(`Agent/test/test_readability.py`), trong đó cố ý gồm các từ tài chính mà
+(`Agent/none/test/test_readability.py`), trong đó cố ý gồm các từ tài chính mà
 chính báo cáo này dùng liên tục (drawdown, leverage, volatility, portfolio,
 ratio, position, simulation...). Đo được ở lần hiệu chỉnh cuối: 41/41.
 

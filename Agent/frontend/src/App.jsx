@@ -32,6 +32,21 @@ function AppHeader() {
   const { session, logout, adminOpenAccess } = useSession();
   const navigate = useNavigate();
 
+  React.useEffect(() => {
+    if (currentTab === "overview") {
+      document.title = "Nora - Risk Management";
+    } else if (currentTab === "bots") {
+      document.title = "Nora - Bot List";
+    } else if (currentTab === "analyze") {
+      document.title = "Nora - Analyze Bot";
+    } else if (currentTab === "bot") {
+      const code = searchParams.get("code") || "";
+      document.title = code ? `Nora - Risk Management · ${code}` : "Nora - Risk Management";
+    } else {
+      document.title = "Nora - Risk Management";
+    }
+  }, [currentTab, searchParams]);
+
   const roleLabel = session
     ? session.role === "admin"
       ? "Admin"

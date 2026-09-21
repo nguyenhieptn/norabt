@@ -591,7 +591,7 @@ def persist(
                 "verdict": khuyen_nghi["verdict"],
                 "quality_score": khuyen_nghi["quality_score"],
                 "risk_score": khuyen_nghi["risk_score"],
-                "file": str(path),
+                "file": _index_relative_path(path, data_dir),
             }
         )
 
@@ -605,12 +605,24 @@ def persist(
     # sau một cú bấm nút, khách gọi qua marketplace chỉ còn thấy 1 trong 31
     # bot. Hàng cũ chỉ được giữ khi file của nó CÒN trên đĩa, để một bot đã
     # bị xoá không sống sót mãi trong index.
+    #
+    # Tính "còn trên đĩa" bằng MÃ BOT quét từ chính cây thư mục, KHÔNG bằng
+    # đường dẫn lưu trong hàng. Bản trước tin vào `row["file"]` và nó là
+    # đường dẫn TUYỆT ĐỐI: hàng do lượt chạy trên host ghi mang
+    # `/home/ubuntu/norabt/...`, nhưng phép hợp nhất chạy TRONG CONTAINER
+    # thấy đường đó không tồn tại nên loại sạch 30 hàng, cắt index xuống
+    # còn 1 -- đúng con bug mà chính khối hợp nhất này sinh ra để chặn,
+    # chỉ là tái xuất ở một môi trường khác. Mã bot thì giống nhau ở mọi
+    # nơi.
+    codes_on_disk = {
+        path.parent.name.rpartition("__")[2]
+        for path in root.glob("*/*/bot/*/assessment.json")
+    }
     merged: Dict[str, Dict[str, Any]] = {}
     existing = _read_index_rows(root / "index.json")
     for row in existing:
         code = str(row.get("unique_code") or "")
-        file_path = row.get("file")
-        if not code or not file_path or not Path(str(file_path)).exists():
+        if not code or code not in codes_on_disk:
             continue
         merged[code] = row
     for row in summary:
@@ -638,6 +650,21 @@ def persist(
     return written
 
 
+
+def _index_relative_path(path: Path, data_dir: Path) -> str:
+    """Đường dẫn ghi vào `index.json`, TƯƠNG ĐỐI so với `data_dir`.
+
+    Tuyệt đối thì index không dùng chung được giữa host và container: cùng
+    một file mang hai tên (`/home/ubuntu/norabt/Agent/data/...` và
+    `/app/Agent/data/...`), nên bất cứ ai đọc index ở môi trường khác nơi
+    ghi nó đều thấy đường dẫn trỏ vào hư không.
+    """
+    try:
+        return str(Path(path).relative_to(Path(data_dir)))
+    except ValueError:
+        return str(path)
+
+
 def _read_index_rows(path: Path) -> List[Dict[str, Any]]:
     """Các hàng trong `index.json` đang có, `[]` khi thiếu hoặc không đọc nổi.
 
@@ -658,7 +685,7 @@ def _read_index_rows(path: Path) -> List[Dict[str, Any]]:
 
 # Thứ tự mức rủi ro dùng để xếp hạng. BẢN SAO CÓ CHỦ Ý của `TIER_ORDER`
 # trong `cohort.py`: import ngược từ đây sang đó tạo vòng import (cohort
-# đã import module này). Hai bảng phải khớp; `Agent/test/test_assessment_
+# đã import module này). Hai bảng phải khớp; `Agent/none/test/test_assessment_
 # store.py` khoá bằng cách so trực tiếp với bản gốc, nên lệch là đỏ ngay.
 _RANK_TIER_ORDER = {
     "EMERGENCY": 0,
@@ -749,7 +776,7 @@ def rebuild_index(data_dir: Path, *, write: bool = True) -> Dict[str, Any]:
                 "verdict": rec.get("verdict"),
                 "quality_score": rec.get("quality_score"),
                 "risk_score": rec.get("risk_score"),
-                "file": str(path),
+                "file": _index_relative_path(path, data_dir),
             }
         )
     rows.sort(key=lambda r: str(r.get("unique_code") or ""))

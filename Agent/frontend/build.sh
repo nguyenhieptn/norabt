@@ -2,7 +2,7 @@
 # Agent/frontend/build.sh -- the ONLY sanctioned way to build this SPA.
 #
 # WHY THIS SCRIPT EXISTS INSTEAD OF JUST "npm run build": this host runs 15
-# OTHER production sites (see Agent/deploy/README.md's own resource-limit
+# OTHER production sites (see Agent/docker/README.md's own resource-limit
 # section) under a hard project-wide ceiling of <=12 cores / <=14GB RAM. A
 # bare `npm run build` lets Vite's esbuild/rollup pipeline use every core
 # and however much heap it wants -- on this box that risks starving the
@@ -36,9 +36,9 @@ taskset -c 0-3 env NODE_OPTIONS=--max-old-space-size=2560 npm run build
 # dùng tải bằng `curl -fsSL https://<domain>/assets/run.sh | bash` -- phải được
 # đặt lại sau mỗi lần build. Không có bước này thì đường dẫn đó âm thầm thành
 # 404 và không ai biết cho tới khi có người thật thử chạy.
-# Nguồn duy nhất là Agent/deploy/okx-run.sh; chỗ này chỉ sao chép.
-_SRC="$_HERE/../deploy/okx-run.sh"
-_DST="$_HERE/../web/dist/assets/run.sh"
+# Nguồn duy nhất là Agent/docker/okx-run.sh; chỗ này chỉ sao chép.
+_SRC="$_HERE/../docker/okx-run.sh"
+_DST="$_HERE/dist/assets/run.sh"
 if [ -f "$_SRC" ]; then
     install -m 0644 "$_SRC" "$_DST"
     echo "đã đặt lại $_DST"

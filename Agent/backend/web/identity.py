@@ -267,7 +267,7 @@ class ProfileStoreError(RuntimeError):
     """Raised by `get_or_create_profile`/`record_analysis` below when the
     on-disk profile store cannot be written to for an OPERATIONAL reason --
     a read-only filesystem, a full disk, or wrong permissions on
-    `users_root`. See `Agent/deploy/docker-compose.yml`'s mount comment for
+    `users_root`. See `Agent/docker/docker-compose.yml`'s mount comment for
     the concrete incident this guards against: `Agent/data` is bind-mounted
     read-only except for a couple of writable sub-paths, and a
     misconfigured or not-yet-created `data/users/` on the host reproduces

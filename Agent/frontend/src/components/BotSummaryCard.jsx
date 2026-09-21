@@ -2,7 +2,7 @@ import React from "react";
 
 // Semantic colors for a per-asset trading state (task's "danh sách tài sản
 // kèm trạng thái"). Reuses the SAME shared verdict tokens
-// (Agent/web/tokens.css) an asset-state color would otherwise duplicate --
+// (Agent/frontend/tokens.css) an asset-state color would otherwise duplicate --
 // there is no dedicated "--asset-state-*" token because the task's design-
 // token scope is specifically the 4-tier verdict classification, and these
 // three states map onto that same green/red/grey semantic directly (see

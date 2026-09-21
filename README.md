@@ -1,228 +1,271 @@
-# DCA Backtest Ecosystem (`norabt`)
+# NoraBT — AI-Native Quantitative Risk Supervisor & Copier Guard on OKX
 
-Hệ thống kiểm thử chiến lược giao dịch tự động (Backtest), tối ưu hóa tham số (Parameter Optimization) và Giám sát dữ liệu thị trường Crypto (Market Data Monitoring & Analysis) đa tầng.
-
-Dự án kết hợp kiến trúc **Laravel (PHP)** cho hệ thống quản lý/điều hành web, **Django/Python** cho động cơ mô phỏng backtest & tính toán chỉ báo thị trường, cùng kiến trúc **Phân tán (Distributed Cluster)** hỗ trợ tính toán song song trên nhiều node worker.
-
-> 📌 **Tài liệu Hướng dẫn Cài đặt Chi tiết**: Vui lòng tham khảo file [`SETUP.md`](file:///Users/nevir/Desktop/DCA_backtest/SETUP.md) để xem đầy đủ các bước setup môi trường, cấu hình Nginx, cài đặt PHP 7.2 extensions, khôi phục MySQL DB, và khởi chạy PM2 services.
-
----
-
-## 📋 Mục lục
-
-- [1. Tổng quan hệ thống (Architecture Overview)](#1-tổng-quan-hệ-thống-architecture-overview)
-- [2. Sơ đồ kiến trúc (System Diagram)](#2-sơ-đồ-kiến-trúc-system-diagram)
-- [3. Cấu trúc và Chi tiết các Thành phần chính](#3-cấu-trúc-và-chi-tiết-các-thành-phần-chính)
-  - [3.1. `coins/` - Laravel Web Portal & Cron Scheduler](#31-coins---laravel-web-portal--cron-scheduler)
-  - [3.2. `coin_service/` - Động cơ Phoenix Backtest & Distributed Parameter Optimizer](#32-coin_service---động-cơ-phoenix-backtest--distributed-parameter-optimizer)
-  - [3.3. `coin_monitor/` - Data Ingestion, Monitoring Agent & React Dashboard](#33-coin_monitor---data-ingestion-monitoring-agent--react-dashboard)
-  - [3.4. Root Config & Utility Scripts (`lab.yml`, `test.py`)](#34-root-config--utility-scripts-labyml-testpy)
-- [4. Kiến trúc Dữ liệu (Database Architecture)](#4-kiến-trúc-dữ-liệu-database-architecture)
-- [5. Hướng dẫn Cài đặt & Vận hành (Setup & Usage Summary)](#5-hướng-dẫn-cài-đặt--vận-hành-setup--usage-summary)
-  - [5.1. Tóm tắt các bước Setup](#51-tóm-tắt-các-bước-setup)
-  - [5.2. Khởi chạy Services & PM2 Cluster](#52-khởi-chạy-services--pm2-cluster)
-- [6. Tổng kết](#6-tổng-kết)
+> **Track:** OKX AI — Agents & AI-Native Businesses  
+> **Live Web App:** `http://localhost:8770` (hoặc Nginx / OKX AI Agent Gateway)  
+> **MCP Server Protocol:** JSON-RPC 2.0 trên cổng `8000` (FastMCP / Model Context Protocol)  
+> **Documentation Root:** [Agent/docs/readme.md](file:///home/ubuntu/norabt/Agent/docs/readme.md)  
+> **BMAD Master Index:** [SPEC-00: Specification Index](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/00_overview/SPEC-00_SPECIFICATION_INDEX.md) & [STORY-00: Progression Status](file:///home/ubuntu/norabt/Agent/docs/bmad/story/00_overview/STORY-00_SYSTEM_PROGRESSION_AND_STATUS.md)  
+> **End-to-End Verification:** `17/17 ĐẠT` ([Agent/none/scripts/acceptance_check.py](file:///home/ubuntu/norabt/Agent/none/scripts/acceptance_check.py))  
 
 ---
 
-## 1. Tổng quan hệ thống (Architecture Overview)
+## 1. Executive Summary & Value Proposition
 
-Dự án `DCA_backtest` (tên mã: `norabt` / `Phoenix`) được thiết kế nhằm giải quyết các bài toán lớn trong giao dịch định lượng (Quantitative Trading) và DCA (Dollar-Cost Averaging) tiền điện tử:
+### Problem Statement (Vấn đề)
+Thị trường Copy-trading (CEX) và giao dịch Onchain (DEX) trên OKX đang đối mặt với những vấn đề nghiêm trọng:
+1. **Nhiễu loạn PnL danh nghĩa & Ẩn giấu Drawdown:** Các lead trader thường che giấu rủi ro bằng cách chốt lời non các lệnh xanh để có tỷ lệ thắng danh nghĩa cao (90%+), trong khi cố tình om các vị thế lỗ thả nổi (floating drawdown) mà không đặt Stop-Loss.
+2. **Bẫy Martingale / DCA nhồi lệnh liều lĩnh:** Khi thị trường đi ngược xu hướng, bot tự động nhân đôi khối lượng vị thế để gỡ lỗ. Khi gặp cú sốc thanh khoản (Flash Crash / Thiên nga đen), toàn bộ tài khoản của người sao chép (Copier) bị thanh lý cưỡng bức (cháy tài khoản).
+3. **Thiếu hạ tầng đánh giá rủi ro độc lập cho AI Agents:** Trong hệ sinh thái OKX AI Marketplace, chưa có một AI Agent chuyên biệt đóng vai trò là **Giám sát viên Rủi ro Định lượng (Quantitative Risk Auditor)** có khả năng bóc tách sổ lệnh theo chuẩn FIFO, chạy mô phỏng ngẫu nhiên 10.000 kịch bản và cung cấp nhận định chuyên môn không thiên vị.
 
-1. **Crawl & Thu thập Dữ liệu Nến (Kline/Tick Data)**: Tải và lưu trữ hàng triệu dữ liệu nến 1 phút (1m), 1 giây (1s), Orderbook depth, và AggTrades từ Binance (Spot & Futures) vào MongoDB.
-2. **Quản lý Chiến dịch & Chiến lược (Campaign & Strategy Management)**: Cung cấp giao diện Web UI (Laravel + React) cho phép tạo lập tài khoản mô phỏng, thiết lập tham số chiến dịch (Leverage, Margin, Phase DCA, Step Profit, Trailing Stop, Stop Loss, Take Profit).
-3. **Động cơ Mô phỏng Backtest (Phoenix Engine)**: Chạy backtest trên chuỗi dữ liệu lịch sử nến 1m/multi-timeframe, tính toán PnL, slippage, drawdown, cân bằng ký quỹ thực tế.
-4. **Tối ưu hóa Tham số Phân tán (Distributed Parameter Optimization Grid-Search)**: Sinh ma trận tham số (INPUT, SETS, EXPRESSIONS), tự động phân phối các bài toán tối ưu qua Socket.IO / Redis PubSub tới danh sách các Worker Node (phân tán CPU đa nhân).
-5. **Giám sát Hạ tầng & Telegram Alerts**: Tự động đo lường hiệu năng máy chủ (CPU, RAM, Disk), theo dõi các tiến trình crawl/backtest, và cảnh báo tức thời qua Telegram Bot.
+### Our Solution (Giải pháp)
+**NoraBT (Nora Bot Tracker & Supervisor)** là một **AI-Native Risk Supervisor & Copier Guard Agent** vận hành tự chủ:
+- **Tái cấu trúc sổ lệnh FIFO:** Nạp dữ liệu lệnh thực tế từ OKX CEX/DEX, ghép cặp mua/bán chuẩn xác, bóc tách triệt để các vị thế đang gồng lỗ và chuỗi PnL ròng.
+- **10 Lăng kính rủi ro lượng hóa (10 Quantitative Risk Lenses):** Đánh giá đa chiều về Drawdown, Fat-tail VaR/CVaR 95%, Đòn bẩy hiệu dụng, Rủi ro thanh khoản & trượt giá, Bẫy hành vi Martingale, Sự suy thoái chiến lược (Strategy Drift), và Sự đồng thuận xu hướng với BTC (Market Alignment).
+- **Mô phỏng Monte Carlo Stationary Bootstrap 10.000 kịch bản:** Tái lập 10.000 kịch bản tương lai theo phương pháp Politis & Romano (1994), kết hợp kiểm định **Deflated Sharpe Ratio (DSR)** và **Minimum Track Record Length (MinTRL)** của GS. Marcos López de Prado để triệt tiêu may mắn ngẫu nhiên.
+- **Cơ chế 6 Tiêu chuẩn Veto An toàn Cứng (Hard Safety Veto):** Lập tức phát cờ đỏ và khuyến nghị rút vốn nếu bot vi phạm các ngưỡng sinh tồn.
+- **Tổng hợp nhận định chuyên môn (Narrative Synthesizer):** Sử dụng LLM `agy/gemini-3.8-flash-medium` với cấu trúc lập luận 3 tầng (Kết luận → Nguyên nhân → Bằng chứng thực nghiệm `◆`), vượt qua 5 cổng kiểm duyệt khắt khe (Flesch-Kincaid grade 10–14, cấm từ AI, khóa số liệu).
+- **Giao diện đẳng cấp (Elite UI):** Thiết kế **70% OKX AI Fintech + 30% Neo-Brutalism** trên bảng màu Deep Slate Obsidian (`#0B0F19`), hỗ trợ cả React SPA và báo cáo kết xuất máy chủ.
+
+### Business Model (Mô hình kinh doanh AI-native)
+NoraBT xây dựng mô hình kinh tế đại lý AI (Agent Economy) qua giao thức **x402 (HTTP 402 Payment Required)**:
+- **Phí vi mô x402 trên X Layer (USDC):**
+  - Tra cứu danh sách bot đã thẩm định (`list_assessed_bots`): **$0.001 USDC**
+  - Truy vấn hồ sơ phân tích chi tiết (`get_assessment`): **$0.002 USDC** (Redis cache < 50ms)
+  - Yêu cầu cào dữ liệu mới & chạy 10.000 kịch bản Monte Carlo (`assess_bot`): **$0.050 USDC**
+- **B2B Risk-as-a-Service cho Quỹ & Copier:** Gói subscription giám sát danh mục tự động cảnh báo real-time qua Webhook/Telegram khi bot đang sao chép bắt đầu có dấu hiệu om lệnh hoặc vi phạm Veto.
 
 ---
 
-## 2. Sơ đồ kiến trúc (System Diagram)
+## 2. System Architecture & Agent Workflow
 
-```mermaid
-graph TD
-    subgraph Data Layer Databases
-        DB_MYSQL[(MySQL: coin_db / coin_lab / Year Partitions)]
-        DB_MONGO[(MongoDB: raw_kline1m_future / backtest_data / nora_monitor)]
-        DB_REDIS[(Redis: Pub/Sub & Caching)]
-    end
+### Sơ đồ kiến trúc (System Flow)
 
-    subgraph 1. Data Verification & Crawlers
-        TEST_PY[test.py / verify_data] --> DB_MONGO
-        CRON[coins/coins & Artisan Crawlers] -->|Crawl 1m Klines & Sentiment| DB_MONGO
-    end
-
-    subgraph 2. Control Portal: coins/ Laravel 5.5
-        WEB_UI[React SPA / Admin & Lab Dashboard] --> REST_PHP[Laravel Controllers & Models]
-        REST_PHP --> DB_MYSQL
-        REST_PHP --> DB_MONGO
-        ARTISAN[Artisan CLI: lab_run, lab_schedule] --> DB_MYSQL
-    end
-
-    subgraph 3. Microservice Cluster: coin_service/ Phoenix
-        LAB_SERVER[lab_server: Socket.IO Hub - Port 5000] <--> DB_REDIS
-        LAB_CLIENT[lab_client: Worker Node Daemon] <--> LAB_SERVER
-        OPT_ENGINE[Optimization Engine: Multi-processing Grid Search] --> LAB_CLIENT
-        PHOENIX[Phoenix Engine: AccountImp & CampaignImp] --> OPT_ENGINE
-        PHOENIX <--> DB_MONGO
-        PHOENIX --> DB_MYSQL
-    end
-
-    subgraph 4. Analytics & Monitoring: coin_monitor/ Django
-        DATA_PROC[Data Processors: Kline, BUSD, MACD] --> DB_MONGO
-        MONITOR_AGENT[Agent: scrape_info, scraper_process] -->|PSUtil Metrics| DB_MONGO
-        MONITOR_AGENT -->|Telegram Alert| TELEGRAM[Telegram Bot]
-        DJANGO_API[Client API Gateway: /api/controller/method] --> REACT_DASHBOARD[React Frontend Dashboard]
-        DJANGO_API --> DB_MYSQL
-    end
+```text
+[OKX Copier / Trader / AI Agent / Web Client]
+                       │
+                       ▼
+            ┌─────────────────────┐
+            │   NoraBT MCP / API  │ ◄───► [Redis Snapshot Cache (<50ms)]
+            │  (FastMCP Port 8000)│ ◄───► [Assessment Store (index.json)]
+            └──────────┬──────────┘
+                       │
+                       ▼
+      ┌─────────────────────────────────┐
+      │     Agent Supervisory Core      │ ◄───► [LLM: agy / Gemini 3.8 Flash]
+      │  (ReAct Planner & 5 DoD Gates)  │       (5 Cổng kiểm duyệt nhận định)
+      └────────────────┬────────────────┘
+                       │
+ ┌─────────────────────┴────────────────────────────────────┐
+ │                     Tool Execution Layer                 │
+ ├────────────────────────────┬─────────────────────────────┤
+ │     Hạ tầng OKX / Web3     │      Động cơ Lượng hóa QC   │
+ │  - OKX Public Market API   │  - FIFO Ledger Reconstruction│
+ │  - OKX Swap / Orderbook L2 │  - 10 Independent Risk Lenses│
+ │  - OKX DEX Onchain Pools   │  - 10.000 Monte Carlo Sim    │
+ │  - X Layer Micro-pay (x402)│  - 6 Hard Safety Veto Rules  │
+ └────────────────────────────┴─────────────────────────────┘
+                       │
+                       ▼
+       [Hồ sơ Thẩm định Độc lập: JSON v3 / React SPA / Server HTML]
 ```
 
----
+### Chi tiết thiết kế Agent (Technical Blueprint)
 
-## 3. Cấu trúc và Chi tiết các Thành phần chính
-
-### 3.1. `coins/` - Laravel Web Portal & Cron Scheduler
-
-`coins/` là ứng dụng xây dựng trên **Laravel 5.5 (PHP 7.2)**, đóng vai trò là trung tâm điều hành, quản lý database, cấu hình chiến dịch backtest và giao diện quản trị viên.
-
-#### Thư mục & Thành phần chính:
-- **`coins/config/database.php`**: Cấu hình kết nối lai (Hybrid Database):
-  - **MySQL Partitioning**: Phân vùng database theo năm (`coin_lab_2017` đến `coin_lab_2021`, `coin_lab_future_*`) giúp xử lý dữ liệu giao dịch khổng lồ mà không bị nỗ nghẽn bảng.
-  - **MongoDB Integration** (`jenssegers/mongodb`): Kết nối các collection `raw_kline1m_future`, `backtest_data_1m`, `ftx_backtest_data`.
-  - **Redis**: Cấu hình cache và Message Queue.
-- **`coins/coins`**: Script Crontab hệ thống định kỳ gọi các lệnh Artisan:
-  - `coin_list`, `coin_history`: Cập nhật danh sách đồng coin và lịch sử giá.
-  - `coin_fear`: Thu thập chỉ số Fear & Greed Index từ thị trường.
-  - `coin_transaction`, `coin_telegram`, `coin_twitter`: Crawl dữ liệu mạng xã hội và giao dịch lớn.
-- **`coins/app/Console/Commands/`** (48 Artisan Commands):
-  - `Lab_run.php` (`php artisan lab_run {campaign}`): Khởi chạy mô phỏng chiến dịch backtest.
-  - `Lab_schedule.php`, `Lab_opt_schedule.php`: Lên lịch tự động hóa backtest và tối ưu hóa tham số.
-  - `Crawler_candle24h.php`, `Crawler_price_1s.php`: Crawl nến 24h và tick giá 1s.
-  - `Telegram_send.php`, `Order_alert.php`: Gửi thông báo Telegram khi phát sinh lệnh.
-- **`coins/routes/web.php` & `api.php`**: Cung cấp đường dẫn UI cho trang quản trị (`/admin`) và không gian làm việc mô phỏng chiến dịch (`/lab`).
+* **Agent Framework:** FastMCP Server (JSON-RPC 2.0) kết hợp Autonomous Supervisory Pipeline hướng sự kiện (`Agent/backend/pipeline.py`, `Agent/backend/agent_server.py`).
+* **LLM Engine:** `agy` / `gemini-3.8-flash-medium` vận hành Động cơ Nhận định Chuyên môn Định tính (`Agent/backend/qc/reporting/narrative.py`).
+* **Reasoning Loop (Vòng suy luận):**
+  1. *Perceive:* Tiếp nhận yêu cầu kiểm định bot từ mã định danh `uniqueCode` qua giao thức MCP Tool hoặc REST API `/api/analyze`.
+  2. *Plan:* Kiểm tra cache Redis và đĩa `data/assessment/`. Nếu chưa có hoặc quá hạn, kích hoạt pipeline nạp lịch sử lệnh OKX CEX/DEX.
+  3. *Action:*
+     - Tái cấu trúc lịch sử vị thế FIFO (`bot_source.py`).
+     - Đo lường 10 lăng kính rủi ro lượng hóa (`qc/evaluator/lenses/`).
+     - Chạy mô phỏng 10.000 kịch bản Stationary Bootstrap và tính toán Deflated Sharpe Ratio (`mcp/analytics/simulation/`).
+     - Đối chiếu 6 tiêu chuẩn Veto cứng và xác định nhãn xếp loại 4 góc phần tư 2 trục (`qc/scoring/verdict.py`).
+     - Kích hoạt LLM sinh bài nhận định chuyên môn 3 tầng có dẫn chứng `◆`.
+  4. *Observe & Reflect:* Đưa bài nhận định qua **5 cổng kiểm duyệt tự động** (Độ dài 80-150 từ, Flesch-Kincaid 10.0-14.0, cấm từ AI, khóa số liệu định lượng, văn phong kiểm toán viên). Nếu không đạt, tự động điều chỉnh tham số sinh lại.
+* **State & Memory Management:**
+  - **Short-term Memory:** Quản lý hàng đợi tác vụ nền `TaskStatusQueue` (`PENDING` → `RUNNING` → `DONE`), ngăn chặn hiện tượng duplicate job khi client làm mới trang.
+  - **Long-term Memory:** Kho lưu trữ bất biến `data/assessment/` (JSON Schema `bot_assessment.v3`), chỉ mục đàn bot `index.json`, và tầng đệm `Redis Snapshot Cache` phản hồi tức thì dưới 50ms.
 
 ---
 
-### 3.2. `coin_service/` - Động cơ Phoenix Backtest & Distributed Parameter Optimizer
+## 3. OKX Integration Specifications (Trọng tâm chấm điểm)
 
-`coin_service` (mã hiệu **Phoenix**) là dịch vụ backend cốt lõi viết bằng **Django/Python**, chịu trách nhiệm tính toán backtest chuyên sâu và tối ưu hóa tham số chiến lược theo cụm máy chủ phân tán (Distributed Computing Cluster).
+| Thành phần OKX | Vai trò trong hệ thống | File triển khai trong Codebase |
+| :--- | :--- | :--- |
+| **OKX Market / Data API** | Thu thập nến OHLCV, sổ lệnh L2, lịch sử trade, funding rate, open interest và dữ liệu thanh lý | [bot_source.py](file:///home/ubuntu/norabt/Agent/backend/sources/bot_source.py), [service.py](file:///home/ubuntu/norabt/Agent/backend/market/service.py) |
+| **OKX Agent Trade Kit / MCP** | Máy chủ FastMCP đạt chuẩn JSON-RPC 2.0 phục vụ các AI Agent trên OKX AI Marketplace | [agent_server.py](file:///home/ubuntu/norabt/Agent/backend/agent_server.py) |
+| **X Layer (Contract / Micro-pay)** | Kiểm thực thanh toán vi mô USDC chuẩn x402, chống replay attack trên mạng X Layer | [x402.py](file:///home/ubuntu/norabt/Agent/backend/payments/x402.py) |
 
-#### Thư mục & Thành phần chính:
-- **`crypto_lab/`**: Thư mục cấu hình Django project (`settings.py.template`, `urls.py`, `wsgi.py`).
-- **`api/` - Hệ thống Giao tiếp Phân tán & Socket Server**:
-  - **`lab_server.py`**: Socket.IO Hub chạy trên port 5000 (Eventlet backend), lắng nghe kênh Redis `lab_order`, quản lý danh sách worker node (`LabNode`) và điều phối task.
-  - **`lab_client.py`**: Tiến trình daemon chạy ngầm ở từng worker node, kết nối với `lab_server` qua WebSocket (xác thực bằng JWT) để nhận lệnh chạy backtest/optimization.
-  - **`api/urls.py`**: Router động (`processRoute`) tự động ánh xạ truy vấn `/api/<controller>/<method>` vào controller tương ứng trong package `api.Controller`.
-- **`Console/Phoenix/` - Động cơ Trading Simulation (Phoenix Core)**:
-  - **`AccountImp.py` / `AccountAsyncImp.py`**: Quản lý tài khoản backtest, nạp chuỗi nến lịch sử từ MongoDB theo từng block thời gian (1-15 ngày), tính toán số dư, ký quỹ, unrealized PnL, drawdown.
-  - **`CampaignImp.py` / `CampaignImp1m.py`**: Thực thi logic chiến lược chi tiết. Đánh giá biểu thức điều kiện lồng phức tạp (`compareAnd`, `compareOr`, `compare`), quản lý giai đoạn vào lệnh DCA, tính Take Profit, Stop Loss, Trailing Stop (`step_profit`, `back_profit`), thời gian sống của lệnh (lifetime).
-- **`Console/Phoenix/Lab/Optimization.py` - Động cơ Tối ưu hóa Tham số (Grid-Search)**:
-  - Tự động sinh ma trận tổ hợp tham số từ cấu hình JSON (`lab_opt_params`) với 3 kiểu mở rộng: `INPUT`, `SETS`, `EXPRESSIONS`.
-  - Sử dụng `multiprocessing.Process` phân phối tính toán song song trên đa nhân CPU.
-  - Ghi nhận kết quả chi tiết (lợi nhuận cuối, đợt sụt giảm tài sản lớn nhất, số lệnh TP/SL) vào MySQL table `lab_opt_result`.
-- **`start` / `stop`**: Các shell script điều khiển bật/tắt `lab_client` daemon dưới nền.
+* **Chi tiết On-Chain & Ranh giới An toàn Ví (Safety Boundary):**
+  - **Mạng hỗ trợ:** **X Layer Testnet** (Chain ID: 195) & **X Layer Mainnet** (Chain ID: 196).
+  - **Hợp đồng thanh toán:** Token USDC chuẩn trên X Layer.
+  - **Chính sách Read-Only Tuyệt đối (Negative Capability Guardrail):**
+    - NoraBT được thiết kế với **ranh giới an toàn đóng kín**: Hệ thống **KHÔNG BAO GIỜ** yêu cầu hoặc lưu trữ Private Key của người dùng.
+    - Đại lý **hoàn toàn không có quyền rút tiền, nộp tiền hay can thiệp vào lệnh giao dịch** (Được bảo vệ bởi 10 bài test phủ định trong `Agent/none/test/test_agent_server.py` và `test_acceptance_gates.py`).
+    - NoraBT chỉ đóng vai trò là **Người Giám Sát Độc Lập** đưa ra khuyến nghị khách quan cho nhà đầu tư.
 
 ---
 
-### 3.3. `coin_monitor/` - Data Ingestion, Monitoring Agent & React Dashboard
+## 4. Tools & Functions Directory (Danh mục công cụ của Agent)
 
-`coin_monitor` là hệ thống Django đa chức năng đóng vai trò trung tâm phân tích dữ liệu thị trường, tính toán chỉ báo kỹ thuật, giám sát hạ tầng máy chủ và hiển thị trực quan hóa qua React SPA.
+Máy chủ MCP cung cấp **6 công cụ chuẩn hóa** phục vụ các Agent khác và người dùng:
 
-#### Thư mục & Thành phần chính:
-- **`nora_monitor/settings.py`**: Cấu hình kết nối **hơn 15 Database khác nhau** (MongoDB `raw_kline1m_future`, `backtest_data_1m`, MySQL `coin_lab`, SQLite local, v.v.).
-- **`Agent/` - Giám sát Hạ tầng Máy chủ**:
-  - `scrape_info`: Sử dụng `psutil` đo lường mức độ sử dụng CPU, RAM, SSD/HDD. Tự động phát cảnh báo qua Telegram khi tài nguyên vượt ngưỡng 95%.
-  - `scraper_process`: Theo dõi toàn bộ các script Python crawler đang chạy, tham số CLI, tài nguyên tiêu thụ.
-  - `scraper_coin`: Kiểm tra các feed dữ liệu coin trên MongoDB, phát hiện feed ngưng hoạt động (> 3 phút không có bản ghi mới).
-- **`Backtest/` - Thu thập & Biến đổi Dữ liệu**:
-  - `crawl_kline_1m_bulk`: Tải dữ liệu nến 1m từ Binance REST API với cơ chế chống vượt rate-limit (`X-MBX-USED-WEIGHT-1M`).
-  - `klineProcessor.py`, `BusdProcessor.py`: Tính toán trước các chỉ báo kỹ thuật (EMA 5/9/12/13/26, MACD, Volume BU/SD, WMA) cho các khung thời gian 15m, 60m, 240m, 1440m và lưu vào `backtest_data_1m`.
-- **`Client/` - REST API Gateway**: Cung cấp API động cho frontend qua định dạng `/api/<controller>/<method>` (ví dụ: `ScraperController`, `RealtimeController`, `AuthenticationController`).
-- **`frontend/`**: Ứng dụng Web Single-Page (React + Webpack + PrimeReact) hiển thị Dashboard thông số hệ thống, danh sách tiến trình, biểu đồ backtest và trạng thái dữ liệu.
+### Tool 1: `list_assets`
+* **Mục đích:** Liệt kê toàn bộ tài sản đã có dữ liệu nạp trên đĩa và các sàn hỗ trợ (`CEX`/`DEX`).
+* **Input Parameters:** `ctx: Context`
+* **Output:** JSON danh sách tài sản kèm mảng sàn giao dịch tương ứng (`{"assets": [{"asset": "BTC", "venues": ["CEX", "DEX"]}]}`).
+* **Chi phí x402:** Miễn phí (< 10ms).
 
----
+### Tool 2: `list_bots`
+* **Mục đích:** Liệt kê các bot đã cào dữ liệu của một tài sản trên sàn cụ thể.
+* **Input Parameters:**
+```json
+{
+  "asset": "BTC",
+  "venue_type": "CEX"
+}
+```
+* **Output:** JSON danh sách bot gồm `bot_folder_name`, `nick_name`, `unique_code`.
+* **Chi phí x402:** Miễn phí (< 15ms).
 
-### 3.4. Root Config & Utility Scripts (`lab.yml`, `test.py`)
+### Tool 3: `list_assessed_bots`
+* **Mục đích:** Liệt kê danh sách các bot đã được chấm điểm rủi ro từ `index.json`, hỗ trợ lọc theo 6 nhãn phân hạng hai trục.
+* **Input Parameters:**
+```json
+{
+  "verdict": "LOW DD · GOOD QUALITY"
+}
+```
+* **Output:** JSON danh sách bot kèm thứ hạng `rank_in_cohort`, `risk_score`, `quality_score`, `verdict`.
+* **Chi phí x402:** $0.001 USDC (< 20ms).
 
-- **`lab.yml`**: File định nghĩa môi trường Anaconda/Conda (tên môi trường: `lab`, Python **3.9.18**). Chứa đầy đủ các thư viện phụ thuộc:
-  - **Frameworks & Core**: `django==3.1.12`, `djongo==1.3.7`, `pymongo==3.11.4`, `mysqlclient==2.1.0`.
-  - **Data Science & Plotting**: `pandas==2.2.3`, `numpy==2.0.2`, `plotly==6.0.0`.
-  - **Async & WebSockets**: `python-socketio==5.12.1`, `websocket-client==1.8.0`, `eventlet==0.39.0`, `gevent==21.12.0`, `redis==5.2.1`.
-- **`test.py`**: Script Python tự động kết nối MongoDB (`mongodb://localhost:27017/`), quét toàn bộ collection trong database `raw_kline1m_future` để phát hiện các đồng coin bị thiếu hoặc rỗng dữ liệu trước khi thực hiện backtest.
+### Tool 4: `get_assessment`
+* **Mục đích:** Trích xuất kết quả thẩm định định lượng chuyên sâu từ bộ nhớ cache hoặc file JSON.
+* **Input Parameters:**
+```json
+{
+  "unique_code": "EF1CC6F40E834D1A"
+}
+```
+* **Output:** Hồ sơ thẩm định đầy đủ gồm 10 lăng kính rủi ro, phân phối Monte Carlo, trạng thái Veto và nhận định chuyên gia.
+* **Chi phí x402:** $0.002 USDC (< 30ms).
 
----
+### Tool 5: `assess_bot`
+* **Mục đích:** **Công cụ phân tích nặng nhất:** Nạp dữ liệu sổ lệnh mới nhất từ OKX, tái tạo vị thế FIFO, chạy 10 lăng kính rủi ro, 10.000 kịch bản Monte Carlo và sinh bài nhận định thẩm định.
+* **Input Parameters:**
+```json
+{
+  "asset": "BTC",
+  "unique_code": "EF1CC6F40E834D1A",
+  "venue_type": "CEX"
+}
+```
+* **Output:** Kết quả thẩm định mới nhất được lưu bất biến vào kho dữ liệu và cập nhật bảng xếp hạng.
+* **Chi phí x402:** $0.050 USDC (1.5s – 4.8s).
 
-## 4. Kiến trúc Dữ liệu (Database Architecture)
-
-Hệ thống kết hợp 3 loại Database nhằm tối ưu hiệu năng:
-
-1. **MySQL (Relational DB)**:
-   - **Mục đích**: Lưu trữ thông tin tài khoản mô phỏng (`LabAccount`), chiến dịch (`LabCampaigns`), danh sách lệnh (`LabOrder`), kết quả backtest (`LabResults`), ma trận tối ưu (`LabOptimization`, `LabOptResult`) và danh sách node worker (`LabNode`).
-   - **Phân vùng (Partitioning)**: Phân tách dữ liệu nến và giao dịch theo từng năm (`coin_lab_2017` $\rightarrow$ `coin_lab_2021`) để tránh nghẽn truy vấn.
-2. **MongoDB (NoSQL Document Store)**:
-   - **Mục đích**: Chuyên dụng lưu trữ dữ liệu chuỗi thời gian (Time-series) khối lượng cực lớn (> 600GB).
-   - **Databases**:
-     - `raw_kline1m_future` / `raw_kline1m_spot`: Nến 1 phút nguyên bản từ sàn Binance.
-     - `backtest_data_1m`: Dữ liệu nến đã qua xử lý & enrich các chỉ báo kỹ thuật (EMA, MACD, Volume BU/SD).
-     - `nora_monitor`: Thông tin log giám sát tiến trình và phần cứng máy chủ.
-3. **Redis (In-Memory Data Store)**:
-   - **Mục đích**: Kênh Message Broker (Pub/Sub) truyền nhận thông điệp thời gian thực giữa `lab_server` và `lab_client`, đồng thời lưu trữ cache trạng thái hệ thống.
-
----
-
-## 5. Hướng dẫn Cài đặt & Vận hành (Setup & Usage Summary)
-
-> 💡 Chi tiết từng bước cài đặt xem tại: [`SETUP.md`](file:///Users/nevir/Desktop/DCA_backtest/SETUP.md)
-
-### 5.1. Tóm tắt các bước Setup
-
-1. **Clone Source Code**:
-   ```bash
-   git clone git@github.com:NORATN/DCA_backtest.git
-   cd DCA_backtest
-   ```
-2. **Tạo & Kích hoạt Môi trường Conda**:
-   ```bash
-   conda env create -f lab.yml
-   conda activate lab
-   ```
-3. **Khởi tạo Database Services**:
-   - Cài đặt MySQL, MongoDB, Redis.
-   - Import schema cơ sở dữ liệu MySQL (`mysql -u root -p coin_lab < coins/database/laravel_itcjsc.sql` hoặc `lab.sql`).
-4. **Cài đặt Web Portal `coins/`**:
-   - Cài đặt PHP 7.2 & extensions (`php7.2-cli`, `php7.2-fpm`, `php7.2-mbstring`, `php7.2-curl`, `php7.2-mysql`, v.v.).
-   - `cd coins && composer install && npm install && npm run prod`.
-   - `cp .env.exp .env && php artisan key:generate`.
-5. **Crawl & Xử lý Dữ liệu Market**:
-   ```bash
-   cd coin_monitor
-   python manage.py crawl_kline_1m_bulk
-   python manage.py process_kline_1m_bulk
-   python manage.py verify_data
-   ```
+### Tool 6: `get_market`
+* **Mục đích:** Lấy thông tin trạng thái thị trường, độ rộng kênh Keltner Channels và chỉ số đối chuẩn BTC.
+* **Input Parameters:**
+```json
+{
+  "asset": "BTC",
+  "venue_type": "CEX"
+}
+```
+* **Output:** JSON chế độ thị trường (`UPTREND_CALM`, `RANGE_VOLATILE`...), ATR14 và Keltner Bandwidth.
+* **Chi phí x402:** $0.001 USDC (< 50ms).
 
 ---
 
-### 5.2. Khởi chạy Services & PM2 Cluster
+## 5. Safety, Risk Limits & Guardrails
 
-Sử dụng PM2 để khởi chạy các background services trên máy chủ Linux:
+* **Bộ 6 Tiêu chuẩn Veto Cứng (Hard Safety Veto):**
+  1. `VETO-01 (Kịch bản stress dẫn tới thanh lý):` $CVaR_{95\%} \ge 85\%$ hoặc $MDD_{sim} \ge 90\%$.
+  2. `VETO-02 (Rủi ro đuôi mô phỏng cực đoan):` $VaR_{95\%} \ge 60\%$ trong 3 chu kỳ liên tiếp.
+  3. `VETO-03 (Hành vi giao dịch hủy hoại):` Nhồi lệnh Martingale $> 3$ bậc hoặc gồng lỗ kéo dài $> 72$ giờ.
+  4. `VETO-04 (Đòn bẩy nguy hiểm):` Đòn bẩy hiệu dụng $> 20x$ trên Altcoin hoặc tỷ lệ ký quỹ cận kề thanh lý.
+  5. `VETO-05 (Trôi chiến lược - Strategy Drift):` Suy thoái hiệu suất nghiêm trọng giữa backtest và live trading.
+  6. `VETO-06 (Bẫy thanh khoản & Trượt giá):` Giao dịch khối lượng lớn trên token thanh khoản mỏng.
+* **Ma trận phân loại 4 góc phần tư hai trục:**
+  - `SỤT VỐN: THẤP · CHẤT LƯỢNG: TỐT (LOW DD · GOOD QUALITY)`: Lành mạnh nhất, khuyến nghị phân bổ vốn.
+  - `SỤT VỐN: THẤP · CHẤT LƯỢNG: YẾU (LOW DD · WEAK QUALITY)`: Lợi nhuận mỏng.
+  - `SỤT VỐN: CAO · CHẤT LƯỢNG: TỐT (HIGH DD · GOOD QUALITY)`: Dành cho khẩu vị mạo hiểm cao.
+  - `SỤT VỐN: CAO · CHẤT LƯỢNG: YẾU (HIGH DD · WEAK QUALITY)`: Cực kỳ nguy hiểm, cảnh báo cấm sao chép.
+  - `RỦI RO BỊ CHE (HIDDEN RISK)`: Có dấu hiệu om lệnh âm hoặc ngụy tạo win rate.
+  - `THIẾU BẰNG CHỨNG (UNKNOWN)`: Dữ liệu dưới 30 lệnh, chưa đủ căn cứ toán học.
+* **Cơ chế chịu lỗi (Resilience & Rate Limiting):** Tự động áp dụng Exponential Backoff khi API OKX báo lỗi `HTTP 429 Too Many Requests`; fallback về Redis Snapshot mà không làm gián đoạn trải nghiệm người dùng.
 
+---
+
+## 6. Step-by-Step Quickstart (Hướng dẫn chạy thử Local)
+
+Hệ thống có thể khởi chạy và kiểm thử trong vòng **dưới 3 phút**:
+
+### Yêu cầu tiên quyết (Prerequisites)
+* Python >= 3.11
+* Node.js >= 20.x
+* Docker & Docker Compose (tùy chọn)
+
+### Cài đặt từng bước
+
+1. **Clone repository:**
 ```bash
-cd coin_service
-pm2 start python --name "dca_lab_server" -- manage.py lab_server
-pm2 start python --name "dca_lab_client" -- manage.py lab_client
-pm2 save
+git clone https://github.com/nguyenhieptn/norabt.git
+cd norabt
 ```
 
-Cấu hình Nginx trỏ vào thư mục `coins/public` với socket `unix:/run/php/php7.2-fpm.sock` để mở giao diện điều hành `/admin` và `/lab`.
+2. **Cấu hình môi trường (`.env`):**
+```bash
+cp Agent/.env.example Agent/.env
+```
+*(Hệ thống đã cấu hình sẵn cổng Web 8770, Redis 6379 và chế độ mở `NORABT_ADMIN_OPEN_ACCESS=true` để kiểm thử ngay lập tức).*
+
+3. **Cài đặt thư viện phụ thuộc:**
+```bash
+pip install -r Agent/requirements.txt
+```
+
+4. **Khởi chạy Hệ thống:**
+```bash
+# Khởi động dịch vụ NoraBT Web & MCP Server
+bash start_nora.sh
+```
+
+5. **Chạy Bộ Kiểm Thử Nghiệm Thu Đầu-Cuối (100% PASS):**
+```bash
+PYTHONPATH=. python3 Agent/none/scripts/acceptance_check.py
+```
+*Kết quả mong đợi:* **ĐẠT toàn bộ 17/17 mục nghiệm thu thực tế trên đĩa.**
 
 ---
 
-## 6. Tổng kết
+## 7. Sample Test Prompts (Kịch bản để Giám khảo test)
 
-Hệ thống **`DCA_backtest` (`norabt`)** là một nền tảng giao dịch định lượng hoàn chỉnh, được phân tách rõ ràng giữa:
-- **Tầng quản trị & Web UI** (`coins/` - Laravel).
-- **Tầng tính toán & Tối ưu hóa phân tán** (`coin_service/` - Django & Phoenix Engine).
-- **Tầng xử lý dữ liệu & Giám sát hạ tầng** (`coin_monitor/` - Django, React & Agents).
+### Test Case 1: Tra cứu Hồ sơ Thẩm định Định lượng Toàn diện của Bot
+* **Hành động:** Mở trình duyệt tại `http://localhost:8770/#/analyze` hoặc gọi API:
+```bash
+curl -s http://localhost:8770/api/bots | jq '.[0]'
+```
+* **Kỳ vọng:** Trả về đầy đủ Risk Score, Quality Score, 10 lăng kính rủi ro, phân vị Monte Carlo và nhận định Wall Street tiếng Anh có cấu trúc 3 tầng kèm bằng chứng `◆`.
 
-Kiến trúc này đảm bảo tính mở rộng cao (Scalability), khả năng tính toán song song vượt trội trên nhiều CPU core/node, và khả năng vận hành ổn định bền bỉ trên thị trường tiền điện tử.
+### Test Case 2: Kiểm tra Phản xạ Veto An toàn đối với Bot Nguy hiểm
+* **Prompt MCP:** Gọi tool `assess_bot` với một bot có hành vi gồng lỗ hoặc nhồi lệnh Martingale.
+* **Kỳ vọng:** Hệ thống phát hiện $CVaR_{95\%} \ge 85\%$ hoặc gồng lỗ $> 72$h, gán nhãn `VETO-01` hoặc `VETO-03`, xếp vào nhóm `HIGH DD · WEAK QUALITY` và xuất khuyến nghị cấm sao chép ngay lập tức.
+
+### Test Case 3: Kiểm tra Ranh giới An toàn Ví (Negative Capability Test)
+* **Kịch bản:** Thử nghiệm gọi lệnh yêu cầu can thiệp rút tiền hoặc thực thi lệnh mua/bán onchain.
+* **Kỳ vọng:** Hệ thống kích hoạt cơ chế phòng thủ Guardrail, từ chối toàn bộ các hành động mang tính can thiệp tài sản và khẳng định ranh giới **READ-ONLY SUPERVISOR** của mình.
+
+---
+
+## 8. Cấu Trúc Tài Liệu Kỹ Thuật (BMAD Documentation Standard)
+
+Toàn bộ tài liệu được chuẩn hóa và phân rã chi tiết theo phương pháp luận **BMAD** tại [Agent/docs/bmad/](file:///home/ubuntu/norabt/Agent/docs/bmad/):
+- **`bmad/spec/` (Đặc tả chức năng):**
+  - `00_overview/`: Bản đồ đặc tả trung tâm ([SPEC-00](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/00_overview/SPEC-00_SPECIFICATION_INDEX.md)) & Ý tưởng khởi nguyên ([IDEA-01](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/00_overview/IDEA-01_REGIME_CONDITIONED_AGENT_EVALUATION.md)).
+  - `01_prd_engine1/`: 10 Bản yêu cầu sản phẩm Engine 1 (`PRD-01` đến `PRD-10`).
+  - `02_technical_skills/`: 8 Bản đặc tả kỹ năng kỹ thuật chuyên sâu (`SPEC-01` đến `SPEC-08`).
+- **`bmad/story/` (Tiến độ & Tình trạng hệ thống):**
+  - `00_overview/`: Lộ trình phát triển 8 giai đoạn & Ma trận sẵn sàng kỹ thuật ([STORY-00](file:///home/ubuntu/norabt/Agent/docs/bmad/story/00_overview/STORY-00_SYSTEM_PROGRESSION_AND_STATUS.md)).
+  - `02_cex_data_foundation/` đến `10_verification_and_gates/`: 100 User Stories chi tiết theo 10 phân hệ nghiệp vụ.

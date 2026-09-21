@@ -127,7 +127,7 @@ class RiskFusionEngine:
                 contribution=item.score * item.weight / max(total_weight, 1e-12),
                 status=item.status.value,
             )
-            for name, item in zip(dim_list, evaluations)
+            for name, item in zip(dim_list, evaluations, strict=False)
             if item.status != EvidenceStatus.NOT_APPLICABLE
         ]
         contributions.sort(key=lambda c: -c.contribution)

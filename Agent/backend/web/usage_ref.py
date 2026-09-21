@@ -23,7 +23,7 @@ THIẾT KẾ:
   * Hình dạng mã: ĐÚNG `identity.USER_REF_RE` (`^[a-z2-7]{10}$`, base32
     thường, 10 ký tự) -- KHÔNG được đổi hình dạng này, vì:
       - regex nginx `^/[a-z2-7]{10}_[A-Za-z0-9]{1,64}$`
-        (`Agent/deploy/nginx-agent.conf.template`) và route Starlette
+        (`Agent/nginx/nginx-agent.conf.template`) và route Starlette
         `/{user_ref}_{code}` (app.py) đã tồn tại sẵn cho ĐÚNG hình dạng
         này -- dùng lại nguyên xi nghĩa là KHÔNG phải sửa nginx template
         (cần sudo, ta không có) hay thêm route mới.

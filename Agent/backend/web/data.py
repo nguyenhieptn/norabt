@@ -93,7 +93,7 @@ logger = logging.getLogger(__name__)
 # module's own responsibility) is completely unaffected either way.
 #
 # `assess_from_error(exc)` is the confirmed real signature (see
-# Agent/backend/analysis/limited.py and Agent/test/test_limited_assessment.py):
+# Agent/backend/analysis/limited.py and Agent/none/test/test_limited_assessment.py):
 # it takes the `LedgerUnavailableError` itself (duck-typed on
 # .status/.code/.profile/.stats/.weekly/str(exc)) and returns the exact
 # `/api/analyze` response contract dict. Still wrapped in its own broad
@@ -1589,7 +1589,7 @@ def _narrative_strategy_profile_vi(bot: Any) -> str:
     it). Built entirely from fixed-vocabulary translations
     (`_DIRECTIONAL_BIAS_VI` etc.) and boolean flags -- never an interpolated
     float -- so it is digit-free BY CONSTRUCTION, not by post-hoc scrubbing;
-    see `Agent/test/test_narrative.py`'s
+    see `Agent/none/test/test_narrative.py`'s
     `test_prompt_strategy_profile_context_never_contains_a_digit` for the
     regression guard.
 
@@ -2361,6 +2361,46 @@ def _market_coverage_evidence(result: Any) -> Dict[str, Any]:
     }
 
 
+def _insights_evidence(result: Any) -> Dict[str, Any]:
+    """Serialize the deterministic insight modules for the report layer.
+
+    Derived from the SAME `AnalysisDossier` the JSON endpoint and MCP publish,
+    not rebuilt here. Rebuilding them independently is what let the two drift:
+    this function used to call `build_risk_twin(bot)` without the scenario
+    states, so the page showed an empty stressed state while the dossier had
+    four, and it omitted claims, user questions and the source ledger
+    altogether.
+
+    Never raises: a report must still render if the dossier cannot be built for
+    an unusual bot. An absent payload makes each section render its "not
+    available" shell, which is the behaviour the renderer already has.
+    """
+    try:
+        from Agent.backend.qc.reporting.dossier import build_analysis_dossier
+
+        dossier = build_analysis_dossier(result)
+        payload = dossier.model_dump(mode="json")
+        return {
+            key: payload[key]
+            for key in (
+                "executive_essence",
+                "behavioral_dna",
+                "risk_twin",
+                "market_compatibility",
+                "failure_modes",
+                "scenario_laboratory",
+                "validation",
+                "uncertainty",
+                "claims",
+                "user_questions",
+                "source_ledger",
+            )
+        }
+    except Exception:  # noqa: BLE001 - see docstring
+        logger.exception("could not build insight evidence; sections will be hidden")
+        return {}
+
+
 def _full_result(
     code: str,
     result: Any,
@@ -2402,6 +2442,12 @@ def _full_result(
             "universe_eligible": result.universe_eligible,
             "eligibility_reason": result.eligibility_reason,
             "performance": _live_performance_evidence(bot),
+            # The deterministic insight modules (Agent/backend/qc/reporting/).
+            # They are attached here, once, so the HTML report renders the SAME
+            # objects the dossier and the JSON endpoint publish -- rather than
+            # re-deriving a second, slightly different version of each in the
+            # rendering layer.
+            "insights": _insights_evidence(result),
             "current_state": bot.current_state.model_dump(mode="json"),
             "reconciliation": bot.reconciliation.model_dump(mode="json"),
             "data_quality": bot.data_quality.model_dump(mode="json"),
@@ -3050,8 +3096,8 @@ class WebDataService:
         # Injectable purely for tests (a fake `narrative.NarrativeBackend`,
         # so a test can assert on the generated result without ever
         # touching `NORABT_NARRATIVE_BACKEND`/spawning a real subprocess --
-        # see Agent/test/test_narrative.py and the narrative-related tests
-        # in Agent/test/test_web_app.py). `None` (the default) means
+        # see Agent/none/test/test_narrative.py and the narrative-related tests
+        # in Agent/none/test/test_web_app.py). `None` (the default) means
         # "resolve from the environment on every call" -- see
         # `narrative.select_backend_from_env`'s own docstring for why that
         # is read live rather than once here.
@@ -3085,7 +3131,7 @@ class WebDataService:
         # "under 8s total" budget -- reusing one instance is what makes a
         # SECOND bot lookup actually land in the 1.5-5s range that budget
         # assumes. Overridable so tests can inject in-memory fakes instead
-        # (still built once) -- see Agent/test/test_web_app.py.
+        # (still built once) -- see Agent/none/test/test_web_app.py.
         self._client = client_factory()
         bot_source_factory = bot_source_factory or (
             lambda client, bucket: LiveBotDataSource(client=client, rate_limiter=bucket)
@@ -3212,7 +3258,7 @@ class WebDataService:
     def _profile_snapshot(self) -> Dict[str, Dict[str, Any]]:
         """The already-crawled lead-trader ranking snapshot on disk
         (`<data_dir>/universe/lead_traders.json`, the same file
-        Agent/scripts/crawl_bots.py and Agent/scripts/backfill_bot_profiles.py
+        Agent/none/scripts/crawl_bots.py and Agent/none/scripts/backfill_bot_profiles.py
         already read/write) -- this is the "cache bảng xếp hạng đã có" the
         task's /api/lookup budget assumes for profile data. Reading it costs
         one local JSON parse, never an OKX request, which is what keeps

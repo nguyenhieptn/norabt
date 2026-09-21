@@ -1,7 +1,7 @@
 """Where BotObservationService gets one bot's overview/ledger payload.
 
 Historically step 2 (Agent/backend/mcp/service.py) only ever read two files a
-separate crawl step (Agent/scripts/crawl_bots.py) had written to
+separate crawl step (Agent/none/scripts/crawl_bots.py) had written to
 Agent/data/<venue>/<asset>/bot/<folder>/{overview,trade_list}.json. This module
 pulls that read behind an interface so step 2 can instead read straight from
 OKX, in memory, with no crawl-to-disk step at all -- step 2's own parsing
@@ -46,18 +46,18 @@ STATS_PATH = "/api/v5/copytrading/public-stats"
 # ignores that parameter here and returns the top of its own ranking instead
 # (ranked by whatever OKX's own default order is), i.e. a different trader's
 # row. See _build_leaderboard_map's docstring for the only correct usage, and
-# Agent/README.md / Agent/scripts/scan_lead_traders.py for this project's
+# Agent/README.md / Agent/none/scripts/scan_lead_traders.py for this project's
 # other run-in with the same trap.
 LEAD_TRADERS_PATH = "/api/v5/copytrading/public-lead-traders"
 
-# Must match Agent/scripts/crawl_bots.py's PAGE_SIZE exactly: service.py infers
+# Must match Agent/none/scripts/crawl_bots.py's PAGE_SIZE exactly: service.py infers
 # "the ledger might be truncated" partly from
 # `len(trades) % ledger_page_size == 0` (see BotObservationService.get_bot_result),
 # so a live page size that drifted from the file-based crawler's would make
 # that heuristic lie about bots it has never even fetched.
 PAGE_SIZE = 100
 
-# Must match Agent/scripts/crawl_bots.py's own default exactly
+# Must match Agent/none/scripts/crawl_bots.py's own default exactly
 # (`parser.add_argument("--max-pages", type=int, default=5)`, PAGE_SIZE=100
 # above). The whole point of this source is that a live-fetched ledger and a
 # freshly-crawled one for the SAME bot come out to the same depth -- not
@@ -107,7 +107,7 @@ STATS_LAST_DAYS = 4
 
 # OKX's own cap for public-lead-traders: confirmed against the real endpoint
 # that limit=50 answers `{"code":"51000","msg":"Parameter limit error"}` while
-# limit=20 succeeds. Matches Agent/scripts/scan_lead_traders.py's own
+# limit=20 succeeds. Matches Agent/none/scripts/scan_lead_traders.py's own
 # PAGE_SIZE, which hit the same ceiling.
 LEADERBOARD_PAGE_SIZE = 20
 
@@ -295,7 +295,7 @@ class FileBotDataSource(BotDataSource):
 class LiveBotDataSource(BotDataSource):
     """Fetch one bot's overview/ledger straight from OKX, in memory only.
 
-    Builds the same dict shapes Agent/scripts/crawl_bots.py writes to disk, so
+    Builds the same dict shapes Agent/none/scripts/crawl_bots.py writes to disk, so
     every downstream parser in service.py works unmodified. Never writes a
     file -- "no storage" is the entire point of this class.
 
@@ -445,7 +445,7 @@ class LiveBotDataSource(BotDataSource):
         # Cheap and pure (no network call): decodes the open time embedded in
         # OKX's snowflake-style subPosId. Everything past this -- actually
         # guessing the instrument of an instId-less position from its PnL
-        # ratio and leverage -- is Agent/scripts/crawl_bots.py's
+        # ratio and leverage -- is Agent/none/scripts/crawl_bots.py's
         # attribute_positions(), which needs market/history-candles calls this
         # source does not make; that is a separate, heavier feature and out of
         # this migration's scope, so "determined"/"narrowed" stay honestly 0
@@ -519,8 +519,8 @@ class LiveBotDataSource(BotDataSource):
 
         Kept as one place so get_overview's return statement doesn't have to
         interleave this bookkeeping with the payload fields themselves.
-        Mirrors the vocabulary Agent/scripts/crawl_bots.py and
-        Agent/scripts/backfill_bot_profiles.py already use
+        Mirrors the vocabulary Agent/none/scripts/crawl_bots.py and
+        Agent/none/scripts/backfill_bot_profiles.py already use
         (OKX_LEADERBOARD_SNAPSHOT_BY_UNIQUECODE / UNAVAILABLE) so a reader
         comparing a live-sourced and file-sourced overview.json side by side
         sees the same provenance vocabulary either way.
@@ -557,7 +557,7 @@ class LiveBotDataSource(BotDataSource):
         does not filter anything -- OKX still returns the top of its own
         ranking (a different trader's row). The single correct workaround is
         to page the WHOLE ranking once and index it by each row's own
-        uniqueCode, exactly like Agent/scripts/scan_lead_traders.py already
+        uniqueCode, exactly like Agent/none/scripts/scan_lead_traders.py already
         does. Caching here is what makes that affordable: paging the ~259-
         trader board costs ~13 requests total, however many bots this process
         goes on to ask about, because every bot after the first is served from
@@ -598,7 +598,7 @@ class LiveBotDataSource(BotDataSource):
                 # Insertion order tracks OKX's own ranking order (pages are
                 # fetched in increasing order, and each page is already rank-
                 # ordered), so the row's position in `board` at insert time IS
-                # its rank -- exactly how Agent/scripts/scan_lead_traders.py
+                # its rank -- exactly how Agent/none/scripts/scan_lead_traders.py
                 # derives the same field.
                 enriched = dict(row)
                 enriched["rank"] = len(board) + 1
@@ -620,7 +620,7 @@ class LiveBotDataSource(BotDataSource):
             # Deliberately no sortType. Passing one (e.g. sortType=pnl_ratio)
             # switches OKX to a different, narrower ranking -- confirmed
             # shrinking the board from 259 to 82 traders -- which would make
-            # this map silently miss most bots. Agent/scripts/scan_lead_traders.py
+            # this map silently miss most bots. Agent/none/scripts/scan_lead_traders.py
             # carries the same warning for the same reason.
         }
         try:
@@ -770,7 +770,7 @@ class LiveBotDataSource(BotDataSource):
     @staticmethod
     def _owned_by(records: List[Dict[str, Any]], code: str) -> List[Dict[str, Any]]:
         """Drop any record carrying a different uniqueCode. Mirrors
-        Agent/scripts/crawl_bots.py's own guard of the same name against OKX
+        Agent/none/scripts/crawl_bots.py's own guard of the same name against OKX
         occasionally handing back a neighbouring trader's row."""
         return [r for r in records if r.get("uniqueCode") in (None, "", code)]
 

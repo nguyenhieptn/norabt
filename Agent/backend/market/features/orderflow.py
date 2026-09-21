@@ -235,8 +235,8 @@ class OrderflowFeatureExtractor:
         100-tick list read straight off disk, and that call site must keep
         producing the same OrderflowState it always has -- see
         test_dex_orderflow_is_derived_from_tick_prints in
-        Agent/test/test_quality_and_safety.py and the file-source regression
-        test in Agent/test/test_tick_stream.py.
+        Agent/none/test/test_quality_and_safety.py and the file-source regression
+        test in Agent/none/test/test_tick_stream.py.
 
         This path deliberately has no fail-closed "too thin" check, unlike
         from_aggregate() below: it has no notion of a target time window to

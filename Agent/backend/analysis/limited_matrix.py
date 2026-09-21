@@ -418,7 +418,7 @@ def simulate_matrix(
     scale = base if matrix.primary.basis != "ABSOLUTE_PNL" else 1.0
     trades: List[TradeLedgerItem] = []
     for index, (ts, value) in enumerate(
-        zip(matrix.primary.timestamps, matrix.primary.values)
+        zip(matrix.primary.timestamps, matrix.primary.values, strict=False)
     ):
         trades.append(
             TradeLedgerItem(

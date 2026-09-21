@@ -86,7 +86,7 @@ def _flatten_diffs(a: Any, b: Any, path: str = "") -> List[Tuple[str, Any, Any]]
         return out
     if isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
         out = []
-        for index, (av, bv) in enumerate(zip(a, b)):
+        for index, (av, bv) in enumerate(zip(a, b, strict=False)):
             out.extend(_flatten_diffs(av, bv, f"{path}[{index}]"))
         return out
     if a != b:

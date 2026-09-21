@@ -191,7 +191,7 @@ class X402Settings:
     Deliberately a local, on-demand dataclass rather than new fields bolted
     onto `Agent.backend.infra.config.AppConfig` -- this package is exploratory
     scaffolding and must not modify files outside
-    `Agent/backend/payments/`, `Agent/test/test_payments.py` and
+    `Agent/backend/payments/`, `Agent/none/test/test_payments.py` and
     `Agent/docs/okx_marketplace.md`.
     """
 
@@ -784,7 +784,7 @@ def _prune_replay_cache(now: float) -> None:
 
 def reset_replay_guard_for_tests() -> None:
     """Clear the in-memory replay cache. Test-only -- production code must
-    never call this; it exists so `Agent/test/test_payments.py` can assert
+    never call this; it exists so `Agent/none/test/test_payments.py` can assert
     replay behavior in one test without leaking state into the next one."""
     with _replay_lock:
         _used_payment_fingerprints.clear()
@@ -859,7 +859,7 @@ def verify_payment(
     missing = settings.missing_for_real_payments
     if missing:
         # NOTE ON LANGUAGE: this string is deliberately left in Vietnamese.
-        # Agent/test/test_payments.py::test_verify_payment_raises_config_error_when_okx_credentials_missing
+        # Agent/none/test/test_payments.py::test_verify_payment_raises_config_error_when_okx_credentials_missing
         # asserts `"TUYỆT ĐỐI không được coi như đã thanh toán" in message`
         # verbatim, and that test file is out of scope for this translation
         # pass; translating this string would silently break it.
@@ -913,7 +913,7 @@ def verify_payment(
         # NOTE: this string is deliberately left in Vietnamese. It is
         # asserted verbatim by test_payments.py::test_verify_payment_raises_on_facilitator_transport_error
         # via `pytest.raises(..., match="mạng lỗi hoặc timeout")`. Translating
-        # it would break that test; Agent/test/ is out of scope for this change.
+        # it would break that test; Agent/none/test/ is out of scope for this change.
         raise X402FacilitatorError(
             f"Không gọi được facilitator OKX để verify thanh toán (mạng lỗi "
             f"hoặc timeout): {exc}"

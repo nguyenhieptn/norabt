@@ -151,7 +151,7 @@ class EquityCurveBuilder:
         # can cancel out across the window, so the verdict uses gross movement.
         flow = 0.0
         gross_flow = 0.0
-        for previous, current in zip(usable[:-1], usable[1:]):
+        for previous, current in zip(usable[:-1], usable[1:], strict=False):
             expected = previous.end_equity or previous.start_equity
             step = (current.start_equity or 0.0) - (expected or 0.0)
             flow += step

@@ -166,7 +166,7 @@ def _read_ctx_headers(ctx: Optional[Context]) -> Optional[Mapping[str, str]]:
     real request attached -- true on stdio (no HTTP request exists at all)
     and also true for the placeholder `Context` that `MCPServer.call_tool()`
     builds when called directly with no `context=` argument, exactly what
-    this project's own test helper (`Agent/test/test_agent_server.py::_call`)
+    this project's own test helper (`Agent/none/test/test_agent_server.py::_call`)
     does. Both cases are treated identically to "this transport has no
     headers" (`None`), not as a crash: a payment gate that cannot see any
     headers must fail toward "no payment proof supplied", not toward an
@@ -228,7 +228,7 @@ def _require_payment(ctx: Optional[Context], tool_name: str) -> None:
     # NOTE ON LANGUAGE: the four ToolError messages in this function are
     # deliberately left in Vietnamese, unlike the rest of this file. Each one
     # is asserted verbatim (via `pytest.raises(..., match=...)` on a
-    # Vietnamese substring) by Agent/test/test_agent_server.py, which is out
+    # Vietnamese substring) by Agent/none/test/test_agent_server.py, which is out
     # of scope for this translation pass. Translating these strings without
     # also updating that test file would silently break it. See this
     # module's own translation task notes for the exact test lines.
@@ -587,7 +587,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         # happen silently, because this server already returns risk verdicts
         # and will soon carry payments, and it has no auth of its own yet.
         # NOTE ON LANGUAGE: this message is deliberately left in Vietnamese,
-        # unlike the rest of this file. Agent/test/test_agent_server.py
+        # unlike the rest of this file. Agent/none/test/test_agent_server.py
         # asserts `"CẢNH BÁO" in out` verbatim on this printed text, and that
         # test file is out of scope for this translation pass; translating
         # this string would silently break it.

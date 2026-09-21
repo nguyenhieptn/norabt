@@ -253,7 +253,7 @@ def verify_token(token: Optional[str]) -> Optional[str]:
 # caught in a screenshot far more often than anyone intends -- storing only
 # the hash means a reader of that leaked config file still cannot call the
 # endpoint with it (SHA-256 is one-way), whereas a leaked plaintext admin key
-# would be immediately usable. See Agent/scripts/make_admin_token.py for the
+# would be immediately usable. See Agent/none/scripts/make_admin_token.py for the
 # helper that produces this value, and Agent/.env.example for the operator
 # guidance on choosing (and NOT reusing) the underlying secret.
 ADMIN_TOKEN_SHA256_ENV = "NORABT_ADMIN_TOKEN_SHA256"
@@ -289,7 +289,7 @@ def _warn_once_bad_admin_token_format() -> None:
         "%s được đặt nhưng KHÔNG phải chuỗi SHA-256 hex 64 ký tự chữ thường "
         "hợp lệ -- coi như KHÔNG có vai admin nào được cấu hình (an toàn hơn "
         "nhiều so với âm thầm chấp nhận một giá trị rác rồi mở toang cổng). "
-        "Dùng Agent/scripts/make_admin_token.py để sinh lại giá trị đúng.",
+        "Dùng Agent/none/scripts/make_admin_token.py để sinh lại giá trị đúng.",
         ADMIN_TOKEN_SHA256_ENV,
     )
 

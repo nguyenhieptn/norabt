@@ -24,7 +24,7 @@ tên trong `limited.py` -- cùng lý do và cùng quy ước
 `Agent/backend/web/report_page.py` đã nêu cho `DIMENSION_LABEL_VI`/
 `TIER_LABEL_VI` của nó (cây `Agent/backend/analysis/*` không phải chỗ module
 trình bày này được sửa, nên sao chép rồi ghi rõ nguồn thay vì import riêng
-tư). `Agent/test/test_score_basis.py` khoá chặt bằng cách so số tái dựng ở
+tư). `Agent/none/test/test_score_basis.py` khoá chặt bằng cách so số tái dựng ở
 đây với `result["confidence"]` thật của `assess_limited_bot` -- lệch hằng số
 nào ở trên sẽ làm test đó đỏ ngay, không âm thầm trôi.
 
@@ -332,7 +332,7 @@ def limited_fusion_summary(components: Sequence[Dict[str, Any]]) -> Dict[str, An
 
 # Bản sao có chủ đích của các hằng số cùng tên trong
 # `Agent/backend/analysis/limited.py` -- xem module docstring ở trên cho lý
-# do và cho tấm khoá chống trôi (`Agent/test/test_score_basis.py`).
+# do và cho tấm khoá chống trôi (`Agent/none/test/test_score_basis.py`).
 _SOURCE_DEPENDENCE_DISCOUNT = 0.8
 _CONFIDENCE_CEILING_BASE = 15.0
 _CONFIDENCE_CEILING_PER_STREAM = 7.5

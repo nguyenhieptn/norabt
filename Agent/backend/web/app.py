@@ -8,7 +8,7 @@ mode), so nothing new is added to the project's dependency set.
 Route surface:
 
     GET  /                  the SPA's built entry document
-                             (Agent/web/dist/index.html, produced by
+                             (Agent/frontend/dist/index.html, produced by
                              Agent/frontend/build.sh -- path is configurable,
                              see run_web.py's --dashboard/NORABT_WEB_DASHBOARD,
                              names kept from before the SPA replaced the old
@@ -331,9 +331,10 @@ import logging
 import os
 import secrets
 import sys
+import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
@@ -355,6 +356,7 @@ from Agent.backend.web import access, identity, snapshot, usage_ref
 from Agent.backend.web import progress as analyze_progress
 from Agent.backend.web.data import (
     InvalidCodeError,
+    find_assessment_document,
     PerIpRateLimiter,
     WebDataService,
     build_report_markdown,
@@ -366,6 +368,13 @@ from Agent.backend.web.data import (
     validate_unique_code,
 )
 from Agent.backend.web.report_page import render_bot_report_html
+from Agent.backend.qc.reporting.contracts import ReportProduct
+from Agent.backend.qc.reporting.persisted import build_persisted_dossier_view
+from Agent.backend.qc.reporting.view_policy import (
+    USER_HIDDEN_PANELS,
+    ViewRole,
+    apply_view_policy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -375,22 +384,22 @@ logger = logging.getLogger(__name__)
 # only file this task may edit; run_web.py, which imports
 # `DEFAULT_DASHBOARD_PATH` and passes `dashboard_path=` unchanged, is not).
 #
-# Việc 2: this used to point at a hand-authored Agent/web/dashboard.html
-# (now deleted). It now points at Agent/web/dist/index.html -- the file
+# Việc 2: this used to point at a hand-authored dashboard.html (đã xoá)
+# (now deleted). It now points at Agent/frontend/dist/index.html -- the file
 # `Agent/frontend/build.sh` produces (see that script and
 # Agent/frontend/vite.config.js's own `build.outDir`). Deliberately does not
 # need to exist -- see _dashboard_response's fallback below -- so a fresh
 # checkout that has not run the frontend build yet still serves a working
 # API, and `/assets/*` (see `_assets_directory`/the `Mount` in create_app
 # below) degrades to a plain 404 per file rather than refusing to start.
-DEFAULT_DASHBOARD_PATH = Path(config.BASE_DIR) / "web" / "dist" / "index.html"
+DEFAULT_DASHBOARD_PATH = Path(config.BASE_DIR) / "frontend" / "dist" / "index.html"
 
 # --------------------------------------------------------------------------- #
 # Client IP resolution -- shared by every route that feeds `PerIpRateLimiter`
 # (api_analyze, bot_report, user_report/_bot_report_response below).
 #
 # WHY THIS EXISTS: this app runs behind nginx inside Docker (see
-# Agent/deploy/docker-compose.yml). `request.client.host` -- what Starlette
+# Agent/docker/docker-compose.yml). `request.client.host` -- what Starlette
 # sees as the TCP peer -- is therefore ALWAYS the reverse proxy's own
 # address (loopback or the Docker bridge network), never the real caller's
 # IP. Using it directly for `PerIpRateLimiter` collapses every distinct
@@ -405,7 +414,7 @@ DEFAULT_DASHBOARD_PATH = Path(config.BASE_DIR) / "web" / "dist" / "index.html"
 # `X-Forwarded-For`. Loopback (this container talking to itself, e.g. a
 # healthcheck or a dev box with no proxy at all) plus the three RFC1918
 # private ranges Docker's bridge networks draw addresses from (see
-# Agent/deploy/docker-compose.yml) -- i.e. "the nginx container sitting
+# Agent/docker/docker-compose.yml) -- i.e. "the nginx container sitting
 # directly in front of this one", never a public address. Overridable via
 # NORABT_TRUSTED_PROXIES for a deployment with a differently-addressed
 # proxy layer; see Agent/.env.example for the operator-facing warning
@@ -487,7 +496,7 @@ def resolve_client_ip(request: Request) -> str:
 
     From a trusted peer, `X-Real-IP` wins when present (nginx's own config
     sets it to the already-resolved real client IP -- see
-    Agent/deploy/README.md's nginx block); otherwise the FIRST entry of
+    Agent/docker/README.md's nginx block); otherwise the FIRST entry of
     `X-Forwarded-For` is used (the address closest to the original client,
     since each proxy hop only ever APPENDS to that list). A header present
     but not a parseable IP (garbage, blank, a stray trailing comma) is
@@ -790,7 +799,7 @@ HEALTHZ_OKX_CHECK_PATH = "/api/v5/public/time"
 
 # How long a "was OKX's public endpoint reachable" result is reused before
 # checking again. This route is meant to be polled often by an orchestrator
-# (docker-compose's `healthcheck:` in Agent/deploy/docker-compose.yml runs it
+# (docker-compose's `healthcheck:` in Agent/docker/docker-compose.yml runs it
 # every ~30s) -- without a cache, every poll would cost one extra OKX request
 # purely for a liveness probe, competing with the same shared rate budget
 # POST /api/analyze and GET /api/leaderboard already have to ration (see
@@ -854,7 +863,7 @@ def _narrative_healthz_status() -> str:
     breaking `/api/analyze`/`GET /bot/<code>` (see that module's own
     docstring) -- exactly the behaviour that made a broken container mount
     (the `claude` binary/credentials living only on the HOST, see
-    Agent/deploy/docker-compose.yml) invisible until someone actually
+    Agent/docker/docker-compose.yml) invisible until someone actually
     diffed a response against the expected LLM prose. This field turns that
     silent degradation into something `docker exec .../healthz` (or an
     orchestrator dashboard) can show a human directly, without ever
@@ -875,7 +884,7 @@ def _narrative_healthz_status() -> str:
     regardless of what this field says.
 
     KNOWN BLIND SPOT, documented rather than hidden (see
-    Agent/deploy/README.md): `"ok"` here only means the credentials FILE is
+    Agent/docker/README.md): `"ok"` here only means the credentials FILE is
     present and readable, never that its token is still valid. That token
     is refreshed by a `claude` session running on the HOST -- a read-only
     container mount cannot refresh it -- so a host that has not run
@@ -907,7 +916,7 @@ _FALLBACK_DASHBOARD_HTML = """<!doctype html>
 <h1>Frontend not built</h1>
 <p>Could not read the HTML file at: <code>{path}</code></p>
 <p>Run <code>bash Agent/frontend/build.sh</code> to build the SPA (produces
-<code>Agent/web/dist/index.html</code> and <code>Agent/web/dist/assets/</code>),
+<code>Agent/frontend/dist/index.html</code> and <code>Agent/frontend/dist/assets/</code>),
 or set a different path via the CLI parameter <code>--dashboard</code>/the
 environment variable <code>NORABT_WEB_DASHBOARD</code> when starting the
 server. While waiting for the build, the JSON APIs below can still be used
@@ -1046,7 +1055,7 @@ _CODE_PARAM_SCHEMA: Dict[str, Any] = {
         "The uniqueCode of an OKX copy-trading bot -- hex or numeric, "
         "letters and digits only, up to 64 characters."
     ),
-    # Same example value as `_REQUEST_SPEC`/Agent/deploy/okx-listing.md's own
+    # Same example value as `_REQUEST_SPEC`/Agent/docs/okx-listing.md's own
     # `[Request Example]` line below -- this is the code the OKX listing
     # itself advertises, so a reviewer who copy-pastes that listing's curl
     # command gets a request that matches this endpoint's own self-reported
@@ -1060,7 +1069,7 @@ _CODE_PARAM_SCHEMA: Dict[str, Any] = {
 # (per the task's own reverse-engineering of that CLI). Included on both
 # error branches below (missing AND invalid-value) so a caller falls back
 # to this instead of ever having to parse `serviceDescription`'s free text
-# (see Agent/deploy/okx-listing.md, which now ALSO carries the same spec in
+# (see Agent/docs/okx-listing.md, which now ALSO carries the same spec in
 # its required "[Parameter Spec]" line as a second, static fallback for
 # whichever surface a given caller reads first).
 _REQUEST_SPEC: Dict[str, Any] = {
@@ -1082,7 +1091,7 @@ _REQUEST_SPEC: Dict[str, Any] = {
 # a redeploy (task's own reasoning: the real domain is not DNS-live yet, so
 # whether the OKX a2mcp-probe CLI actually accepts 400 for its own
 # `input_required` classification cannot be confirmed end-to-end today --
-# see Agent/deploy/okx-listing.md/this module's docstring). Only these three
+# see Agent/docs/okx-listing.md/this module's docstring). Only these three
 # codes are meaningful to that CLI's own documented state machine (200 "it
 # worked anyway", 400 "structured client error", 422 "unprocessable input");
 # anything else is almost certainly a typo and must not silently change this
@@ -1951,7 +1960,7 @@ def create_app(
 ) -> Starlette:
     """Build the Starlette app. Every dependency is injectable so tests can
     swap in a `WebDataService` wired to fakes instead of real OKX/disk
-    access (see Agent/test/test_web_app.py). `users_root` is the same kind
+    access (see Agent/none/test/test_web_app.py). `users_root` is the same kind
     of injectable default as `dashboard_path` above -- it overrides
     `Agent/backend/web/identity.py`'s `DEFAULT_USERS_ROOT` so tests never
     read/write this project's real `data/users/` directory. `usage_refs_root`
@@ -2289,7 +2298,7 @@ def create_app(
         # ONLY added for an admin-authenticated request, never for an
         # ordinary token or open-mode caller, so every non-admin caller of
         # this same summary shape keeps seeing exactly the keys they always
-        # have (see Agent/test/test_web_app.py's own ANALYZE_SUMMARY_KEYS
+        # have (see Agent/none/test/test_web_app.py's own ANALYZE_SUMMARY_KEYS
         # set). Built as a copy here rather than mutating `result` in
         # place, for the same reason as above: a different, non-admin
         # caller must never see this key leak into THEIR response for the
@@ -3020,6 +3029,7 @@ def create_app(
         is_admin: bool = False,
         refresh: bool = False,
         self_path: str,
+        hidden_panels: Sequence[str] = (),
     ) -> Response:
         """Shared body for GET /bot/<code> and GET /<userref>_<code> below --
         both ultimately render the exact same HTML report for a `code` that
@@ -3030,7 +3040,7 @@ def create_app(
         logged-in user's session.
 
         Deliberately does NOT reuse the SPA `index` route serves (Việc 2,
-        `Agent/frontend/`/`Agent/web/dist/`) -- that page is a client-side
+        `Agent/frontend/` (nguồn) / `Agent/frontend/dist/` (bản build)) -- that page is a client-side
         app with its own router and never renders a bot report itself; it
         only ever LINKS to this route (`window.location.href`) once a
         lookup+analyze flow finishes, then leaves the SPA entirely -- see
@@ -3237,6 +3247,22 @@ def create_app(
             # whether this ends up cached afterwards or not.
             snapshot_at_ms = int(now_fn() * 1000)
             await snapshot.set_snapshot(code, result, snapshot_at_ms)
+            if refresh:
+                # GHI ĐÈ BẢN TRÊN ĐĨA, không chỉ đặt snapshot Redis.
+                #
+                # Nút "Phân tích lại" mà người dùng thật bấm trỏ tới ĐÚNG
+                # route này (`?refresh=1`, xem `refresh_url` ngay dưới) --
+                # không phải `POST /api/analyze`. Bản sửa trước chỉ gắn lượt
+                # ghi đè vào đường `/api/analyze`, nên trên đường người dùng
+                # đi: chạy sống ~95 giây, hiện số mới, ghi snapshot 24h, rồi
+                # hết hạn đệm là hệ thống đọc lại ĐÚNG `assessment.json` cũ.
+                # Công chạy lại của người dùng bị vứt đi âm thầm.
+                #
+                # Chạy ở LUỒNG NỀN và SAU khi đã có kết quả trả về: người
+                # dùng không phải chờ thêm, và lượt ghi đè hỏng thì bản cũ
+                # vẫn nguyên (xoá trước rồi hỏng sẽ làm bot biến mất khỏi
+                # /api/bots, vốn đọc từ đĩa).
+                _start_background_rescore(code, service.data_dir)
 
         refresh_url = f"{self_path}?refresh=1"
         # See this function's own docstring's last paragraph: a Redis-backed
@@ -3257,6 +3283,7 @@ def create_app(
                 snapshot_at_ms=snapshot_at_ms,
                 refresh_url=refresh_url,
                 is_stale=is_stale,
+                hidden_panels=hidden_panels,
             ),
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
@@ -3291,7 +3318,65 @@ def create_app(
             is_admin=is_admin,
             refresh=refresh,
             self_path=f"/bot/{code}",
+            # `?view=user` lets the SPA ask for the user-scoped document rather
+            # than removing panels itself after the fact. Absent the parameter
+            # this route renders exactly as it always has.
+            hidden_panels=(
+                USER_HIDDEN_PANELS
+                if request.query_params.get("view") == "user" and not is_admin
+                else ()
+            ),
         )
+
+    async def api_dossier(request: Request) -> Response:
+        """GET /api/v2/dossier?code=<code> -- one serialized dossier.
+
+        This is the single structured payload §10 of the design contract asks
+        for: a consumer reads the dossier instead of calling individual lens
+        internals. It is deliberately a READ of an already-scored record --
+        it never starts the live pipeline, so it cannot become a way to
+        trigger a ~70s analysis from an unauthenticated GET.
+
+        Role handling is explicit rather than implied: both roles receive the
+        SAME record, and a user's view marks withheld branches with
+        `DETAIL_WITHHELD_BY_ROLE` instead of silently dropping them.
+        """
+        raw_code = request.query_params.get("code")
+        try:
+            code = validate_unique_code(raw_code)
+        except InvalidCodeError as exc:
+            return _invalid_param_response(str(exc))
+        is_admin = await _is_admin_request(request)
+        try:
+            document = await run_in_threadpool(
+                find_assessment_document, service.data_dir, code
+            )
+        except Exception as exc:  # noqa: BLE001 - disk I/O; never bubble a traceback
+            incident_code = _log_incident("GET /api/v2/dossier", exc)
+            return _error_json(_generic_error_message(incident_code), 500)
+        if document is None:
+            return _error_json("No analysis is on record for this code", 404)
+        view = build_persisted_dossier_view(document)
+        payload = apply_view_policy(
+            view.model_dump(mode="json"),
+            ViewRole.ADMIN if is_admin else ViewRole.USER,
+        )
+        # `?product=analyst|premium_market|other_position` returns ONE report
+        # product built through the stable adapter contract instead of the raw
+        # dossier view. This is the machine-readable form section 10 asks for:
+        # a consumer reads a product, not a lens internal.
+        product = request.query_params.get("product")
+        if product:
+            try:
+                selected = ReportProduct(product.strip().lower())
+            except ValueError:
+                return _invalid_param_response(
+                    "product must be one of: "
+                    + ", ".join(p.value for p in ReportProduct)
+                )
+            payload["report_product"] = selected.value
+            payload["available_products"] = [p.value for p in ReportProduct]
+        return JSONResponse(payload)
 
     def _generic_report_404() -> HTMLResponse:
         """The one, deliberately unhelpful 404 body shared by `user_report`
@@ -3619,7 +3704,7 @@ def create_app(
             )
         except identity.ProfileStoreError as exc:
             # Lỗi 1/Lỗi 2 fix: a read-only/full/wrong-permission
-            # `data/users` mount (see Agent/deploy/docker-compose.yml's own
+            # `data/users` mount (see Agent/docker/docker-compose.yml's own
             # mount comment) must never surface as a raw OSError string to
             # an internet-facing caller. This is a MORE SPECIFIC message
             # than the generic `_generic_error_message` every other
@@ -3686,6 +3771,7 @@ def create_app(
         # không quan trọng thứ tự ở đây (literal path khác hẳn), nhưng đặt
         # cạnh `/api/analyze` cho dễ đọc bảng route.
         Route("/api/analyze/status", api_analyze_status, methods=["GET"]),
+        Route("/api/v2/dossier", api_dossier, methods=["GET"]),
         Route("/bot/{code}", bot_report, methods=["GET"]),
         # Việc 2: the SPA's own JS/CSS bundle (Agent/frontend/build.sh's
         # output, see `assets_dir` above). `check_dir=False` -- a fresh
@@ -3697,7 +3783,7 @@ def create_app(
         # exactly like any other missing static asset. `StaticFiles` itself
         # already normalizes and rejects any path that would resolve
         # outside `assets_dir` (`..`-escapes, absolute-path overrides, ...)
-        # -- see Agent/test/test_web_app.py's own directory-traversal tests,
+        # -- see Agent/none/test/test_web_app.py's own directory-traversal tests,
         # required by this task, which check this holds rather than
         # assuming it.
         Mount("/assets", app=StaticFiles(directory=assets_dir, check_dir=False)),
@@ -3720,7 +3806,7 @@ def create_app(
         # today's behaviour, but keeping this one last is what keeps that
         # true automatically as routes are added, without anyone having to
         # re-reason about Starlette's matching order each time. See
-        # Agent/test/test_web_app.py's own route-conflict tests, one per
+        # Agent/none/test/test_web_app.py's own route-conflict tests, one per
         # sibling route, for the actual proof this holds.
         Route("/{user_ref}_{code}", user_report, methods=["GET"]),
     ]

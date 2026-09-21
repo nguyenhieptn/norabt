@@ -140,6 +140,17 @@ def _pct(value: Any, digits: int = 1, default: str = "—", signed: bool = False
     return fmt.format(float(value))
 
 
+def _format_prob_pct(value: Any, default: str = "—") -> str:
+    if not _is_finite_number(value):
+        return default
+    fval = float(value)
+    if 0.0 < fval < 0.05:
+        return "<0.1%"
+    if 99.95 < fval < 100.0:
+        return ">99.9%"
+    return f"{fval:.1f}%"
+
+
 def _money(value: Any, default: str = "—") -> str:
     if not _is_finite_number(value):
         return default
@@ -349,7 +360,7 @@ ASSET_STATE_COLOR: Dict[str, str] = {
 # `_FALLBACK_VERDICT_COLOR` below.
 # --------------------------------------------------------------------------- #
 
-_DESIGN_TOKENS_PATH = Path(config.BASE_DIR) / "web" / "tokens.css"
+_DESIGN_TOKENS_PATH = Path(config.BASE_DIR) / "frontend" / "tokens.css"
 
 # Same 6 values this module falls back to whenever tokens.css cannot be
 # read/parsed at all (missing checkout, bad permissions, a syntax error a
@@ -492,19 +503,15 @@ def _verdict_color(verdict: Any) -> str:
 def _theory(
     read_html: str, basis_html: str, *, label: str = "Methodology & interpretation"
 ) -> str:
-    """One collapsible "sở cứ + lý thuyết" block -- the task's own explicit
-    third requirement, distinct from a chart or a raw number: what a value
-    means for THIS bot, and what method/source produced it. `read_html` and
-    `basis_html` are trusted, hand-written Vietnamese prose from this module
-    with numbers interpolated through the `_num`/`_pct`/`_esc` helpers above
-    (never raw f-string values), so they are safe to place directly.
-    """
+    """Collapsible methodology & quantitative interpretation block in compact terminal format."""
     return (
         '<details class="theory">'
         f"<summary>{_esc(label)}</summary>"
-        '<div class="theory-body">'
-        f"<p><strong>Interpretation:</strong> {read_html}</p>"
-        f"<p><strong>Method:</strong> {basis_html}</p>"
+        '<div class="theory-body theory-quant-grid">'
+        '<div class="theory-item"><span class="theory-tag">METRIC FOCUS</span>'
+        f'<div class="theory-text">{read_html}</div></div>'
+        '<div class="theory-item"><span class="theory-tag theory-tag-formula">METHODOLOGY</span>'
+        f'<div class="theory-text">{basis_html}</div></div>'
         "</div></details>"
     )
 
@@ -799,12 +806,14 @@ def _calc_label_html(label: str, info_key: Optional[str] = None) -> str:
     tooltip = f"{title}\n📐 Formula: {formula}\n💡 Criteria: {desc}"
 
     return (
+        f'<span class="metric-label-row">'
         f'<span class="param-label" title="{_esc(tooltip)}" data-metric-key="{escaped_key}" '
         f'data-title="{title}" data-formula="{formula}" data-desc="{desc}">'
-        f'{_esc(label)} '
+        f'{_esc(label)}'
+        f'</span>'
         f'<button type="button" class="formula-star-btn" onclick="openFormulaModal(\'{escaped_key}\')" '
         f'data-metric-key="{escaped_key}" data-title="{title}" data-formula="{formula}" data-desc="{desc}" '
-        f'title="View formula: {title}" aria-label="View formula {title}">*</button>'
+        f'aria-label="View formula {title}">*</button>'
         f'</span>'
     )
 
@@ -955,11 +964,19 @@ def _line(
     stroke: str,
     width: float = 1.0,
     dash: str = "",
+    extra: str = "",
 ) -> str:
+    """`extra` mirrors `_text`'s own parameter: raw SVG attributes appended
+    verbatim. Callers in the Monte Carlo chart already passed it, which raised
+    a TypeError on every render of that chart until this accepted it. Content
+    is trusted markup written in this module, never user data -- same contract
+    as `_text`.
+    """
     dash_attr = f' stroke-dasharray="{_esc(dash)}"' if dash else ""
+    extra_attr = f" {extra.strip()}" if extra else ""
     return (
         f'<line x1="{_coord(x1)}" y1="{_coord(y1)}" x2="{_coord(x2)}" y2="{_coord(y2)}" '
-        f'stroke="{_esc(stroke)}" stroke-width="{_coord(width)}"{dash_attr}/>'
+        f'stroke="{_esc(stroke)}" stroke-width="{_coord(width)}"{dash_attr}{extra_attr}/>'
     )
 
 
@@ -1022,15 +1039,19 @@ class _BarRow:
 
 
 def _horizontal_bars(
-    rows: Sequence[_BarRow], *, max_value: float = 100.0, width: float = 750.0
+    rows: Sequence[_BarRow],
+    *,
+    max_value: float = 100.0,
+    width: float = 750.0,
+    value_w: float = 135.0,
 ) -> str:
     if not rows:
         return ""
     row_h = 38.0  # khoảng thở thoáng đãng giữa các thanh
     top_pad = 8.0
-    label_w = 230.0
-    value_w = 135.0
-    track_x = label_w + 12.0
+    label_w = 236.0
+    star_x = 242.0
+    track_x = 252.0
     track_w = max(width - track_x - value_w - 10.0, 40.0)
     height = top_pad * 2 + row_h * len(rows)
     parts: List[str] = []
@@ -1039,14 +1060,10 @@ def _horizontal_bars(
         mid = y + row_h * 0.60
         info = METRIC_FORMULA_INFO.get(row.info_key) if row.info_key else None
         row_parts: List[str] = []
-        # Câu ống kính tự viết khi không đo được chiều này. Nối SAU phần mô tả
-        # công thức (thứ giống nhau ở mọi bot) chứ không thay thế nó: người
-        # đọc cần biết cả "chiều này là gì" lẫn "vì sao bot NÀY không có nó".
         note_suffix = f" -- {row.note}" if row.note else ""
         if info:
             tooltip_str = f"{info.get('title', row.label)}: {info.get('desc', '')} (Formula: {info.get('formula', '')}){note_suffix}"
             row_parts.append(f"<title>{_esc(tooltip_str)}</title>")
-            star_label = f"{row.label} *"
             escaped_key = _esc(row.info_key or "")
             t_title = _esc(info.get("title", row.label))
             t_formula = _esc(info.get("formula", ""))
@@ -1056,15 +1073,32 @@ def _horizontal_bars(
                 f'data-title="{t_title}" data-formula="{t_formula}" data-desc="{t_desc}" '
                 f'title="{_esc(tooltip_str)}" onclick="openFormulaModal(\'{escaped_key}\')"'
             )
+            star_extra = (
+                f'style="cursor:pointer;font-weight:700;" data-metric-key="{escaped_key}" '
+                f'data-title="{t_title}" data-formula="{t_formula}" data-desc="{t_desc}" '
+                f'title="{_esc(tooltip_str)}" onclick="openFormulaModal(\'{escaped_key}\')"'
+            )
         elif row.note:
-            star_label = row.label
             text_extra = f'title="{_esc(row.note)}"'
+            star_extra = ""
         else:
-            star_label = row.label
             text_extra = ""
+            star_extra = ""
 
-        label_text = star_label if len(star_label) <= 38 else star_label[:37] + "…"
+        label_text = row.label if len(row.label) <= 36 else row.label[:35] + "…"
         row_parts.append(_text(0, mid, label_text, cls="bar-label", extra=text_extra))
+        if info:
+            row_parts.append(
+                _text(
+                    star_x,
+                    mid,
+                    "*",
+                    anchor="middle",
+                    cls="bar-star",
+                    fill="var(--accent, #38bdf8)",
+                    extra=star_extra,
+                )
+            )
         row_parts.append(
             _rect(track_x, y + 6, track_w, row_h - 16, fill="var(--track)", rx=6)
         )
@@ -1092,7 +1126,16 @@ def _horizontal_bars(
                 )
             )
         value_x = track_x + track_w + 10
-        row_parts.append(_text(value_x, mid, row.value_text, cls="bar-value"))
+        val_cls = "bar-value"
+        val_fill = ""
+        val_txt = str(row.value_text or "").strip()
+        if val_txt.startswith("+"):
+            val_cls += " val-pos"
+            val_fill = "#10b981"
+        elif val_txt.startswith("-") or "-" in val_txt:
+            val_cls += " val-neg"
+            val_fill = "#ef4444"
+        row_parts.append(_text(value_x, mid, row.value_text, cls=val_cls, fill=val_fill))
         if row.tag:
             row_parts.append(_text(track_x + 4, y + row_h - 3, row.tag, cls="bar-tag"))
         parts.append(f'<g class="bar-row-g">{"".join(row_parts)}</g>')
@@ -1107,16 +1150,17 @@ def _diverging_bars(
 ) -> str:
     """Percentiles that can be negative or positive, drawn as bars growing
     left (loss) or right (profit) from a shared zero/breakeven line. Used
-    for the Monte Carlo terminal-outcome percentile spread.
+    for the Monte Carlo terminal-outcome percentile spread. Clamped at -100.0%
+    stop-out boundary so that simulated paths do not show unrealistic -3000% ruin.
     """
-    values = [v for _, v in rows if _is_finite_number(v)]
+    values = [max(-100.0, float(v)) for _, v in rows if _is_finite_number(v)]
     if not values:
         return ""
     span = max(max(values, default=1.0), abs(min(values, default=-1.0)), 1.0)
     row_h = 32.0
     top_pad = 6.0
     label_w = 70.0
-    value_w = 90.0
+    value_w = 110.0
     half_track = max((width - label_w - value_w - 20.0) / 2.0, 40.0)
     zero_x = label_w + 10.0 + half_track
     height = top_pad * 2 + row_h * len(rows) + 4
@@ -1131,7 +1175,8 @@ def _diverging_bars(
             parts.append(_text(zero_x + half_track + 8, mid, "—", cls="bar-value"))
             continue
         v = float(value)
-        frac = _clamp(abs(v) / span, 0.0, 1.0) * half_track
+        v_clamped = max(-100.0, v)
+        frac = _clamp(abs(v_clamped) / span, 0.0, 1.0) * half_track
         color = "#16a34a" if v >= 0 else "#dc2626"
         if v >= 0:
             parts.append(_rect(zero_x, y + 5, frac, row_h - 14, fill=color, rx=4))
@@ -1139,7 +1184,10 @@ def _diverging_bars(
             parts.append(
                 _rect(zero_x - frac, y + 5, frac, row_h - 14, fill=color, rx=4)
             )
-        value_text = f"{v:+.1f}{unit}"
+        if v <= -100.0:
+            value_text = f"-100.0{unit} (Ruin)"
+        else:
+            value_text = f"{v:+.1f}{unit}"
         parts.append(_text(zero_x + half_track + 8, mid, value_text, cls="bar-value"))
     return _svg(width, height, "".join(parts), extra_class="bar-chart")
 
@@ -1498,7 +1546,7 @@ def _line_chart(
             (peak_i, "Peak", "#10b981"),
             (trough_i, "Trough", "#ef4444"),
         ):
-            if i in (0, n - 1):
+            if i == 0 or (i == n - 1 and tag == "Peak"):
                 continue
             x, y = xy(i, pts[i])
             parts.append(
@@ -1510,27 +1558,34 @@ def _line_chart(
             elif x > left_pad + plot_w - 45.0:
                 marker_anchor = "end"
 
-            marker_y = y + 16 if tag == "Trough" else y - 8
+            # Avoid clipping below SVG or above top padding
+            if tag == "Trough":
+                marker_y = y - 8 if y >= top_pad + plot_h - 14 else y + 16
+            else:
+                marker_y = y + 16 if y <= top_pad + 14 else y - 8
+
             parts.append(
                 _text(
                     x,
                     marker_y,
                     f"{tag} {pts[i]:,.0f}{y_unit}",
                     anchor=marker_anchor,
-                    cls="line-marker",
+                    cls=f"line-marker line-marker-{tag.lower()}",
+                    fill=color,
                 )
             )
 
     # Nhãn điểm cuối: đặt tại lề phải ngoài plot, không bao giờ đè lên nhãn Đáy/Đỉnh
     y_end = _clamp(y_last + 4, top_pad + 12, height - bottom_pad - 4)
+    end_cls = "line-end-label end-pos" if pts[-1] >= 0.0 else "line-end-label end-neg"
     parts.append(
         _text(
             left_pad + plot_w + 10,
             y_end,
             f"{pts[-1]:,.0f}{y_unit}",
             anchor="start",
-            cls="line-end-label",
-            extra=f'fill="{stroke_last}"',
+            cls=end_cls,
+            fill=stroke_last,
         )
     )
 
@@ -1869,6 +1924,264 @@ _CONCLUSION_PROOF_PREFIX = "EVIDENCE:"
 _CONCLUSION_VERDICT_PREFIX = "CONCLUSION:"
 
 
+def _format_verdict_headline(headline: str) -> str:
+    """Highlight risk verdict values (e.g. HIGH, WEAK, LOW, GOOD) with soft warning badges on hover."""
+    if not headline:
+        return ""
+    pattern = r'\b(HIGH|WEAK|LOW|GOOD|ELEVATED|ACCEPTABLE|VETO|DANGER|MODERATE|ROBUST|SAFE|WARNING)\b'
+    parts = []
+    last_end = 0
+    for m in re.finditer(pattern, headline, flags=re.IGNORECASE):
+        parts.append(_esc(headline[last_end:m.start()]))
+        word = m.group(0)
+        u = word.upper()
+        if u in ("HIGH", "DANGER", "VETO"):
+            badge_cls = "badge-high"
+        elif u in ("WEAK", "ELEVATED", "WARNING", "CAUTION"):
+            badge_cls = "badge-weak"
+        elif u in ("LOW", "GOOD", "ROBUST", "SAFE"):
+            badge_cls = "badge-low"
+        else:
+            badge_cls = "badge-acceptable"
+        parts.append(f'<span class="verdict-val-badge {badge_cls}">{_esc(word)}</span>')
+        last_end = m.end()
+    parts.append(_esc(headline[last_end:]))
+    return "".join(parts)
+
+
+def _detect_quant_tag(text: str) -> str:
+    u = text.upper()
+    if "PROFIT FACTOR" in u:
+        return "[PROFIT FACTOR]"
+    elif "UNREALISED LOSS" in u or "UNREALIZED LOSS" in u or "OPEN LOSS" in u:
+        return "[UNREALISED LOSS]"
+    elif "VETO FLOOR" in u:
+        return "[RISK VETO FLOOR]"
+    elif "RISK SCORE" in u:
+        return "[RISK DRIVERS]"
+    elif "MONTE CARLO" in u:
+        return "[MONTE CARLO]"
+    elif "TAIL RISK" in u or "TAIL LOSS" in u or "SIMULATED TAIL" in u:
+        return "[TAIL RISK]"
+    elif "PAYOFF" in u or "WIN RATE" in u or "WINNING TRADES" in u:
+        return "[PAYOFF ASYMMETRY]"
+    elif "NEVER TESTED" in u or "DOWNTREND" in u:
+        return "[REGIME BIAS]"
+    elif "DRAWDOWN" in u or "SHARPE" in u:
+        return "[DRAWDOWN / SHARPE]"
+    elif "STRESS SCENARIO" in u or "STRESS TEST" in u:
+        return "[STRESS TEST]"
+    elif "DEFLATED SHARPE" in u:
+        return "[DEFLATED SHARPE]"
+    return "[AUDIT LOG]"
+
+
+def _split_quant_consequence(text: str) -> Tuple[str, Optional[str]]:
+    # 1. " — " em dash or hyphen separator
+    if " — " in text:
+        main, cons = text.split(" — ", 1)
+        return main.strip(), cons.strip()
+    # 2. " → one losing trade..." or " → winning trades..."
+    if " → one losing trade" in text:
+        main, cons = text.split(" → ", 1)
+        return main.strip(), cons.strip()
+    if " → winning trades are" in text:
+        main, cons = text.split(" → ", 1)
+        return main.strip(), cons.strip()
+    # 3. Veto floor with ": destructive trading behaviour"
+    if "): " in text and "veto floor" in text.lower():
+        main, cons = text.split("): ", 1)
+        return (main + ")").strip(), cons.strip()
+    return text.strip(), None
+
+
+def _highlight_quant_numbers(raw_text: str) -> str:
+    """Highlight numbers, USDT values, negative percentages in quant terminal text."""
+    pattern = r'([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*%|\s*USDT)?)'
+    tokens = []
+    last_idx = 0
+    for m in re.finditer(pattern, raw_text):
+        val = m.group(0)
+        start, end = m.start(), m.end()
+        if not re.search(r'\d', val):
+            continue
+        prefix = raw_text[last_idx:start]
+        tokens.append(_esc(prefix))
+
+        val_clean = val.strip()
+        is_neg = val_clean.startswith("-") or ("loss" in prefix.lower() and "%" in val_clean)
+        is_warn = val_clean in ("97%", "100%", "88") or ("ruin" in prefix.lower())
+
+        if is_neg:
+            tokens.append(f'<span class="quant-num quant-num-neg">{_esc(val)}</span>')
+        elif is_warn:
+            tokens.append(f'<span class="quant-num quant-num-warn">{_esc(val)}</span>')
+        else:
+            tokens.append(f'<span class="quant-num">{_esc(val)}</span>')
+        last_idx = end
+    tokens.append(_esc(raw_text[last_idx:]))
+    return "".join(tokens)
+
+
+def _render_quant_terminal_evidence(proof_items: List[str]) -> str:
+    """Render quantitative evidence as an Audit Log / Quant Terminal Text View."""
+    if not proof_items:
+        return ""
+    rows = []
+    for item in proof_items:
+        tag = _detect_quant_tag(item)
+        main_text, cons_text = _split_quant_consequence(item)
+        main_html = _highlight_quant_numbers(main_text)
+
+        cons_html = ""
+        if cons_text:
+            if cons_text and cons_text[0].islower() and not cons_text.startswith("http"):
+                cons_disp = cons_text[0].upper() + cons_text[1:]
+            else:
+                cons_disp = cons_text
+            cons_body = _highlight_quant_numbers(cons_disp)
+            cons_html = (
+                f'<div class="quant-audit-consequence">'
+                f'<span class="quant-consequence-arrow">↳</span> '
+                f'<span class="quant-consequence-text">{cons_body}</span>'
+                f'</div>'
+            )
+
+        rows.append(
+            f'<div class="quant-audit-row">'
+            f'<div class="quant-audit-tag">{_esc(tag)}</div>'
+            f'<div class="quant-audit-body">'
+            f'<div class="quant-audit-main">{main_html}</div>'
+            f'{cons_html}'
+            f'</div>'
+            f'</div>'
+        )
+
+    return (
+        '<div class="quant-audit-terminal">'
+        '<div class="quant-terminal-divider"></div>'
+        f'<div class="quant-audit-rows">{"".join(rows)}</div>'
+        '<div class="quant-terminal-divider"></div>'
+        '</div>'
+    )
+
+
+def _render_quick_risk_strip(result: Dict[str, Any]) -> str:
+    evidence = result.get("evidence")
+    if not isinstance(evidence, dict):
+        evidence = {}
+    perf = evidence.get("performance")
+    if not isinstance(perf, dict):
+        perf = {}
+    metrics = evidence.get("metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
+    loss_prof = compute_loss_profile(evidence)
+    if not isinstance(loss_prof, dict):
+        loss_prof = {}
+
+    # 1. Reference Capital
+    capital = loss_prof.get("capital")
+    if not _is_finite_number(capital):
+        capital = evidence.get("capital") or perf.get("capital")
+    if _is_finite_number(capital) and float(capital) > 0:
+        cap_val = float(capital)
+        cap_text = f"{cap_val:,.0f} USDT" if cap_val >= 1000 else f"{cap_val:.2f} USDT"
+    else:
+        cap_text = "—"
+
+    # 2. Unrealised Float PnL
+    open_loss = perf.get("open_loss")
+    open_loss_pct = perf.get("open_loss_to_capital_pct")
+    if _is_finite_number(open_loss_pct):
+        float_pct = float(open_loss_pct) * 100.0 if abs(float(open_loss_pct)) <= 1.0 else float(open_loss_pct)
+        float_cls = "qrs-danger" if float_pct < 0 else "qrs-safe"
+        float_text = f"{float_pct:+.1f}%"
+        if _is_finite_number(open_loss):
+            float_text += f" ({_money(open_loss)})"
+    elif _is_finite_number(open_loss):
+        val_ol = float(open_loss)
+        float_cls = "qrs-danger" if val_ol < 0 else "qrs-safe"
+        float_text = _money(open_loss)
+    else:
+        open_pos = perf.get("open_positions")
+        if open_pos == 0:
+            float_cls = "qrs-safe"
+            float_text = "0.0% (Clean)"
+        else:
+            float_cls = "qrs-neutral"
+            float_text = "—"
+
+    # 3. Max Drawdown
+    deepest_ep = loss_prof.get("deepest_episode")
+    deepest_ep = deepest_ep if isinstance(deepest_ep, dict) else {}
+    depth_pct = deepest_ep.get("depth_pct")
+    depth_abs = deepest_ep.get("depth_abs")
+    if _is_finite_number(depth_pct):
+        dd_val = float(depth_pct)
+        dd_cls = "qrs-danger" if dd_val >= 20.0 else ("qrs-warn" if dd_val >= 10.0 else "qrs-safe")
+        dd_text = f"-{dd_val:.1f}%"
+    elif _is_finite_number(depth_abs):
+        dd_cls = "qrs-danger" if float(depth_abs) > 0 else "qrs-safe"
+        dd_text = f"-{_money(depth_abs)}"
+    else:
+        m_dd = metrics.get("max_drawdown") or perf.get("max_drawdown")
+        if _is_finite_number(m_dd):
+            val = float(m_dd) * 100.0 if float(m_dd) <= 1.0 else float(m_dd)
+            dd_cls = "qrs-danger" if val >= 20.0 else "qrs-warn"
+            dd_text = f"-{val:.1f}%"
+        else:
+            dd_cls = "qrs-neutral"
+            dd_text = "—"
+
+    # 4. Win Rate
+    win_rate = metrics.get("win_rate") or perf.get("win_rate")
+    if _is_finite_number(win_rate):
+        wr_val = float(win_rate) * 100.0 if float(win_rate) <= 1.0 else float(win_rate)
+        wr_cls = "qrs-safe" if wr_val >= 50.0 else "qrs-warn"
+        wr_text = f"{wr_val:.1f}%"
+    else:
+        wr_cls = "qrs-neutral"
+        wr_text = "—"
+
+    # 5. Observed trades
+    sample_count = result.get("trade_count") or perf.get("trade_count") or perf.get("closed_trades_count")
+    if not _is_finite_number(sample_count):
+        trades = loss_prof.get("trades") or []
+        sample_count = len(trades) if trades else None
+    if _is_finite_number(sample_count) and float(sample_count) > 0:
+        sample_text = f"{int(float(sample_count)):,} trades"
+        sample_cls = "qrs-safe" if int(float(sample_count)) >= 50 else "qrs-warn"
+    else:
+        sample_text = "—"
+        sample_cls = "qrs-neutral"
+
+    return (
+        f'<div class="quick-risk-strip">'
+        f'<div class="qrs-item">'
+        f'<span class="qrs-label">Reference Capital</span>'
+        f'<span class="qrs-value">{_esc(cap_text)}</span>'
+        f'</div>'
+        f'<div class="qrs-item {float_cls}">'
+        f'<span class="qrs-label">Unrealised Loss (Float)</span>'
+        f'<span class="qrs-value">{_esc(float_text)}</span>'
+        f'</div>'
+        f'<div class="qrs-item {dd_cls}">'
+        f'<span class="qrs-label">Max Drawdown</span>'
+        f'<span class="qrs-value">{_esc(dd_text)}</span>'
+        f'</div>'
+        f'<div class="qrs-item {wr_cls}">'
+        f'<span class="qrs-label">Win Rate</span>'
+        f'<span class="qrs-value">{_esc(wr_text)}</span>'
+        f'</div>'
+        f'<div class="qrs-item {sample_cls}">'
+        f'<span class="qrs-label">Observed Trades</span>'
+        f'<span class="qrs-value">{_esc(sample_text)}</span>'
+        f'</div>'
+        f'</div>'
+    )
+
+
 def _render_conclusion(result: Dict[str, Any]) -> str:
     """Trình bày mục "Kết luận và khuyến nghị" theo cấu trúc chuẩn đồng nhất
     với hệ thống:
@@ -1936,15 +2249,10 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
 
     blocks: List[str] = []
 
-    # 1. Prominent Verdict Box
+    # 1. Prominent Verdict Box with Action Directive
     if verdict_info:
         headline, detail = verdict_info
         is_veto = "VETO" in headline.upper()
-        # Bộ nhãn MỘT TRỤC cũ ("NGUY HIỂM"/"RỦI RO CAO") đã bị thay bằng sáu
-        # nhãn HAI TRỤC từ lâu, nhưng phép dò này không được cập nhật theo --
-        # nên kiểu hiển thị "nguy hiểm" (viền đỏ) chưa từng kích hoạt lần nào
-        # kể từ đó, kể cả với bot rủi ro cao nhất. Dò theo trục sụt vốn của
-        # chính bộ nhãn đang dùng, cộng nhánh rủi ro bị che.
         upper = headline.upper()
         is_danger = "DRAWDOWN: HIGH" in upper or "HIDDEN RISK" in upper
         verdict_cls = (
@@ -1954,12 +2262,37 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
         )
 
         detail_html = f'<p class="verdict-detail">{_esc(detail)}</p>' if detail else ""
+        formatted_headline = _format_verdict_headline(headline)
+
+        if verdict_cls == "danger":
+            action_directive = (
+                '<div class="verdict-action-callout action-danger">'
+                '<div class="action-callout-badge">ACTION DIRECTIVE: DO NOT ALLOCATE CAPITAL</div>'
+                '<p class="action-callout-desc">Potential investors: do not copy this bot. Existing followers: consider stopping copy-trading and closing open positions immediately to prevent severe liquidation.</p>'
+                '</div>'
+            )
+        elif verdict_cls == "warning":
+            action_directive = (
+                '<div class="verdict-action-callout action-warning">'
+                '<div class="action-callout-badge">ACTION DIRECTIVE: ELEVATED CAUTION / STRICT SIZE CAP</div>'
+                '<p class="action-callout-desc">Bot shows elevated tail risk or thin sample validity. Maintain strict stop-loss discipline and restrict allocation to minimal exploratory sizing.</p>'
+                '</div>'
+            )
+        else:
+            action_directive = (
+                '<div class="verdict-action-callout action-success">'
+                '<div class="action-callout-badge">ACTION DIRECTIVE: STANDARD ALLOCATION</div>'
+                '<p class="action-callout-desc">Risk parameters within normal operational boundaries. Maintain standard portfolio risk limits and monitor drawdown progression.</p>'
+                '</div>'
+            )
+
         blocks.append(
             f'<div class="conclusion-verdict-box tone-{verdict_cls}">'
             f'<div class="verdict-header-line">'
-            f'<span class="verdict-chip">{_esc(headline)}</span>'
+            f'<span class="verdict-chip">{formatted_headline}</span>'
             f'</div>'
             f'{detail_html}'
+            f'{action_directive}'
             f'</div>'
         )
 
@@ -1967,6 +2300,11 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
     scores_and_basis_html = _render_hero_scores(result)
     if scores_and_basis_html:
         blocks.append(f'<div class="conclusion-scores-wrapper">{scores_and_basis_html}</div>')
+
+    # 2b. Quick Risk Metrics Strip (Reference capital, float PnL, max DD, win rate, sample size)
+    quick_strip_html = _render_quick_risk_strip(result)
+    if quick_strip_html:
+        blocks.append(quick_strip_html)
 
     # 3. Key Metrics Overview
     if overview_parts:
@@ -1981,23 +2319,34 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
                 rendered_ov.append(f'<p class="conclusion-summary-text">{_esc(line_str)}</p>')
         blocks.append('<div class="conclusion-overview-block">' + "".join(rendered_ov) + "</div>")
 
+    # Keep the observation sample explicit in the conclusion.
+    evidence = result.get("evidence")
+    evidence = evidence if isinstance(evidence, dict) else {}
+    performance = evidence.get("performance")
+    performance = performance if isinstance(performance, dict) else {}
+    sample_count = result.get("trade_count") or performance.get("trade_count")
+    if _is_finite_number(sample_count) and float(sample_count) > 0:
+        blocks.append(
+            f'<div class="conclusion-metric-row">SAMPLE: {int(float(sample_count)):,} TRADES</div>'
+        )
+
     # 3. Why / Causes
     if why_items:
         items_html = "".join(f"<li>{_esc(w)}</li>" for w in why_items)
         blocks.append(
             '<div class="conclusion-section-block">'
-            '<div class="conclusion-sub-title">Why</div>'
+            '<div class="conclusion-sub-title">WHY</div>'
             f'<ul class="findings">{items_html}</ul>'
             '</div>'
         )
 
-    # 4. Proof / Quantitative Evidence
+    # 4. Proof / Quantitative Evidence (Terminal View)
     if proof_items:
-        items_html = "".join(f"<li>{_esc(p)}</li>" for p in proof_items)
+        quant_evidence_html = _render_quant_terminal_evidence(proof_items)
         blocks.append(
-            '<div class="conclusion-section-block">'
-            '<div class="conclusion-sub-title">Quantitative evidence</div>'
-            f'<ul class="findings">{items_html}</ul>'
+            '<div class="conclusion-section-block conclusion-quant-evidence-block">'
+            '<div class="conclusion-sub-title">QUANTITATIVE EVIDENCE</div>'
+            f'{quant_evidence_html}'
             '</div>'
         )
 
@@ -2053,21 +2402,6 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
 
 
 def _render_market_coverage(result: Dict[str, Any]) -> str:
-    """Ẩn hoàn toàn khi `evidence.primary_share_pct` vắng mặt -- file
-    assessment.json ghi TRƯỚC Việc 2 (hoặc một FULL result mà bot không đo
-    được exposure nào) đơn giản là không có mục này, không suy diễn, không
-    báo lỗi.
-
-    Phủ sóng theo mục tiêu (xem Agent/backend/market/coverage.py) thêm
-    `evidence.resolved_markets`/`unresolved_markets`/`coverage_achieved_pct`
-    -- khi có mặt (kết quả tới từ pipeline/cohort đã giải NHIỀU thị trường),
-    headline và ngưỡng cảnh báo dùng ĐÚNG con số phủ sóng THẬT này thay vì
-    `primary_share_pct` (chỉ riêng mã chính) như trước, per yêu cầu "đừng để
-    nó nói con số cũ". Một kết quả CŨ (trước đợt này, hoặc chỉ giải được
-    đúng thị trường CHÍNH) không có `resolved_markets` -- lùi nguyên về
-    hành vi CŨ (headline/ngưỡng 60% theo `primary_share_pct`) để không nói
-    sai lệch gì so với những gì thật sự đo được cho kết quả đó.
-    """
     evidence = result.get("evidence")
     evidence = evidence if isinstance(evidence, dict) else {}
     primary_share_pct = evidence.get("primary_share_pct")
@@ -2097,38 +2431,176 @@ def _render_market_coverage(result: Dict[str, Any]) -> str:
         coverage_achieved_pct
     )
     headline_pct = (
-        coverage_achieved_pct if has_full_coverage_data else primary_share_pct
+        float(coverage_achieved_pct) if has_full_coverage_data else float(primary_share_pct)
     )
 
     if has_full_coverage_data:
-        symbols_text = ", ".join(
-            f"{_esc(m.get('symbol'))} ({_pct(m.get('share_pct'), 0)})"
-            for m in resolved_markets
-        )
-        parts = [
-            f"<p><strong>Resolved {len(resolved_markets)} markets, covering "
-            f"{_pct(headline_pct, 0)} of the bot's trading value:</strong> "
-            f"{symbols_text}.</p>"
-        ]
+        resolved_list = resolved_markets
+        unresolved_list = unresolved_markets
     else:
-        parts = [
-            "<p><strong>The market being scored "
-            f"({_esc(traded_symbol)}) accounts for {_pct(headline_pct, 0)} of the "
-            "bot's trading value.</strong></p>"
-        ]
-
+        resolved_list = [{"symbol": traded_symbol, "share_pct": float(primary_share_pct)}]
         others = [s for s in observed_symbols if s != traded_symbol]
-        other_cells = [
-            f"{_esc(s)} ({_pct(share_map[s] * 100.0, 0)})"
+        unresolved_list = [
+            {"symbol": s, "share_pct": float(share_map[s] * 100.0)}
             for s in others
             if _is_finite_number(share_map.get(s))
         ]
-        if other_cells:
-            parts.append(
-                "<p>The bot also trades: " + ", ".join(other_cells) + " -- these "
-                "symbols are NOT included in the market assessment above.</p>"
-            )
 
+    resolved_sum = sum(float(m.get("share_pct", 0) or 0) for m in resolved_list)
+    unresolved_sum = sum(float(m.get("share_pct", 0) or 0) for m in unresolved_list)
+    accounted_sum = resolved_sum + unresolved_sum
+    rem_pct = round(100.0 - accounted_sum, 1) if (accounted_sum < 99.5 and accounted_sum > 0) else 0.0
+    unresolved_total = unresolved_sum + rem_pct
+
+    target_pct = float(MARKET_COVERAGE_TARGET_PCT)
+    # Legacy primary-only coverage used a 60% representativeness threshold;
+    # resolved-market coverage uses the explicit 80% target. Keep the two
+    # semantics separate so old assessment files do not suddenly acquire a
+    # stricter warning merely because the renderer learned the new branch.
+    is_under_target = (
+        headline_pct < target_pct
+        if has_full_coverage_data
+        else float(primary_share_pct) < 60.0
+    )
+
+    if is_under_target:
+        status_badge = '<span class="cov-status-badge cov-status-under">UNDER TARGET ⚠</span>'
+    else:
+        status_badge = '<span class="cov-status-badge cov-status-met">TARGET MET ✔</span>'
+
+    # Curated crypto brand colors
+    asset_brand_colors = {
+        "BTC": "#f7931a",
+        "ETH": "#627eea",
+        "SOL": "#9945ff",
+        "BNB": "#f3ba2f",
+        "DOGE": "#ba9f33",
+        "SUI": "#2a82e4",
+        "DOT": "#e6007a",
+        "UNI": "#ff007a",
+        "AVAX": "#e84142",
+        "LINK": "#375bd2",
+        "XRP": "#23292f",
+        "ADA": "#0033ad",
+        "NEAR": "#1e293b",
+        "APT": "#10b981",
+        "MATIC": "#8247e5",
+        "POL": "#8247e5",
+        "ARB": "#28a0f0",
+        "OP": "#ff0420",
+        "TRX": "#ef0027",
+        "LTC": "#345d9d",
+        "SHIB": "#ea580c",
+        "PEPE": "#15803d",
+    }
+    fallback_palette = [
+        "#6366f1", "#0ea5e9", "#10b981", "#8b5cf6", "#f59e0b",
+        "#ec4899", "#14b8a6", "#f97316", "#3b82f6", "#84cc16"
+    ]
+
+    segments_html = []
+    color_idx = 0
+    for m in resolved_list:
+        sym = str(m.get("symbol", "")).strip()
+        share = float(m.get("share_pct", 0) or 0)
+        if share <= 0:
+            continue
+        base_sym = sym.split("-")[0].upper()
+        color = asset_brand_colors.get(base_sym, fallback_palette[color_idx % len(fallback_palette)])
+        color_idx += 1
+
+        if share >= 6.5:
+            label_inside = f'<span class="cov-seg-sym">{_esc(sym)}</span> <span class="cov-seg-pct">{_pct(share, 0)}</span>'
+        elif share >= 4.0:
+            label_inside = f'<span class="cov-seg-sym">{_esc(sym)}</span>'
+        else:
+            label_inside = ""
+
+        tooltip = f"{sym}: {_pct(share, 1)} of trading value (Covered) · Order book, liquidity & volatility integrated into risk score"
+        segments_html.append(
+            f'<div class="cov-bar-seg cov-seg-resolved" style="width:{share:.2f}%;flex-basis:{share:.2f}%;background:{color};" '
+            f'title="{_esc(tooltip)}">'
+            f'<div class="cov-seg-inner">{label_inside}</div>'
+            f'</div>'
+        )
+
+    for m in unresolved_list:
+        sym = str(m.get("symbol", "")).strip()
+        share = float(m.get("share_pct", 0) or 0)
+        if share <= 0:
+            continue
+        reason = m.get("reason") or "Market data could not be measured / CEX order book not synchronized"
+        reason_text = str(reason).replace("NO_MARKET_DATA_FOR_TRADED_SYMBOL", "market data could not be measured")
+        reason_text = reason_text.replace("TIMEOUT", "market data request timed out")
+
+        if share >= 6.5:
+            label_inside = f'<span class="cov-seg-sym">{_esc(sym)}</span> <span class="cov-seg-pct">{_pct(share, 0)}</span>'
+        elif share >= 4.0:
+            label_inside = f'<span class="cov-seg-sym">{_esc(sym)}</span>'
+        else:
+            label_inside = ""
+
+        tooltip = f"{sym}: {_pct(share, 1)} of trading value (Unresolved) · {reason_text}. Not inferred from other markets."
+        segments_html.append(
+            f'<div class="cov-bar-seg cov-seg-unresolved" style="width:{share:.2f}%;flex-basis:{share:.2f}%;" '
+            f'title="{_esc(tooltip)}">'
+            f'<div class="cov-seg-inner">{label_inside}</div>'
+            f'</div>'
+        )
+
+    if rem_pct > 0.5:
+        if rem_pct >= 6.5:
+            label_inside = f'<span class="cov-seg-sym">Others</span> <span class="cov-seg-pct">{_pct(rem_pct, 0)}</span>'
+        elif rem_pct >= 4.0:
+            label_inside = '<span class="cov-seg-sym">Others</span>'
+        else:
+            label_inside = f'<span class="cov-seg-pct">{_pct(rem_pct, 0)}</span>'
+        tooltip = f"Other unallocated activity: {_pct(rem_pct, 1)} of trading value (Unmeasured)"
+        segments_html.append(
+            f'<div class="cov-bar-seg cov-seg-unallocated" style="width:{rem_pct:.2f}%;flex-basis:{rem_pct:.2f}%;" '
+            f'title="{_esc(tooltip)}">'
+            f'<div class="cov-seg-inner">{label_inside}</div>'
+            f'</div>'
+        )
+
+    target_line_html = (
+        f'<div class="cov-target-line" style="left:{target_pct:.1f}%;" '
+        f'title="Target benchmark: {target_pct:.0f}% coverage">'
+        f'<span class="cov-target-pin">Target: {target_pct:.0f}%</span>'
+        '</div>'
+    )
+
+    sublabels_html = (
+        '<div class="cov-sublabel-row">'
+        '<div class="cov-sublabel-col cov-sublabel-resolved">'
+        f'<span class="cov-icon-resolved">✓</span> <span><strong>Resolved {len(resolved_list)} markets: covering {_pct(headline_pct, 0)} of trading value</strong></span>'
+        '</div>'
+        '<div class="cov-sublabel-col cov-sublabel-unresolved">'
+        f'<span class="cov-icon-unresolved">✗</span> <span><strong>Unresolved:</strong> {_pct(unresolved_total, 0)} unmeasured (Not inferred from another market)</span>'
+        '</div>'
+        '</div>'
+    )
+
+    warning_html = ""
+    if is_under_target:
+        warning_html = (
+            '<div class="cov-warning-box notice-warning">'
+            '<div class="cov-warning-head">'
+            '<span class="cov-warning-icon">⚠</span>'
+            '<span class="cov-warning-title">COVERAGE WARNING</span>'
+            '</div>'
+            '<div class="cov-warning-body">'
+            f"Only <strong>{_pct(headline_pct, 0)}</strong> of the bot's trading value has been covered so far (target {target_pct:.0f}%). "
+            'The <code class="cov-dim-pill" title="View dimension in Analyst Result" onclick="if(window.location.hash!=\'#panel-report\')window.location.hash=\'#panel-report\';">market_alignment</code>, '
+            '<code class="cov-dim-pill" title="View dimension in Analyst Result" onclick="if(window.location.hash!=\'#panel-report\')window.location.hash=\'#panel-report\';">liquidity_execution</code> and '
+            '<code class="cov-dim-pill" title="View dimension in Analyst Result" onclick="if(window.location.hash!=\'#panel-report\')window.location.hash=\'#panel-report\';">leverage_exposure</code> '
+            "dimensions are <strong>ONLY</strong> scored on the primary market; the rest of the bot's activity has NOT been reviewed."
+            '</div>'
+            '</div>'
+        )
+
+    secondary_html = ""
+    if not has_full_coverage_data:
         secondary = evidence.get("secondary_market")
         if isinstance(secondary, dict) and secondary.get("symbol"):
             trend = TREND_VI.get(secondary.get("trend"), "unclear")
@@ -2138,44 +2610,50 @@ def _render_market_coverage(result: Dict[str, Any]) -> str:
             secondary_share_text = (
                 _pct(secondary_share, 0) if _is_finite_number(secondary_share) else "—"
             )
-            parts.append(
-                "<p>Second-largest market by trading share: "
-                f"<strong>{_esc(secondary.get('symbol'))}</strong> "
-                f"({secondary_share_text}) -- {trend}, {vol}, {liq}.</p>"
+            secondary_html = (
+                '<div class="card-hint" style="margin-top:0.65rem;">'
+                f"Second-largest market by trading share: <strong>{_esc(secondary.get('symbol'))}</strong> "
+                f"({secondary_share_text}) -- {trend}, {vol}, {liq}."
+                '</div>'
             )
 
-    if unresolved_markets:
-        missing_text = ", ".join(
-            f"{_esc(m.get('symbol'))} ({_pct(m.get('share_pct'), 0)})"
-            for m in unresolved_markets
-        )
-        parts.append(
-            "<p>Market data could not be measured for: "
-            + missing_text
-            + " -- NOT inferred from another market.</p>"
-        )
+    # Coverage is a representativeness warning, not optional methodology
+    # chrome: keep its interpretation visible beside the benchmark so a reader
+    # cannot mistake the covered slice for the whole bot.
+    theory = (
+        '<div class="theory theory-always-visible"><div class="theory-body">'
+        '<p><strong>Interpretation:</strong> Market data coverage reflects how much of the bot\'s total trading volume has been'
+        ' directly observed and validated against historical order book, candle series, and liquidity depth.'
+        ' When a bot trades many symbols and coverage is below the 80% benchmark, dimensions dependent on'
+        ' market microstructure (market_alignment, liquidity_execution, leverage_exposure) are only scored'
+        ' on the observed slice, and cannot be blindly extrapolated to the unmeasured markets.</p>'
+        '<p><strong>Method:</strong> Calculated from closed trades notional value distribution across symbols.'
+        ' Targets 80% coverage to minimize unobserved multi-asset tail risks.</p>'
+        '</div></div>'
+    )
 
-    if has_full_coverage_data:
-        if headline_pct < MARKET_COVERAGE_TARGET_PCT:
-            parts.append(
-                '<div class="notice notice-warning">'
-                f"WARNING: only {_pct(headline_pct, 0)} of the bot's trading value "
-                f"has been covered so far (target {MARKET_COVERAGE_TARGET_PCT:.0f}%) -- "
-                "the <strong>market_alignment</strong>, <strong>liquidity_execution</strong> "
-                "and <strong>leverage_exposure</strong> dimensions are ONLY scored on the "
-                "primary market; the rest of the bot's activity has NOT been reviewed.</div>"
-            )
-    elif primary_share_pct < 60:
-        parts.append(
-            '<div class="notice notice-warning">'
-            f"WARNING: the market being scored accounts for only {_pct(primary_share_pct, 0)} "
-            "of the bot's trading value -- the <strong>market_alignment</strong>, "
-            "<strong>liquidity_execution</strong> and <strong>leverage_exposure</strong> "
-            "dimensions are ONLY scored on this part; the rest of the bot's activity "
-            "has NOT been reviewed.</div>"
-        )
+    card_body = (
+        '<div class="cov-card-wrap">'
+        '<div class="cov-benchmark-row">'
+        '  <span class="cov-benchmark-title">DATA COVERAGE BENCHMARK</span>'
+        '  <div class="cov-benchmark-metrics">'
+        f'    <span class="cov-metric-item"><span class="cov-metric-label">TARGET:</span> <span class="cov-metric-val">{target_pct:.1f}%</span></span>'
+        '    <span class="cov-metric-sep">│</span>'
+        f'    <span class="cov-metric-item"><span class="cov-metric-label">CURRENT:</span> <span class="cov-metric-val">{headline_pct:.1f}%</span></span>'
+        f'    {status_badge}'
+        '  </div>'
+        '</div>'
+        f'{sublabels_html}'
+        '<div class="cov-bar-wrapper">'
+        f'  <div class="cov-stacked-bar">{"".join(segments_html)}</div>'
+        f'  {target_line_html}'
+        '</div>'
+        f'{warning_html}'
+        f'{secondary_html}'
+        '</div>'
+    )
 
-    return _section("Market being scored", "".join(parts), anchor="thi-truong")
+    return _section("Market being scored", card_body + theory, anchor="thi-truong")
 
 
 # --------------------------------------------------------------------------- #
@@ -2227,12 +2705,25 @@ def _render_phase_breakdown_table(strategy: Dict[str, Any]) -> str:
             phase_cell += " " + _badge(
                 f"{PHASE_CONFIDENCE_THIN_VI} (reference only)", "#9ca3af"
             )
+        pnl = row.get("total_pnl")
+        pnl_text = _money(pnl)
+        if _is_finite_number(pnl):
+            f_pnl = float(pnl)
+            if f_pnl > 0:
+                pnl_cell = f'<span class="pnl-val pnl-pos" style="color:#16a34a;font-weight:700;font-family:var(--mono);">+{_esc(pnl_text)}</span>'
+            elif f_pnl < 0:
+                pnl_cell = f'<span class="pnl-val pnl-neg" style="color:#dc2626;font-weight:700;font-family:var(--mono);">{_esc(pnl_text)}</span>'
+            else:
+                pnl_cell = f'<span class="pnl-val pnl-zero" style="font-weight:600;font-family:var(--mono);">{_esc(pnl_text)}</span>'
+        else:
+            pnl_cell = f'<span class="pnl-val">{_esc(pnl_text)}</span>'
+
         table_rows.append(
             [
                 phase_cell,
                 _esc(_num(trades, 0)),
                 _esc(_pct(row.get("win_rate"), 0)),
-                _esc(_money(row.get("total_pnl"))),
+                pnl_cell,
                 _esc(_pct(row.get("long_share_pct"), 0)) + " long",
                 _esc(_num(row.get("average_leverage"), 1)) + "x",
                 _esc(_num(row.get("median_hold_minutes"), 0)) + " min",
@@ -2356,28 +2847,12 @@ def _render_strategy_section(result: Dict[str, Any]) -> str:
     table_block = _render_phase_breakdown_table(strategy)
 
     theory = _theory(
-        "This is a STRATEGY/BEHAVIOUR profile inferred from the bot's own closed "
-        "trades -- NOT self-declared by the bot, and not a scored metric. The "
-        "per-phase table (when present) is sorted by profit contribution "
-        "descending, so the first row is the phase that made the most money. "
-        "Each row carries its own confidence label: "
-        f'"{PHASE_CONFIDENCE_ENOUGH_VI}" (10 trades or more) is enough to draw a '
-        f'pattern from, "{PHASE_CONFIDENCE_THIN_VI}" (3-9 trades) should only be '
-        f'used as a reference, and "{PHASE_CONFIDENCE_INSUFFICIENT_VI}" (fewer '
-        "than 3 trades) means that row is not representative of anything -- read "
-        'it as a hint, not a validated pattern. When the profile says "not enough '
-        'evidence" or lists a phase as "never traded", that is the system '
-        "refusing to guess, not a measurement gone missing.",
-        "Agent/backend/mcp/analytics/strategy/profile.py (classifies bias, entry "
-        "style, and performance across the uptrend/downtrend/sideways \u00d7 "
-        "calm/highly-volatile market phases) and "
-        "Agent/backend/mcp/analytics/behavior/detector.py (martingale, averaging "
-        "down, raising leverage after a loss, repeated re-entry loops) -- these "
-        "two modules are ALSO the evidence behind the "
-        '"Strategy durability across phases" and "Trading behaviour" dimension '
-        "scores further below.",
+        "Profit distribution across market regimes. Sample validity: "
+        f"<strong>{PHASE_CONFIDENCE_ENOUGH_VI}</strong> (≥10 trds) = statistically valid; "
+        f"<strong>{PHASE_CONFIDENCE_THIN_VI}</strong> (3-9 trds) = reference only; "
+        f"<strong>{PHASE_CONFIDENCE_INSUFFICIENT_VI}</strong> (<3 trds) = unrepresentative.",
+        "Inferred strategy bias and execution style mapped onto 1H OHLCV trend and volatility phases."
     )
-
     body = "".join(paragraphs) + table_block + theory
     return _section("How this bot trades", body, anchor="cach-choi")
 
@@ -2489,7 +2964,30 @@ def _synthesize_3rd_person_narrative(result: Dict[str, Any]) -> str:
     if p2:
         paragraphs.append(p2)
     paragraphs.append(p3)
-    return "".join(f"<p class='narrative-paragraph'>{p}</p>" for p in paragraphs)
+
+    cards = []
+    labels = ["Quantitative Review & Risk Score", "Performance & Behavioral Profile", "Capital Allocation Recommendation"]
+    for idx, p in enumerate(paragraphs, start=1):
+        lbl = labels[idx - 1] if idx <= len(labels) else f"Point {idx}"
+        cards.append(
+            f'<div class="expert-point-card" style="display:flex;flex-direction:column;gap:5px;background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:10px 12px;box-sizing:border-box;margin-bottom:7px;">'
+            f'<div style="display:flex;align-items:center;gap:8px;">'
+            f'<span class="expert-point-num" style="font-family:var(--mono);font-size:10px;font-weight:700;color:#38bdf8;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.2);border-radius:4px;padding:2px 6px;line-height:1.2;">{idx:02d}</span>'
+            f'<span style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#38bdf8;">{lbl}</span>'
+            f'</div>'
+            f'<div class="expert-point-content" style="font-size:12.5px;line-height:1.55;color:var(--ink-2,#cbd5e1);">{p}</div>'
+            f'</div>'
+        )
+    return f'<div class="expert-points-feed" style="display:flex;flex-direction:column;gap:6px;margin-top:0.75rem;">{"".join(cards)}</div>'
+
+
+def _format_expert_metric_highlights(text: str) -> str:
+    escaped = _esc(text)
+    return re.sub(
+        r'(\b\d{1,3}(?:,\d{3})*(?:\.\d+)?%|\b\d+(?:\.\d+)?x|\b\d+\.\d+\b)',
+        r'<strong class="expert-metric" style="font-family:var(--mono);font-weight:700;color:var(--ink,#fff);background:rgba(255,255,255,0.06);padding:0 4px;border-radius:3px;font-variant-numeric:tabular-nums;">\1</strong>',
+        escaped,
+    )
 
 
 def _render_narrative(result: Dict[str, Any]) -> str:
@@ -2524,31 +3022,58 @@ def _render_narrative(result: Dict[str, Any]) -> str:
             if len(sentences) >= 2:
                 summary_text = sentences[0]
                 bullets = sentences[1:]
-                prose_html = f"<p class='narrative-paragraph'>{_esc(summary_text)}</p>"
+                prose_html = (
+                    '<div class="expert-summary-box" style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.2);border-left:3px solid #38bdf8;border-radius:8px;padding:12px 16px;margin-top:0.5rem;margin-bottom:0.85rem;box-sizing:border-box;">'
+                    '<div class="expert-summary-label" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#38bdf8;margin-bottom:4px;">Core Strategy Thesis</div>'
+                    f'<div class="expert-summary-text" style="font-size:13.5px;line-height:1.55;color:var(--ink,#fff);font-weight:500;">{_esc(summary_text)}</div>'
+                    '</div>'
+                )
             else:
-                prose_html = f"<p class='narrative-paragraph'>{_esc(full_prose)}</p>"
+                prose_html = (
+                    '<div class="expert-summary-box" style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.2);border-left:3px solid #38bdf8;border-radius:8px;padding:12px 16px;margin-top:0.5rem;margin-bottom:0.85rem;box-sizing:border-box;">'
+                    '<div class="expert-summary-label" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#38bdf8;margin-bottom:4px;">Core Strategy Thesis</div>'
+                    f'<div class="expert-summary-text" style="font-size:13.5px;line-height:1.55;color:var(--ink,#fff);font-weight:500;">{_esc(full_prose)}</div>'
+                    '</div>'
+                )
         else:
-            prose_html = "".join(
-                f"<p class='narrative-paragraph'>{_esc(p)}</p>" for p in prose_lines
+            summary_p = "".join(f"<div style='margin-bottom:4px;'>{_esc(p)}</div>" for p in prose_lines)
+            prose_html = (
+                '<div class="expert-summary-box" style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.2);border-left:3px solid #38bdf8;border-radius:8px;padding:12px 16px;margin-top:0.5rem;margin-bottom:0.85rem;box-sizing:border-box;">'
+                '<div class="expert-summary-label" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#38bdf8;margin-bottom:4px;">Core Strategy Thesis</div>'
+                f'<div class="expert-summary-text" style="font-size:13.5px;line-height:1.55;color:var(--ink,#fff);font-weight:500;">{summary_p}</div>'
+                '</div>'
+                if summary_p else ""
             )
 
     keypoints_html = ""
     if bullets:
-        items = "".join(f"<li>{_esc(b)}</li>" for b in bullets)
+        card_items = []
+        for idx, b in enumerate(bullets, start=1):
+            highlighted = _format_expert_metric_highlights(b)
+            card_items.append(
+                f'<div class="expert-point-card" style="display:flex;align-items:flex-start;gap:10px;background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:9px 12px;box-sizing:border-box;transition:all 0.15s ease;">'
+                f'<span class="expert-point-num" style="font-family:var(--mono);font-size:10px;font-weight:700;color:#38bdf8;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.2);border-radius:4px;padding:2px 6px;line-height:1.2;flex-shrink:0;margin-top:2px;">{idx:02d}</span>'
+                f'<div class="expert-point-content" style="font-size:12.5px;line-height:1.5;color:var(--ink-2,#cbd5e1);flex:1;">{highlighted}</div>'
+                f'</div>'
+            )
+
         keypoints_html = (
-            '<div class="conclusion-section-block">'
-            '<div class="conclusion-sub-title">Key points</div>'
-            f'<ul class="findings">{items}</ul>'
+            '<div class="expert-points-wrap" style="margin-top:0.5rem;display:flex;flex-direction:column;">'
+            '<div class="expert-points-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.65rem;">'
+            '<span class="expert-points-title" style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted,#94a3b8);">Key findings & quantitative evidence</span>'
+            f'<span class="expert-points-count" style="font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;background:rgba(255,255,255,0.06);color:var(--muted,#94a3b8);">{len(bullets)} items</span>'
+            '</div>'
+            f'<div class="expert-points-feed" style="display:flex;flex-direction:column;gap:7px;max-height:285px;overflow-y:auto;padding-right:4px;box-sizing:border-box;">{"".join(card_items)}</div>'
             '</div>'
         )
 
     body = (
         '<div class="narrative-body-wrap">'
-        '<div class="narrative-meta-bar">'
+        '<div class="narrative-meta-bar" style="display:flex;align-items:center;gap:10px;margin-bottom:0.75rem;flex-wrap:wrap;">'
         '<span class="badge badge-info">INDEPENDENT VIEW</span>'
-        '<span class="meta-desc">An independent third-person view synthesised by a language model from the quantitative analysis results</span>'
+        '<span class="meta-desc" style="font-size:12px;color:var(--muted,#94a3b8);">An independent third-person view synthesised by a language model from the quantitative analysis results</span>'
         '</div>'
-        f'<div class="narrative-prose-content">{prose_html}</div>'
+        f'{prose_html}'
         f'{keypoints_html}'
         '</div>'
     )
@@ -2578,32 +3103,9 @@ def _render_dimensions_section(result: Dict[str, Any]) -> str:
             return ""
 
     theory = _theory(
-        "Each bar is one independent risk dimension, scaled 0-100, where "
-        '<strong>higher means riskier</strong> (the opposite of the "quality score" '
-        "scale). A hatched grey bar is a dimension that is <strong>not yet "
-        "measured</strong> -- not a low risk, just no evidence, so it is treated "
-        "as neutral rather than given the benefit of the doubt. The overall risk "
-        "score at the top of the page is usually NOT a simple average of these "
-        "bars: it is a weighted average based on the severity of each dimension, "
-        "and can be overridden entirely by an exchange veto or an emergency rule "
-        "if one dimension is bad enough -- see the notice at the top of the page "
-        "if that is happening here.",
-        "The 10 dimensions and their weights come from the internal QC evaluator "
-        "(<code>Agent/backend/qc/evaluator/lenses/*</code>); each lens computes "
-        "its own 0-100 score from its own evidence (closed-trade performance, "
-        "Monte Carlo simulation, stress scenarios, ledger reconciliation, ...). "
-        "The overall score is a weighted average via "
-        "<code>Agent/backend/qc/scoring/fusion.py</code>, which can be overridden "
-        "by a veto when one failure is severe enough that a good-looking average "
-        "must not be allowed to hide it.",
+        "10 independent risk dimensions scaled 0-100 (higher = riskier). Unmeasured dimensions default to neutral 50 without lowering the score.",
+        "Internal QC evaluation lenses fused via weighted average with exchange veto floors for critical risks."
     )
-    # Khối chú thích điểm số nhúng VÀO TRONG mục này, đúng như chú thích
-    # ngay dưới `_render_score_basis` đã đặt ra -- và đúng chỗ mà dấu `*`
-    # trên ba ô điểm ở đầu trang trỏ tới. Dòng gọi này trước đây thiếu, nên
-    # hàm đó đứng mồ côi: toàn bộ phần giải thích cách ra điểm (trọng số và
-    # độ tin cậy từng chiều, câu hợp nhất, và tuyên bố kiểm định
-    # out-of-sample kèm những gì nó KHÔNG chứng minh được) chưa từng hiện
-    # ra trang nào, và ba dấu `*` ở đầu trang trỏ vào chỗ trống.
     return _section(
         "Score by risk dimension",
         body + _render_score_basis(result) + theory,
@@ -2654,162 +3156,102 @@ def _render_full_score_basis(result: Dict[str, Any]) -> str:
         return ""
     fusion = score_basis.full_fusion_summary(evidence)
 
-    dim_rows = []
+    table_rows = []
     for d in dims:
         label = DIMENSION_LABEL_VI.get(d["name"], str(d["name"]))
-        if d["status"] == "AVAILABLE" and d["score"] is not None:
-            weight_text = (
-                f"weight {d['weight']:.1f}"
-                if d["weight"] is not None
-                else "weight not present in the saved record"
-            )
-            conf_text = (
-                f", confidence {d['confidence'] * 100:.0f}%"
-                if d["confidence"] is not None
-                else ""
-            )
-            dim_rows.append(
-                f"<li><strong>{_esc(label)}</strong>: {_num(d['score'], 0)}/100 "
-                f"({weight_text}{conf_text})</li>"
+        status = str(d.get("status") or "AVAILABLE").upper()
+        score_val = d.get("score")
+        weight_val = d.get("weight")
+        conf_val = d.get("confidence")
+
+        score_str = f"{_num(score_val, 0)}/100" if score_val is not None else "—"
+        weight_str = f"{weight_val:.1f}x" if weight_val is not None else "1.0x"
+        conf_str = f"{conf_val * 100:.0f}%" if conf_val is not None else "—"
+
+        if status == "AVAILABLE":
+            badge_html = '<span class="q-badge q-badge-ok">ACTIVE</span>'
+            row_cls = ""
+        else:
+            badge_html = f'<span class="q-badge q-badge-neutral">{_esc(status)}</span>'
+            row_cls = "row-unmeasured"
+
+        table_rows.append(
+            f'<tr class="{row_cls}">'
+            f'<td class="dim-col-name"><strong>{_esc(label)}</strong></td>'
+            f'<td class="dim-col-num">{score_str}</td>'
+            f'<td class="dim-col-num">{weight_str}</td>'
+            f'<td class="dim-col-num">{conf_str}</td>'
+            f'<td class="dim-col-status">{badge_html}</td>'
+            f'</tr>'
+        )
+
+    weighted_avg = fusion.get("weighted_average")
+    weighted_str = f"{weighted_avg:.1f}/100" if weighted_avg is not None else "—"
+    # `total_weight` is absent from saved assessment records (see
+    # `score_basis.full_fusion_summary`'s `has_rich_breakdown`). Formatting it
+    # unconditionally crashed every disk-read report, so the weight clause is
+    # stated only when the record actually carries the number.
+    tot_weight = fusion.get("total_weight")
+    has_rich = bool(fusion.get("has_rich_breakdown")) and tot_weight is not None
+    final_score = fusion.get("final_score", result.get("risk"))
+    final_str = f"{final_score:.0f}/100" if final_score is not None else "—"
+
+    if fusion.get("decided_by") and fusion.get("decided_by") != "WEIGHTED_AVERAGE":
+        rule_name = "VETO FLOOR" if fusion["decided_by"] == "VETO_FLOOR" else "EMERGENCY OVERRIDE"
+        reasons = "; ".join(_esc(r) for r in fusion.get("veto_reasons", []))
+        veto_box = (
+            f'<div class="score-basis-alert score-basis-veto">'
+            f'<span class="sb-badge-veto">{rule_name}</span> '
+            f'Risk elevated to <strong>{final_str}</strong> (Weighted avg: {weighted_str}). '
+            f'Trigger: {reasons}'
+            f'</div>'
+        )
+    else:
+        if has_rich:
+            basis_clause = (
+                f"Weighted average across {len(dims)} dimensions, "
+                f"total weight: {tot_weight:.1f}"
             )
         else:
-            reason = d.get("reason")
-            reason_text = f" \u2014 {_esc(str(reason))}" if reason else ""
-            dim_rows.append(
-                f"<li><strong>{_esc(label)}</strong>: not measured "
-                f"({_esc(str(d['status'] or 'UNKNOWN'))}){reason_text}</li>"
+            basis_clause = (
+                f"Weighted average across {len(dims)} dimensions; "
+                "per-dimension weights are not present in this bot's saved record"
             )
-
-    if fusion["has_rich_breakdown"] and fusion["total_weight"]:
-        n = fusion["applicable_dimensions"]
-        # KHÔNG gọi con số này là "measured": `fusion.py` đặt
-        # `applicable_dimensions = len(contributions)`, tức MỌI chiều trừ
-        # loại không áp dụng -- chiều chưa đo được vẫn nằm trong đó và vẫn
-        # ăn trọng số của nó, với điểm trung tính 50. Gọi nhầm là "đo được"
-        # thì mâu thuẫn với chính đoạn diễn giải ngay trên biểu đồ ("không
-        # phải rủi ro thấp, chỉ là chưa có bằng chứng"), và làm cỡ bằng
-        # chứng trông lớn hơn thực tế.
-        unknown_n = sum(1 for d in dims if str(d.get("status") or "").upper() != "AVAILABLE")
-        unknown_clause = (
-            f", of which {unknown_n} could not be measured and "
-            f"{'enters' if unknown_n == 1 else 'enter'} as a neutral 50 rather "
-            "than being dropped"
-            if unknown_n
-            else ""
-        )
-        fusion_sentence = (
-            f"Weighted average of "
-            f"{n if n is not None else len(dims)} dimensions that count toward the "
-            f"score (total weight {fusion['total_weight']:.1f}{unknown_clause}): "
-            + (
-                f"{fusion['weighted_average']:.1f}/100."
-                if fusion["weighted_average"] is not None
-                else "could not be computed."
-            )
-        )
-    elif fusion["weighted_average"] is not None:
-        fusion_sentence = (
-            "Weighted average of the dimensions measured above (per-dimension "
-            "weight/confidence detail is not present in this bot's saved record): "
-            f"{fusion['weighted_average']:.1f}/100."
-        )
-    else:
-        fusion_sentence = (
-            "This bot's saved record does not carry enough data to restate the "
-            "weighted average -- only the per-dimension scores/status above remain."
+        veto_box = (
+            f'<div class="score-basis-alert score-basis-normal">'
+            f'<span class="sb-badge-normal">WEIGHTED FUSION</span> '
+            f'Risk score: <strong>{final_str}</strong> ({basis_clause}).'
+            f'</div>'
         )
 
-    if fusion["decided_by"] and fusion["decided_by"] != "WEIGHTED_AVERAGE":
-        kind = (
-            "emergency rule (EMERGENCY_OVERRIDE)"
-            if fusion["decided_by"] == "EMERGENCY_OVERRIDE"
-            else "exchange veto (VETO_FLOOR)"
-        )
-        final = fusion["final_score"]
-        final_text = (
-            f"{final:.0f}/100"
-            if final is not None
-            else f"{_num(result.get('risk'), 0)}/100"
-        )
-        reasons = "; ".join(_esc(r) for r in fusion["veto_reasons"])
-        veto_sentence = (
-            f"But the final score does NOT stop at that average: the {kind} raised "
-            f"the score to {final_text}" + (f" because of {reasons}." if reasons else ".")
-        )
-    else:
-        veto_sentence = (
-            "No dimension triggered an exchange veto or emergency rule for this "
-            "bot -- the final risk score remains exactly the weighted average above."
-        )
-
-    # `dim_rows` dựng ở trên rồi bị bỏ quên: nó là phần LIỆT KÊ TỪNG CHIỀU
-    # (điểm, trọng số, độ tin cậy, và lý do khi chiều đó không đo được) --
-    # đúng thứ câu hợp nhất ngay dưới nó viện dẫn ("trung bình có trọng số
-    # của các chiều ĐO ĐƯỢC Ở TRÊN") nhưng lại không có gì ở trên để trỏ
-    # tới. Dùng cùng lớp `findings` như mọi danh sách bằng chứng khác trong
-    # module này, để không sinh thêm một kiểu trình bày thứ hai.
-    dim_list_html = (
-        f"<ul class='findings'>{''.join(dim_rows)}</ul>" if dim_rows else ""
-    )
     risk_html = (
-        '<div id="giai-thich-risk">'
-        f"<h3>Where the risk score ({_num(result.get('risk'), 0)}/100) comes from</h3>"
-        f"{dim_list_html}"
-        f"<p>{fusion_sentence} {veto_sentence}</p>"
-        f"<p>{_esc(score_basis.VALIDATION_FULL_VI)}</p>"
-        "</div>"
+        '<div id="giai-thich-risk" class="score-basis-section">'
+        f'<div class="sb-section-header"><strong>Risk Score Composition</strong> ({_num(result.get("risk"), 0)}/100)</div>'
+        '<table class="score-basis-table">'
+        '<thead><tr>'
+        '<th>Dimension</th><th>Score</th><th>Weight</th><th>Confidence</th><th>Status</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(table_rows)}</tbody>'
+        '</table>'
+        f'{veto_box}'
+        '</div>'
     )
 
     quality_html = (
-        '<div id="giai-thich-quality">'
-        f"<h3>What the quality score ({_num(result.get('quality'), 0)}/100) measures</h3>"
-        f"<p>{_esc(score_basis.QUALITY_METHOD_FULL_VI)}</p>"
-        "</div>"
+        '<div id="giai-thich-quality" class="score-basis-section">'
+        f'<div class="sb-math-col"><span class="sb-label">QUALITY SCORE ({_num(result.get("quality"), 0)}/100)</span>'
+        '<span class="sb-desc">Execution consistency & trade expectancy: Profit Factor (40%) + Win Rate (30%) + Calmar Drawdown Ratio (30%).</span></div>'
+        '</div>'
     )
 
-    cb = score_basis.full_confidence_basis(evidence)
-    conf_parts = [
-        "Confidence = (trust in the underlying data quality) \u00d7 (trust in how "
-        "measurable each dimension is) \u00d7 100, capped at 100 "
-        "(<code>Agent/backend/qc/scoring/fusion.py::fuse</code>)."
-    ]
-    if cb["has_data_quality"] and cb["bot_overall_score"] is not None:
-        conf_parts.append(
-            f"This bot's data quality: overall score "
-            f"{cb['bot_overall_score']:.0f}/100"
-            + (
-                f", freshness {cb['bot_freshness_score']:.0f}/100"
-                if cb["bot_freshness_score"] is not None
-                else ""
-            )
-            + "."
-        )
-    else:
-        conf_parts.append(
-            "Source data quality detail is not present in this bot's saved record."
-        )
-    if cb["dimension_confidence_count"]:
-        conf_parts.append(
-            f"{cb['dimension_confidence_count']}/{cb['dimension_count']} dimensions "
-            "carry their own confidence value (listed above)."
-        )
-    else:
-        conf_parts.append(
-            "Per-dimension confidence is not present in the saved record."
-        )
-    if not cb["has_market_context"]:
-        conf_parts.append(
-            "This bot has no market context (market_context), so the 'market "
-            "source' part of confidence does not contribute."
-        )
     confidence_html = (
-        '<div id="giai-thich-confidence">'
-        f"<h3>What the confidence ({_pct(result.get('confidence'), 0)}) measures</h3>"
-        f"<p>{' '.join(conf_parts)}</p>"
-        "</div>"
+        '<div id="giai-thich-confidence" class="score-basis-section">'
+        f'<div class="sb-math-col"><span class="sb-label">CONFIDENCE ({_pct(result.get("confidence"), 0)})</span>'
+        '<span class="sb-desc">Data Trust (freshness & candle completeness) × Dimension Measurability Ratio.</span></div>'
+        '</div>'
     )
 
-    return risk_html + quality_html + confidence_html
+    return f'<div class="score-basis-wrap">{risk_html}<div class="score-basis-math-grid">{quality_html}{confidence_html}</div></div>'
 
 
 def _render_limited_score_basis(result: Dict[str, Any]) -> str:
@@ -2819,132 +3261,73 @@ def _render_limited_score_basis(result: Dict[str, Any]) -> str:
         return ""
     fusion = score_basis.limited_fusion_summary(components)
 
-    comp_rows = []
+    table_rows = []
     for c in components:
         label = c.get("label") or c.get("name") or "—"
-        weight_text = f"{c['weight']:.1f}" if c.get("weight") is not None else "—"
-        if c.get("status") == "AVAILABLE" and c.get("score") is not None:
-            comp_rows.append(
-                f"<li><strong>{_esc(label)}</strong>: {_num(c['score'], 0)}/100 "
-                f"(weight {weight_text})</li>"
-            )
-        else:
-            tag = (
-                "concealed"
-                if c.get("status") == "UNKNOWN_CONCEALED"
-                else "missing data"
-            )
-            comp_rows.append(
-                f"<li><strong>{_esc(label)}</strong>: {_num(c.get('score'), 0)}/100 "
-                f"({tag}, weight {weight_text})</li>"
-            )
-    concealed_labels = [
-        c.get("label") or c.get("name")
-        for c in components
-        if c.get("status") == "UNKNOWN_CONCEALED"
-    ]
+        status = str(c.get("status") or "AVAILABLE").upper()
+        score_val = c.get("score")
+        weight_val = c.get("weight")
 
-    weighted_average = fusion["weighted_average"]
-    fusion_sentence = (
-        (
-            f"Weighted average of {len(components)} components (total weight "
-            f"{fusion['total_weight']:.2f}): {weighted_average:.1f}/100."
-            if weighted_average is not None
-            else "The weighted average could not be computed (weight missing)."
+        score_str = f"{_num(score_val, 0)}/100" if score_val is not None else "—"
+        weight_str = f"{weight_val:.1f}x" if weight_val is not None else "1.0x"
+
+        if status == "AVAILABLE":
+            badge_html = '<span class="q-badge q-badge-ok">ACTIVE</span>'
+            row_cls = ""
+        else:
+            tag = "CONCEALED" if status == "UNKNOWN_CONCEALED" else "MISSING"
+            badge_html = f'<span class="q-badge q-badge-neutral">{tag}</span>'
+            row_cls = "row-unmeasured"
+
+        table_rows.append(
+            f'<tr class="{row_cls}">'
+            f'<td class="dim-col-name"><strong>{_esc(label)}</strong></td>'
+            f'<td class="dim-col-num">{score_str}</td>'
+            f'<td class="dim-col-num">{weight_str}</td>'
+            f'<td class="dim-col-status">{badge_html}</td>'
+            f'</tr>'
         )
-        + " The LIMITED ASSESSMENT branch has NO exchange veto or emergency rule -- "
-        "the risk score ALWAYS equals this weighted average exactly, with no "
-        "exception overriding it."
+
+    weighted_avg = fusion.get("weighted_average")
+    weighted_str = f"{weighted_avg:.1f}/100" if weighted_avg is not None else "—"
+    final_score = fusion.get("final_score", result.get("risk"))
+    final_str = f"{final_score:.0f}/100" if final_score is not None else "—"
+
+    summary_box = (
+        f'<div class="score-basis-alert score-basis-normal">'
+        f'<span class="sb-badge-normal">LIMITED RECORD</span> '
+        f'Risk score: <strong>{final_str}</strong> (Weighted base: {weighted_str}).'
+        f'</div>'
     )
-    if concealed_labels:
-        fusion_sentence += (
-            f" {len(concealed_labels)} dimensions are always scored at a high risk "
-            f"level (75/100, weight 1.3) because OKX does not publicly expose this "
-            f"bot's trade ledger: "
-            + ", ".join(_esc(str(x)) for x in concealed_labels)
-            + "."
-        )
 
     risk_html = (
-        '<div id="giai-thich-risk">'
-        f"<h3>Where the risk score ({_num(result.get('risk'), 0)}/100) comes from</h3>"
-        f"<p>{fusion_sentence}</p>"
-        + _percentile_findings_html(components)
-        + f"<p>{_esc(score_basis.VALIDATION_LIMITED_VI)}</p>"
-        "</div>"
+        '<div id="giai-thich-risk" class="score-basis-section">'
+        f'<div class="sb-section-header"><strong>Component Breakdown</strong> ({_num(result.get("risk"), 0)}/100)</div>'
+        '<table class="score-basis-table">'
+        '<thead><tr>'
+        '<th>Component</th><th>Score</th><th>Weight</th><th>Status</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(table_rows)}</tbody>'
+        '</table>'
+        f'{summary_box}'
+        '</div>'
     )
 
-    qb = score_basis.quality_basis_limited(evidence)
-    quality_parts = ["The quality score starts from a base of 50 points."]
-    if qb:
-        if qb["lead_days"] is not None:
-            quality_parts.append(
-                f"Adds up to 15 points based on the number of days as a lead trader "
-                f"(record: {qb['lead_days']} days)."
-            )
-        if qb["pnl"] is not None:
-            sign = "positive" if qb["pnl"] > 0 else "negative"
-            quality_parts.append(
-                f"Adds 10 points if PnL is positive / subtracts 20 points if negative "
-                f"(record: PnL {qb['pnl']:,.0f} USDT, {sign})."
-            )
-        if qb["win_ratio_pct"] is not None:
-            quality_parts.append(
-                "Adds (share of winning days \u2212 50%) \u00d7 40 (public stats: share "
-                f"of winning days {qb['win_ratio_pct']:.1f}%)."
-            )
-        if qb["wiped_out"]:
-            quality_parts.append(
-                "Subtracts 30 points because the weekly capital curve fell to zero "
-                "(wiped out) at least once."
-            )
-        quality_parts.append(
-            f"Capped at {qb['cap']:.0f}/100 -- a bot that hides its trade ledger "
-            "cannot be rated 'excellent' no matter how good the surface looks."
-        )
-    else:
-        quality_parts.append(
-            "Not enough ranking/daily-stats record to state a specific basis."
-        )
     quality_html = (
-        '<div id="giai-thich-quality">'
-        f"<h3>What the quality score ({_num(result.get('quality'), 0)}/100) measures</h3>"
-        f"<p>{' '.join(quality_parts)}</p>"
-        "</div>"
+        '<div id="giai-thich-quality" class="score-basis-section">'
+        f'<div class="sb-math-col"><span class="sb-label">QUALITY SCORE ({_num(result.get("quality"), 0)}/100)</span>'
+        '<span class="sb-desc">Base 50 pts + Lead days factor + Cumulative PnL sign.</span></div>'
+        '</div>'
     )
 
-    cf = score_basis.limited_confidence_breakdown(evidence)
-    if cf:
-        stream_items = "".join(
-            f"<li>{'✓' if present else '✗'} {_esc(label)}</li>"
-            for label, present in cf["stream_detail"]
-        )
-        confidence_body = (
-            "<p>Confidence = (trust in what HAS been measured, combined using the "
-            "noisy-OR rule for independent evidence: each additional source can only "
-            "INCREASE it, never decrease it) \u00d7 (coverage = weight share of the "
-            "measured dimensions / total weight), then capped by a ceiling based on "
-            "the NUMBER OF PUBLIC DATA STREAMS that could be combined for this "
-            "bot.</p>"
-            f"<p>Confidence of the measured dimensions (before coverage): "
-            f"{cf['measured_confidence_pct']:.1f}%. Coverage: "
-            f"{cf['coverage_pct']:.1f}%. Number of data streams combined: "
-            f"{cf['streams']}/4:</p>"
-            f"<ul class='findings'>{stream_items}</ul>"
-            f"<p>Confidence ceiling = min(45%, 15% + 7.5% \u00d7 {cf['streams']}) = "
-            f"{cf['ceiling_pct']:.1f}%. Implied confidence = min(ceiling, measured "
-            f"\u00d7 coverage) = {cf['implied_confidence_pct']:.1f}%.</p>"
-        )
-    else:
-        confidence_body = "<p>Not enough data to restate the confidence formula.</p>"
     confidence_html = (
-        '<div id="giai-thich-confidence">'
-        f"<h3>What the confidence ({_pct(result.get('confidence'), 0)}) measures</h3>"
-        f"{confidence_body}"
-        "</div>"
+        '<div id="giai-thich-confidence" class="score-basis-section">'
+        f'<div class="sb-math-col"><span class="sb-label">CONFIDENCE ({_pct(result.get("confidence"), 0)})</span>'
+        '<span class="sb-desc">Derived from observable history length and data source trust.</span></div>'
+        '</div>'
     )
 
-    return risk_html + quality_html + confidence_html
+    return f'<div class="score-basis-wrap">{risk_html}<div class="score-basis-math-grid">{quality_html}{confidence_html}</div></div>'
 
 
 def _render_score_basis(result: Dict[str, Any]) -> str:
@@ -3025,7 +3408,10 @@ def _render_full_dimension_bars(
                 )
             )
 
-    return _horizontal_bars(rows)
+    measured = [r for r in rows if r.measured and r.value is not None]
+    unmeasured = [r for r in rows if not r.measured or r.value is None]
+    measured.sort(key=lambda r: float(r.value or 0.0), reverse=True)
+    return _horizontal_bars(measured + unmeasured)
 
 
 def _render_component_bars(components: List[Any]) -> str:
@@ -3125,19 +3511,8 @@ def _render_growth_curve(result: Dict[str, Any]) -> str:
     if not chart:
         return ""
     theory = _theory(
-        "The x-axis is the ORDER of closed trades (trade #1 -> the last trade), not"
-        " real time -- two adjacent points on this axis could be minutes or days"
-        " apart. The y-axis is CUMULATIVE profit/loss since the first trade, in"
-        " actual USDT (not converted to %). A steadily rising line is stable growth;"
-        " a long flat stretch followed by one sharp jump is growth that depends on a"
-        " handful of lucky trades -- these two shapes can produce the same final"
-        " 'total profit' figure but carry very different confidence. The 'Trough'"
-        " marker flags the exact point where cumulative capital was at its LOWEST"
-        " across the whole history -- this is a point in time, not a % drawdown"
-        " figure (see the Trade metrics section for that percentage).",
-        "Directly accumulates each trade's realized profit/loss (realized_pnl), in"
-        " the exact order trades were closed (close_time) -- no interpolation, no"
-        " smoothing, and open positions are not counted.",
+        "Tracks realized USDT capital trajectory over closed trades. Flags peak equity and deepest historical trough.",
+        "Direct cumulative sum of realized PnL: Equity(t) = Initial + ∑ PnL(i) directly from closed trades (excludes open positions)."
     )
     return (
         '<div class="growth-curve-panel">'
@@ -3298,63 +3673,56 @@ def _render_monte_carlo(result: Dict[str, Any]) -> str:
             )
         parts.append(f'<div class="notice notice-warning">{thin_text}</div>')
 
-    fan_rows: List[Tuple[str, Optional[float]]] = [
-        ("P05", mc.get("profit_pct_p05")),
-        ("P25", mc.get("profit_pct_p25")),
-        ("P50", mc.get("profit_pct_p50")),
-        ("P75", mc.get("profit_pct_p75")),
-        ("P95", mc.get("profit_pct_p95")),
-    ]
-    if any(_is_finite_number(v) for _, v in fan_rows):
+    # 1. Row 1: Unified Multi-Horizon Simulation & Tail Risk Distribution Chart
+    unified_chart = _render_unified_monte_carlo_chart(mc)
+    if unified_chart:
+        parts.append(f'<div class="mc-full-row">{unified_chart}</div>')
+    else:
+        # Fallback if horizon_scenarios is empty
+        fan_rows = [
+            ("P05", max(-100.0, float(mc.get("profit_pct_p05"))) if _is_finite_number(mc.get("profit_pct_p05")) else None),
+            ("P25", max(-100.0, float(mc.get("profit_pct_p25"))) if _is_finite_number(mc.get("profit_pct_p25")) else None),
+            ("P50", mc.get("profit_pct_p50")),
+            ("P75", mc.get("profit_pct_p75")),
+            ("P95", mc.get("profit_pct_p95")),
+        ]
         chart = _diverging_bars(fan_rows)
-        theory = _theory(
-            "Each bar is one percentile of the simulated end-of-horizon outcome, as a"
-            " % of reference capital; the middle line is break-even (0%). A green bar"
-            " to the right = a profit at that percentile, a red bar to the left = a"
-            " loss. If P05 is already deeply negative, it means that in the bad-case"
-            f" scenario (worst 5%), the bot loses {_num(abs(fan_rows[0][1]), 0) if _is_finite_number(fan_rows[0][1]) else '—'}%"
-            " of capital even though the median scenario (P50) may still be positive"
-            " -- the gap between those two numbers is the real risk, not the median"
-            " figure alone.",
-            f"Stationary bootstrap (Politis &amp; Romano 1994) on"
-            f" {_int_text(mc.get('sample_size'))} closed trades, repeated"
-            f" {_int_text(mc.get('iterations'))} times, drawing {_int_text(mc.get('horizon_trades'))}"
-            " trades each time. Block length is geometrically random with expectation"
-            " L = n^(1/3) instead of a fixed number, so no single choice of L imposes"
-            " itself on the result. The simulation uses only CLOSED trades, not open"
-            " positions -- if the bot is holding an unrealised loss (see the notice"
-            " above if present), these probabilities are more optimistic than reality.",
-        )
-        parts.append(_subsection("End-of-horizon outcome percentiles", chart, theory))
+        if chart:
+            theory = _theory(
+                "Simulated terminal return distribution across capital percentiles. Spread between Median (P50) and Stress (P05) measures downside tail risk.",
+                f"Stationary bootstrap (Politis & Romano 1994): {_int_text(mc.get('iterations', 10000))} resampled paths over {_int_text(mc.get('horizon_trades', 50))} trades."
+            )
+            parts.append(f'<div class="mc-full-row">{_subsection("End-of-horizon outcome percentiles", chart, theory)}</div>')
 
-    dd_rows: List[Tuple[str, Optional[float]]] = [
-        ("Median", mc.get("median_max_drawdown")),
-        ("P90", mc.get("p90_max_drawdown")),
-        ("P95", mc.get("p95_max_drawdown")),
-        ("P99", mc.get("p99_max_drawdown")),
-        ("Worst", mc.get("worst_percentile_drawdown")),
-    ]
-    if any(_is_finite_number(v) for _, v in dd_rows):
-        chart = _vertical_bars(dd_rows, max_value=100.0)
-        theory = _theory(
-            "The maximum drawdown simulated at each percentile of the runs, not a"
-            ' drawdown that actually happened. The "Worst" bar is the single worst'
-            " run across every iteration -- a bar near 100% means there is a scenario"
-            " that wipes out nearly all reference capital, even if the median still"
-            " looks fine.",
-            "Computed on the same stationary-bootstrap simulation above: the maximum"
-            " drawdown within each run is taken, then ranked into percentiles across"
-            " every iteration.",
+    # 2. Row 2: Multi-horizon comparison (left) & Key probabilities (right)
+    horizon_comp_html = _render_horizon_comparison(mc)
+    key_prob_html = _render_key_probabilities(mc)
+    if horizon_comp_html and key_prob_html:
+        parts.append(
+            f'<div class="mc-pair-row">'
+            f'<div class="mc-pair-cell">{horizon_comp_html}</div>'
+            f'<div class="mc-pair-cell">{key_prob_html}</div>'
+            f'</div>'
         )
-        parts.append(_subsection("Simulated drawdown by percentile", chart, theory))
-
-    parts.append(_render_horizon_comparison(mc))
-    parts.append(_render_horizon_probability_chart(mc))
-    parts.append(_render_key_probabilities(mc))
+    elif horizon_comp_html or key_prob_html:
+        parts.append(f'<div class="mc-full-row">{horizon_comp_html or key_prob_html}</div>')
 
     body = "".join(p for p in parts if p)
     if not body:
         return ""
+    # One methodology drawer for the whole section, not one per sub-chart.
+    body += _theory(
+        "Outcome dispersion, drawdown and ruin probability across three trade "
+        "horizons. A median that falls from SHORT to LONG is expectancy decay; "
+        "a rising ruin probability is the same story told from the tail.",
+        "Stationary bootstrap (Politis &amp; Romano 1994), "
+        f"{_int_text(mc.get('iterations') or 10000)} resampled paths, re-run at "
+        "SHORT = 0.2x, MEDIUM = 1.0x and LONG = 3.0x the observed trade count. "
+        "P(profit) = terminal equity above starting equity. Percentiles deeper "
+        "than -100% are reported as -100%, the liquidation boundary. Streak "
+        "excess = max(0, observed &minus; analytical Markov-binomial baseline at "
+        "the observed loss rate), so only clustering beyond chance is counted.",
+    )
     return _section("Monte Carlo simulation", body, anchor="monte-carlo")
 
 
@@ -3369,26 +3737,120 @@ def _render_horizon_comparison(mc: Dict[str, Any]) -> str:
     if not isinstance(scenarios, list) or not scenarios:
         return ""
     by_label = {s.get("label"): s for s in scenarios if isinstance(s, dict)}
-    cards = []
+    rows_html = []
+    short_s = by_label.get("SHORT")
+    long_s = by_label.get("LONG")
+
     for key in ("SHORT", "MEDIUM", "LONG"):
         s = by_label.get(key)
         if not s:
             continue
+        trades = s.get("horizon_trades")
         pop = s.get("probability_of_profit")
-        cards.append(
-            '<div class="horizon-card">'
-            f'<div class="horizon-title">{_esc(HORIZON_LABEL_VI.get(key, key))}</div>'
-            f'<div class="horizon-trades">{_int_text(s.get("horizon_trades"))} trades</div>'
-            f'<div class="horizon-pop" style="color:{_risk_color(100 - float(pop)) if _is_finite_number(pop) else "inherit"}">'
-            f"{_pct(pop, 0)} chance of profit</div>"
-            f'<div class="horizon-sub">P(loss at horizon end) {_pct(s.get("p_loss_after_horizon"), 0)} &middot;'
-            f" P(ruin) {_pct(s.get('p_ruin'), 0)}</div>"
-            "</div>"
+        p_loss = s.get("p_loss_after_horizon")
+        p_ruin = s.get("p_ruin")
+
+        pop_num = float(pop) if _is_finite_number(pop) else 0.0
+        pop_pct_str = _format_prob_pct(pop)
+        loss_pct_str = _format_prob_pct(p_loss)
+        ruin_pct_str = _format_prob_pct(p_ruin)
+
+        bar_w = max(0.0, min(100.0, pop_num))
+        if pop_num >= 50.0:
+            color = "#10b981"
+        elif pop_num >= 20.0:
+            color = "#f59e0b"
+        else:
+            color = "#ef4444"
+
+        ruin_color = "#ef4444" if (_is_finite_number(p_ruin) and float(p_ruin) > 0.05) else "var(--muted, #64748b)"
+        loss_color = "#ef4444" if (_is_finite_number(p_loss) and float(p_loss) >= 60.0) else "var(--ink-2, #94a3b8)"
+
+        trades_str = f"{_int_text(trades)} trds"
+        row_tooltip = f"Monte Carlo bootstrap across 10,000 scenarios over {_int_text(trades)} trades"
+
+        rows_html.append(
+            f'<tr class="hz-matrix-row" data-hz="{key.lower()}" title="{_esc(row_tooltip)}">'
+            f'<td class="col-hz"><span class="hz-pill hz-pill-{key.lower()}">{key}</span></td>'
+            f'<td class="col-sample"><span class="hz-sample">{trades_str}</span></td>'
+            f'<td class="col-pop">'
+            f'  <div class="hz-progress-wrap">'
+            f'    <div class="hz-progress-track"><div class="hz-progress-bar" style="width:{bar_w:.1f}%;background:{color};"></div></div>'
+            f'    <span class="hz-progress-val" style="color:{color};">{pop_pct_str}</span>'
+            f'  </div>'
+            f'</td>'
+            f'<td class="col-loss-ruin">'
+            f'  <span class="hz-loss-val" style="color:{loss_color};">{loss_pct_str}</span>'
+            f'  <span class="hz-divider">&middot;</span>'
+            f'  <span class="hz-ruin-val" style="color:{ruin_color};">{ruin_pct_str}</span>'
+            f'</td>'
+            f'</tr>'
         )
-    if not cards:
+
+    if not rows_html:
         return ""
-    label = mc.get("horizon_stability_label")
-    label_html = f'<div class="horizon-label">{_esc(label)}</div>' if label else ""
+
+    table_html = (
+        '<div class="hz-matrix-wrap">'
+        '<table class="hz-matrix-table">'
+        '<thead><tr>'
+        '<th class="col-hz" title="Simulation horizon (Short / Medium / Long)">Horizon</th>'
+        '<th class="col-sample" title="Sample size in trades for this horizon">Sample</th>'
+        '<th class="col-pop" title="Probability of ending with profit (Profit &gt; 0)">Profit Chance</th>'
+        '<th class="col-loss-ruin" title="Probability of loss at horizon end &middot; Probability of ruin">Loss &middot; Ruin</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows_html)}</tbody>'
+        '</table>'
+        '</div>'
+    )
+
+    insight_html = ""
+    stability_label = mc.get("horizon_stability_label")
+    if short_s and long_s:
+        s_pop = float(short_s.get("probability_of_profit") or 0.0)
+        l_pop = float(long_s.get("probability_of_profit") or 0.0)
+
+        if stability_label in ("HOLDS ONLY AT SHORT HORIZON", "CHỈ ỔN Ở NGẮN HẠN") or (s_pop >= 50.0 and l_pop < 50.0):
+            callout_icon = "⚠"
+            callout_class = "hz-insight-warn"
+            callout_title = "HOLDS ONLY AT SHORT HORIZON"
+            callout_msg = f"Profit edge ({_pct(s_pop, 1)}) decays sharply over longer horizons ({_pct(l_pop, 1)}); strategy relies on short sample."
+        elif stability_label in ("NEEDS MORE TIME", "CẦN THỜI GIAN") or (s_pop < 50.0 and l_pop >= 50.0):
+            callout_icon = "⏳"
+            callout_class = "hz-insight-info"
+            callout_title = "NEEDS MORE TIME TO CONVERGE"
+            callout_msg = f"Requires sufficient trade sample to realise statistical edge ({_pct(s_pop, 1)} &rarr; {_pct(l_pop, 1)})."
+        elif stability_label in ("STABLE ACROSS HORIZONS", "ỔN ĐỊNH MỌI HORIZON") or (s_pop >= 50.0 and l_pop >= 50.0):
+            if s_pop >= 50.0 and l_pop >= 50.0:
+                callout_icon = "✔"
+                callout_class = "hz-insight-positive"
+                callout_title = "STABLE ACROSS HORIZONS"
+                callout_msg = f"Profit chance remains solid ({_pct(s_pop, 1)} &rarr; {_pct(l_pop, 1)}), confirming persistent statistical edge."
+            else:
+                callout_icon = "⚡"
+                callout_class = "hz-insight-decay"
+                callout_title = "PERSISTENT NEGATIVE EDGE"
+                callout_msg = f"Profit probability remains depressed across all simulated horizons ({_pct(s_pop, 1)} &rarr; {_pct(l_pop, 1)})."
+        else:
+            callout_icon = "ℹ"
+            callout_class = "hz-insight-info"
+            callout_title = "MULTI-HORIZON OUTCOME"
+            callout_msg = f"Profit chance varies {_pct(s_pop, 1)} &rarr; {_pct(l_pop, 1)} across horizons."
+
+        insight_html = (
+            f'<div class="hz-insight-callout {callout_class}">'
+            f'<span class="hz-insight-icon">{callout_icon}</span>'
+            f'<div class="hz-insight-body"><strong>{callout_title}:</strong> {callout_msg}</div>'
+            f'</div>'
+        )
+    elif stability_label:
+        insight_html = (
+            f'<div class="hz-insight-callout hz-insight-info">'
+            f'<span class="hz-insight-icon">ℹ</span>'
+            f'<div class="hz-insight-body"><strong>INSIGHT:</strong> {_esc(stability_label)}</div>'
+            f'</div>'
+        )
+
     exceeds_html = ""
     if mc.get("horizon_exceeds_observed"):
         days = mc.get("horizon_calendar_days")
@@ -3400,131 +3862,407 @@ def _render_horizon_comparison(mc: Dict[str, Any]) -> str:
             else ""
         )
         exceeds_html = (
-            '<div class="notice notice-warning">The simulated horizon is longer than'
+            '<div class="notice notice-warning" style="margin-top:0.5rem;font-size:11.5px;padding:6px 10px;">The simulated horizon is longer than'
             f" the actual observed data{detail}: this is an EXTRAPOLATION beyond the"
             " observed data, not a validated result.</div>"
         )
-    theory = _theory(
-        "Compares the same bot at three different simulation lengths: SHORT (a few"
-        " trades ahead), MEDIUM (exactly the number of trades the bot already has),"
-        " LONG (more trades, extrapolating further). If all three cards agree (all"
-        " high or all low), the conclusion does not depend on which horizon is"
-        " chosen. If they diverge -- for example solid at SHORT but worsening at"
-        " LONG -- the label above states that pattern explicitly, and that is a more"
-        " important signal than any single number.",
-        "Same stationary-bootstrap engine as above, re-run three times with three"
-        ' different horizon_trades values. "SHORT/MEDIUM/LONG" and the converted'
-        " calendar-day figures use this specific bot's own observed trading pace"
-        " (trades/day), not one constant shared across every bot.",
-    )
     return _subsection(
         "Multi-horizon comparison",
-        f'<div class="horizon-row">{"".join(cards)}</div>{label_html}{exceeds_html}',
-        theory,
+        f'{table_html}{insight_html}{exceeds_html}',
+        "",
     )
 
 
-def _render_horizon_probability_chart(mc: Dict[str, Any]) -> str:
-    """Grouped-bar counterpart to `_render_horizon_comparison`'s text cards
-    above: the same three horizons' `probability_of_profit`, but as an actual
-    chart rather than three numbers a reader has to compare by eye across
-    separate cards. Project owner's own explicit request ("biểu đồ cột nhóm
-    so sánh xác suất có lãi giữa ba horizon").
+def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
+    """Biểu đồ hợp nhất toàn diện Monte Carlo: kết hợp cả 3 yếu tố cốt tử:
+      1. Phân vị kết cục (P05..P95) chặn sàn thanh lý -100.0%
+      2. Mức độ sụt giảm tối đa (Median & Worst Drawdown)
+      3. Diễn tiến xác suất có lãi & cháy vốn theo đa kỳ hạn (Short/Medium/Long)
+    trên một khung nhìn trực quan duy nhất chuẩn mực tài chính định lượng.
     """
     scenarios = mc.get("horizon_scenarios")
     if not isinstance(scenarios, list) or not scenarios:
         return ""
     by_label = {s.get("label"): s for s in scenarios if isinstance(s, dict)}
-    rows: List[Tuple[str, Optional[float]]] = []
+    valid_scenarios = []
     for key in ("SHORT", "MEDIUM", "LONG"):
         s = by_label.get(key)
-        if not s:
-            continue
-        rows.append((HORIZON_LABEL_VI.get(key, key), s.get("probability_of_profit")))
-    if not rows or not any(_is_finite_number(v) for _, v in rows):
+        if s and isinstance(s, dict):
+            valid_scenarios.append((key, s))
+    if not valid_scenarios:
         return ""
-    chart = _vertical_bars(rows, max_value=100.0, unit="%", higher_is_better=True)
-    theory = _theory(
-        "Each bar is the simulated probability that horizon ends WITH A PROFIT (not"
-        " how much profit, just whether there is one) -- a tall bar is good, the"
-        " opposite of the drawdown chart above (where a tall bar is bad), so here"
-        " green marks a tall bar and red marks a short one instead of the reverse."
-        " Three bars declining from SHORT to LONG means the statistical edge thins"
-        " out the further out you look; three bars flat or rising means the"
-        " conclusion does not depend on which horizon is chosen.",
-        "Same `horizon_scenarios` data as above, just visualising a single field"
-        " (`probability_of_profit`) as bars instead of number cards, to make it"
-        " easier to compare all three horizons at a glance.",
+
+    width = 720.0
+    height = 360.0
+    pad_l = 75.0
+    pad_r = 96.0
+    pad_t = 42.0
+    pad_b = 64.0
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+
+    # --- Y domain -------------------------------------------------------- #
+    # The axis follows the data, and the ruin floor is only part of the axis
+    # when the simulation actually reaches for it. Pinning every chart to
+    # -100% looked rigorous but spent roughly half the canvas drawing an empty
+    # liquidation zone for a bot whose worst percentile never went negative,
+    # squashing the boxes that carry the answer into the top half -- and it
+    # printed a red RUIN banner on a bot with a 0% ruin probability.
+    lows: List[float] = []
+    highs: List[float] = []
+    ruin_risk = False
+    for _, s in valid_scenarios:
+        raw_05 = s.get("profit_pct_p05")
+        p05_v = float(raw_05) if _is_finite_number(raw_05) else -100.0
+        if p05_v <= -100.0:
+            ruin_risk = True
+        lows.append(max(-100.0, p05_v))
+        dd_v = s.get("median_max_drawdown")
+        if _is_finite_number(dd_v):
+            lows.append(max(-100.0, -float(dd_v)))
+        v = s.get("profit_pct_p95")
+        if _is_finite_number(v):
+            highs.append(float(v))
+        pr = s.get("p_ruin")
+        if _is_finite_number(pr) and float(pr) > 0.05:
+            ruin_risk = True
+
+    data_low = min(lows) if lows else -100.0
+    data_high = max(highs) if highs else 10.0
+    # Breakeven is always on the axis: it is the line every reader compares to.
+    data_low = min(data_low, 0.0)
+    data_high = max(data_high, 0.0)
+
+    if ruin_risk:
+        # A run that can be liquidated must show the floor it can hit.
+        y_floor_val = -100.0
+    else:
+        headroom = max(5.0, (data_high - data_low) * 0.12)
+        y_floor_val = math.floor((data_low - headroom) / 10.0) * 10.0
+    y_ceil_val = math.ceil((data_high + max(5.0, (data_high - data_low) * 0.12)) / 10.0) * 10.0
+    if y_ceil_val <= y_floor_val:
+        y_ceil_val = y_floor_val + 10.0
+    y_span = max(y_ceil_val - y_floor_val, 1.0)
+
+    def to_y(val: float) -> float:
+        c_val = max(y_floor_val, min(y_ceil_val, val))
+        ratio = (c_val - y_floor_val) / y_span
+        return (pad_t + plot_h) - ratio * plot_h
+
+    y_ruin = to_y(-100.0)
+    y_zero = to_y(0.0)
+
+    svg_parts: List[str] = []
+
+    # 1. Background grid.
+    # Ticks are derived from the domain rather than hardcoded, so the same code
+    # draws a readable axis for a bot ranging +1%..+124% and for one pinned to
+    # the liquidation floor.
+    raw_step = y_span / 5.0
+    magnitude = 10.0 ** math.floor(math.log10(raw_step)) if raw_step > 0 else 10.0
+    for candidate in (1.0, 2.0, 2.5, 5.0, 10.0):
+        step = candidate * magnitude
+        if step >= raw_step:
+            break
+    tick = math.ceil(y_floor_val / step) * step
+    while tick <= y_ceil_val + 1e-9:
+        y_t = to_y(tick)
+        if abs(tick) > 1e-9 and pad_t + 6 <= y_t <= pad_t + plot_h - 6:
+            svg_parts.append(_line(pad_l, y_t, pad_l + plot_w, y_t, stroke="var(--line-2, #334155)", width=1.0, dash="4,4", extra='opacity="0.45"'))
+            svg_parts.append(_text(pad_l - 8, y_t + 4, f"{tick:+.0f}%", anchor="end", fill="var(--ink-3, #94a3b8)", extra='font-size="10"'))
+        tick += step
+
+    # The ruin floor is drawn only when the simulation can actually reach it.
+    # A red "LIQUIDATION FLOOR" banner on a bot with 0% ruin probability is a
+    # false alarm, and a false alarm costs the reader trust in the real ones.
+    if ruin_risk:
+        svg_parts.append(_line(pad_l, y_ruin, pad_l + plot_w, y_ruin, stroke="var(--down, #dc2626)", width=2.0, dash="6,4"))
+        svg_parts.append(_text(pad_l - 8, y_ruin + 4, "-100%", anchor="end", fill="var(--down, #ef4444)", extra='font-size="10" font-weight="bold"'))
+        svg_parts.append(_text(pad_l + 8, y_ruin - 6, "RUIN / LIQUIDATION FLOOR", fill="var(--down, #ef4444)", extra='font-size="10" font-weight="bold"'))
+
+    # Breakeven line (0%) -- always present, it is the reference every reader uses.
+    svg_parts.append(_line(pad_l, y_zero, pad_l + plot_w, y_zero, stroke="var(--ink, #0f172a)", width=1.5, extra='opacity="0.55"'))
+    svg_parts.append(_text(pad_l - 8, y_zero + 4, "0%", anchor="end", fill="var(--ink, #0f172a)", extra='font-weight="bold" font-size="10"'))
+    svg_parts.append(_text(pad_l + plot_w - 4, y_zero - 6, "Breakeven", anchor="end", fill="var(--ink-3, #94a3b8)", extra='font-size="10"'))
+
+    n_cols = len(valid_scenarios)
+    col_x_list = []
+    for i in range(n_cols):
+        cx = pad_l + plot_w * (2 * i + 1) / (2 * n_cols)
+        col_x_list.append(cx)
+
+    # 2. Shaded Fan Ribbons connecting columns
+    if n_cols >= 2:
+        p95_points = []
+        p50_points = []
+        p05_points = []
+        for i, (_, s) in enumerate(valid_scenarios):
+            cx = col_x_list[i]
+            p95_val = float(s.get("profit_pct_p95") or 0.0)
+            p50_val = float(s.get("profit_pct_p50") or 0.0)
+            raw_05 = s.get("profit_pct_p05")
+            p05_val = float(raw_05) if _is_finite_number(raw_05) else -100.0
+            p95_points.append((cx, to_y(p95_val)))
+            p50_points.append((cx, to_y(p50_val)))
+            p05_points.append((cx, to_y(max(-100.0, p05_val))))
+
+        poly_upper_pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in p95_points)
+        poly_upper_pts += " " + " ".join(f"{x:.1f},{y:.1f}" for x, y in reversed(p50_points))
+        svg_parts.append(f'<polygon points="{poly_upper_pts}" fill="var(--up, #10b981)" fill-opacity="0.14" />')
+
+        poly_lower_pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in p50_points)
+        poly_lower_pts += " " + " ".join(f"{x:.1f},{y:.1f}" for x, y in reversed(p05_points))
+        svg_parts.append(f'<polygon points="{poly_lower_pts}" fill="var(--down, #ef4444)" fill-opacity="0.14" />')
+
+        med_path = " ".join(f"{'M' if i == 0 else 'L'}{x:.1f},{y:.1f}" for i, (x, y) in enumerate(p50_points))
+        svg_parts.append(f'<path d="{med_path}" fill="none" stroke="var(--amber, #f59e0b)" stroke-width="2" stroke-dasharray="4,3" />')
+
+    # 3. Render Columns
+    for i, (key, s) in enumerate(valid_scenarios):
+        cx = col_x_list[i]
+        trades = s.get("horizon_trades")
+        pop = s.get("probability_of_profit")
+        p_ruin = s.get("p_ruin")
+        p95_val = float(s.get("profit_pct_p95") or 0.0)
+        p50_val = float(s.get("profit_pct_p50") or 0.0)
+        raw_p05 = s.get("profit_pct_p05")
+        p05_val = float(raw_p05) if _is_finite_number(raw_p05) else -100.0
+        dd_val = float(s.get("median_max_drawdown") or 0.0)
+
+        is_liquidated = p05_val <= -100.0
+        clamped_p05 = max(-100.0, p05_val)
+
+        y_p95 = to_y(p95_val)
+        y_p50 = to_y(p50_val)
+        y_p05 = to_y(clamped_p05)
+
+        # Whisker line
+        svg_parts.append(_line(cx, y_p05, cx, y_p95, stroke="var(--ink-3, #64748b)", width=2.0))
+
+        # Upper box (P50 to P95)
+        box_w = 46.0
+        box_x = cx - box_w / 2.0
+        h_upper = max(2.0, y_p50 - y_p95)
+        svg_parts.append(_rect(box_x, y_p95, box_w, h_upper, fill="var(--up, #10b981)", rx=3.0, extra='opacity="0.85"'))
+
+        # Lower box (P05 to P50)
+        h_lower = max(2.0, y_p05 - y_p50)
+        svg_parts.append(_rect(box_x, y_p50, box_w, h_lower, fill="var(--down, #ef4444)", rx=3.0, extra='opacity="0.85"'))
+
+        # Median marker line
+        svg_parts.append(_line(cx - box_w / 2.0 - 4, y_p50, cx + box_w / 2.0 + 4, y_p50, stroke="var(--panel, #ffffff)", width=2.5))
+        svg_parts.append(_text(cx, y_p50 - 4, f"{p50_val:+.1f}%", anchor="middle", fill="var(--panel, #ffffff)", extra='font-size="10" font-weight="bold"'))
+
+        # P95 label
+        svg_parts.append(_text(cx, y_p95 - 4, f"P95: {p95_val:+.1f}%", anchor="middle", fill="var(--up, #10b981)", extra='font-size="9.5"'))
+
+        # P05 label
+        if is_liquidated:
+            svg_parts.append(_rect(box_x - 3, y_ruin - 8, box_w + 6, 8.0, fill="var(--down, #dc2626)", rx=2.0))
+            svg_parts.append(_text(cx, y_ruin - 10, "P05: RUIN (-100%)", anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9" font-weight="bold"'))
+        else:
+            svg_parts.append(_text(cx, y_p05 + 12, f"P05: {p05_val:+.1f}%", anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9.5"'))
+
+        # Drawdown marker on side
+        y_dd = to_y(-dd_val)
+        svg_parts.append(_line(cx + box_w / 2.0 + 2, y_dd, cx + box_w / 2.0 + 8, y_dd, stroke="var(--down, #ef4444)", width=1.5))
+        svg_parts.append(_text(cx + box_w / 2.0 + 10, y_dd + 3, f"DD: -{dd_val:.1f}%", fill="var(--down, #ef4444)", extra='font-size="9"'))
+
+        # Probability of profit badge at top
+        pop_num = float(pop) if _is_finite_number(pop) else 0.0
+        pop_str = _format_prob_pct(pop)
+        pop_bg = "var(--up, #10b981)" if pop_num >= 50.0 else ("var(--amber, #f59e0b)" if pop_num >= 20.0 else "var(--down, #ef4444)")
+        badge_w = 84.0
+        badge_x = cx - badge_w / 2.0
+        badge_y = 12.0
+        svg_parts.append(_rect(badge_x, badge_y, badge_w, 20.0, fill=pop_bg, rx=4.0))
+        svg_parts.append(_text(cx, badge_y + 14, f"PoP: {pop_str}", anchor="middle", fill="var(--panel, #ffffff)", extra='font-size="10" font-weight="bold"'))
+
+        # X-axis label
+        label_y = pad_t + plot_h + 18.0
+        svg_parts.append(_text(cx, label_y, key, anchor="middle", fill="var(--ink, #0f172a)", extra='font-size="11" font-weight="bold"'))
+        svg_parts.append(_text(cx, label_y + 14, f"{_int_text(trades)} trds", anchor="middle", fill="var(--ink-3, #94a3b8)", extra='font-size="10"'))
+
+        # Ruin indicator
+        if _is_finite_number(p_ruin) and float(p_ruin) > 0.05:
+            ruin_str = f"Ruin: {_format_prob_pct(p_ruin)} ⚠"
+            svg_parts.append(_text(cx, label_y + 28, ruin_str, anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9.5" font-weight="bold"'))
+        else:
+            svg_parts.append(_text(cx, label_y + 28, "Safe Floor ✔", anchor="middle", fill="var(--up, #10b981)", extra='font-size="9.5"'))
+
+    svg_content = "".join(svg_parts)
+    chart_svg = _svg(width, height, svg_content, extra_class="mc-unified-svg")
+
+    # The title used to name the separate "probability of profit by horizon"
+    # chart that this one replaced, so the page advertised two charts and drew
+    # one. The subtitle and the ruin legend entry now describe what is actually
+    # on the axis for THIS bot.
+    subtitle = (
+        f"{_int_text(mc.get('iterations') or 10000)} bootstrap paths &middot; "
+        + (
+            "liquidation floor at -100%"
+            if ruin_risk
+            else "no simulated path reaches liquidation"
+        )
     )
-    return _subsection("Probability of profit by horizon (chart)", chart, theory)
+    ruin_legend = (
+        '<span class="mc-legend-item"><span class="mc-legend-dot" '
+        'style="background:var(--down,#dc2626);"></span>-100% ruin floor</span>'
+        if ruin_risk
+        else ""
+    )
+    header_html = (
+        '<div class="mc-unified-header">'
+        '  <div class="mc-unified-title-wrap">'
+        '    <h3 class="mc-unified-title">Outcome distribution by horizon</h3>'
+        f'    <div class="mc-unified-subtitle">{subtitle}</div>'
+        '  </div>'
+        '  <div class="mc-unified-legend">'
+        '    <span class="mc-legend-item"><span class="mc-legend-dot" style="background:var(--up,#10b981);"></span>P50&ndash;P95 upside</span>'
+        '    <span class="mc-legend-item"><span class="mc-legend-dot" style="background:var(--amber,#f59e0b);"></span>P50 median</span>'
+        '    <span class="mc-legend-item"><span class="mc-legend-dot" style="background:var(--down,#ef4444);"></span>P05&ndash;P50 downside</span>'
+        f'    {ruin_legend}'
+        '  </div>'
+        '</div>'
+    )
+
+    # No theory drawer here: the section collects one at the end.
+    return f'<div class="mc-unified-panel">{header_html}{chart_svg}</div>'
+
+
+def _render_horizon_probability_chart(mc: Dict[str, Any]) -> str:
+    """Counterpart preserving API and test compatibility for the horizon probability chart."""
+    return _render_unified_monte_carlo_chart(mc)
 
 
 def _render_key_probabilities(mc: Dict[str, Any]) -> str:
-    rows: List[Tuple[str, str]] = []
-    if _is_finite_number(mc.get("p_ruin")):
-        rows.append(("Probability of ruin", _pct(mc.get("p_ruin"), 1)))
-    if _is_finite_number(mc.get("p_loss_after_horizon")):
-        rows.append(
-            (
-                "Probability of a loss at horizon end",
-                _pct(mc.get("p_loss_after_horizon"), 1),
-            )
+    p_ruin = mc.get("p_ruin")
+    p_loss = mc.get("p_loss_after_horizon")
+    horizon_trades = mc.get("horizon_trades")
+    horizon_desc = f" ({_int_text(horizon_trades)} trds)" if _is_finite_number(horizon_trades) else ""
+
+    kpi_cards = []
+    # 1. Probability of ruin
+    if _is_finite_number(p_ruin):
+        val_ruin = float(p_ruin)
+        if val_ruin <= 0.05:
+            badge = '<span class="kp-badge kp-badge-safe" title="Zero ruin probability detected across 10,000 paths"><span class="kp-badge-dot"></span>Safe Floor ℹ</span>'
+            ruin_color = "var(--ink, #fff)"
+        elif val_ruin <= 5.0:
+            badge = '<span class="kp-badge kp-badge-warn" title="Low risk of total capital loss"><span class="kp-badge-dot"></span>Low Ruin Risk</span>'
+            ruin_color = "#f59e0b"
+        else:
+            badge = '<span class="kp-badge kp-badge-danger" title="Severe capital wipeout risk"><span class="kp-badge-dot"></span>Elevated Ruin ⚠</span>'
+            ruin_color = "#ef4444"
+
+        ruin_display = _format_prob_pct(val_ruin)
+        if val_ruin <= 0.05:
+            safe_title = "Zero ruin probability detected across 10,000 paths (0 / 10,000 paths touched 0 USDT)" if val_ruin <= 0.0001 else "Near-zero ruin probability (<0.05% across 10,000 paths)"
+            badge = f'<span class="kp-badge kp-badge-safe" title="{safe_title}"><span class="kp-badge-dot"></span>Safe Floor ℹ</span>'
+            ruin_color = "var(--ink, #fff)"
+        elif val_ruin <= 5.0:
+            badge = '<span class="kp-badge kp-badge-warn" title="Low risk of total capital loss"><span class="kp-badge-dot"></span>Low Ruin Risk</span>'
+            ruin_color = "#f59e0b"
+        else:
+            badge = '<span class="kp-badge kp-badge-danger" title="Severe capital wipeout risk"><span class="kp-badge-dot"></span>Elevated Ruin ⚠</span>'
+            ruin_color = "#ef4444"
+
+        kpi_cards.append(
+            f'<div class="kp-kpi-card" title="Simulated probability that cumulative equity drops to or below 0 USDT across 10,000 bootstrap paths">'
+            f'<div class="kp-kpi-header"><span class="kp-kpi-label">Probability of Ruin</span></div>'
+            f'<div class="kp-kpi-sublabel">P(100% loss){horizon_desc}</div>'
+            f'<div class="kp-kpi-value" style="color:{ruin_color};">{ruin_display}</div>'
+            f'<div class="kp-kpi-footer">{badge}</div>'
+            f'</div>'
         )
 
-    streak_rows: List[List[str]] = []
+    # 2. Probability of loss at horizon end
+    if _is_finite_number(p_loss):
+        val_loss = float(p_loss)
+        loss_display = _format_prob_pct(val_loss)
+        if val_loss >= 70.0:
+            badge = '<span class="kp-badge kp-badge-danger" title="Loss probability is near absolute"><span class="kp-badge-dot"></span>Extreme Decay ⚠</span>'
+            loss_color = "#ef4444"
+        elif val_loss <= 20.0:
+            fav_title = "Zero terminal loss detected across 10,000 simulations (terminal capital remained >= initial equity)" if val_loss <= 0.0001 else "High probability of ending profitable"
+            badge = f'<span class="kp-badge kp-badge-safe" title="{fav_title}"><span class="kp-badge-dot"></span>Favourable Odds ✔</span>'
+            loss_color = "#10b981"
+        else:
+            badge = '<span class="kp-badge kp-badge-warn" title="Moderate loss probability"><span class="kp-badge-dot"></span>Moderate Risk</span>'
+            loss_color = "#f59e0b"
+
+        kpi_cards.append(
+            f'<div class="kp-kpi-card" title="Simulated probability that terminal capital is below initial equity across 10,000 bootstrap iterations">'
+            f'<div class="kp-kpi-header"><span class="kp-kpi-label">Prob. of Loss at End</span></div>'
+            f'<div class="kp-kpi-sublabel">Simulation horizon{horizon_desc}</div>'
+            f'<div class="kp-kpi-value" style="color:{loss_color};">{loss_display}</div>'
+            f'<div class="kp-kpi-footer">{badge}</div>'
+            f'</div>'
+        )
+
+    streak_rows = []
     for n, obs_key, base_key, excess_key in (
         (5, "p_5_loss_streak", "p_5_loss_streak_baseline", "p_5_loss_streak_excess"),
-        (
-            10,
-            "p_10_loss_streak",
-            "p_10_loss_streak_baseline",
-            "p_10_loss_streak_excess",
-        ),
+        (10, "p_10_loss_streak", "p_10_loss_streak_baseline", "p_10_loss_streak_excess"),
     ):
         obs = mc.get(obs_key)
         if not _is_finite_number(obs):
             continue
         base = mc.get(base_key)
         excess = mc.get(excess_key)
-        streak_rows.append(
-            [
-                f"\u2265{n} consecutive losing trades",
-                _pct(obs, 1),
-                _pct(base, 1) if _is_finite_number(base) else "no baseline yet",
-                _pct(excess, 1) if _is_finite_number(excess) else "—",
-            ]
+
+        obs_val = float(obs)
+        base_val = float(base) if _is_finite_number(base) else None
+        excess_val = float(excess) if _is_finite_number(excess) else None
+
+        excess_str = f"+{excess_val:.1f}%" if (excess_val is not None and excess_val > 0.05) else (_pct(excess_val, 1) if excess_val is not None else "—")
+        excess_color = "#f59e0b" if (excess_val is not None and excess_val > 0.05) else "var(--muted, #94a3b8)"
+
+        excess_tooltip = (
+            f"Observed probability of \u2265{n} consecutive losses is {excess_str} higher than random baseline, indicating loss clustering (e.g. averaging down or martingale)"
+            if (excess_val is not None and excess_val > 0.05)
+            else f"Losing streak \u2265{n} trades is consistent with random chance"
         )
 
-    body = ""
-    if rows:
-        tiles = "".join(_stat_tile(label, value) for label, value in rows)
-        body += f'<div class="stat-row">{tiles}</div>'
-    if streak_rows:
-        body += _table(
-            ["Losing streak", "Observed", "Baseline (pure randomness)", "Excess"],
-            streak_rows,
+        streak_rows.append(
+            f'<tr class="kp-streak-row" title="Simulated probability of \u2265{n} consecutive losing trades">'
+            f'<td class="col-streak"><span class="kp-streak-pill">&ge;{n} trades</span></td>'
+            f'<td class="col-obs">{_pct(obs_val, 1)}</td>'
+            f'<td class="col-base">{_pct(base_val, 1) if base_val is not None else "—"}</td>'
+            f'<td class="col-excess" style="color:{excess_color};font-weight:700;" title="{_esc(excess_tooltip)}">{excess_str}</td>'
+            f'</tr>'
         )
+
+    body_parts = []
+    if kpi_cards:
+        body_parts.append(f'<div class="kp-kpi-row">{"".join(kpi_cards)}</div>')
+
+    if streak_rows:
+        streak_meta = f'<span class="kp-subhead-meta">Horizon: {_int_text(horizon_trades)} trades</span>' if _is_finite_number(horizon_trades) else ''
+        body_parts.append(
+            '<div class="kp-subhead-row">'
+            '<span class="kp-subhead-title">LOSING STREAK RISK</span>'
+            f'{streak_meta}'
+            '</div>'
+            '<div class="kp-table-wrap">'
+            '<table class="kp-table">'
+            '<thead><tr>'
+            '<th class="col-streak" title="Consecutive losing trades streak">Streak</th>'
+            '<th class="col-obs" title="Observed probability from 10,000 bootstrap simulations">Observed</th>'
+            '<th class="col-base" title="Baseline expected from random chance (Binomial distribution)">Baseline <span class="th-sub">(random)</span></th>'
+            '<th class="col-excess" title="Excess over random baseline (Observed - Baseline)">Excess</th>'
+            '</tr></thead>'
+            f'<tbody>{"".join(streak_rows)}</tbody>'
+            '</table>'
+            '</div>'
+        )
+
+    body = "".join(body_parts)
     if not body:
         return ""
-    theory = _theory(
-        '"Observed" is the simulated probability of actually seeing that losing'
-        " streak happen. But the probability of hitting a long losing streak rises"
-        " simply because the bot trades more -- even for a strategy that is entirely"
-        ' random and independent between trades. "Baseline" is the probability of'
-        " that streak occurring PURELY because of the trade count, assuming each"
-        ' trade is independent with this exact bot\u2019s own win rate. "Excess"'
-        " (observed minus baseline) is the real signal for whether losses tend to"
-        " cluster for this bot -- a high excess means losing trades are NOT"
-        " independent of each other (behaviour like averaging down/martingale), an"
-        " excess near 0 means the losing streak is simply the inevitable result of"
-        " having traded a lot, not a behavioural flaw.",
-        "The baseline is computed analytically from the binomial distribution using"
-        " this bot's own exact trade count and observed loss rate (not re-simulated)"
-        " -- see"
-        " <code>MonteCarloSimulationEngine.loss_streak_baseline_probability</code>."
-        " Excess = observed \u2212 baseline, floored at 0.",
-    )
-    return _subsection("Key probabilities", body, theory)
+    # No drawer here either: the Monte Carlo section carries one for all of
+    # its sub-blocks, and the streak baseline is explained there.
+    return _subsection("Key probabilities", body, "")
 
 
 # --------------------------------------------------------------------------- #
@@ -3562,20 +4300,59 @@ def _render_statistical_inference(result: Dict[str, Any]) -> str:
             "</div>"
         )
 
+    spt = mc.get("sharpe_per_trade")
+    if _is_finite_number(spt):
+        f_spt = float(spt)
+        spt_str = _num(spt, 2)
+        if f_spt > 0:
+            spt_val = f'<span style="color:#16a34a;font-weight:700;font-family:var(--mono);">+{spt_str}</span>'
+        elif f_spt < 0:
+            spt_val = f'<span style="color:#dc2626;font-weight:700;font-family:var(--mono);">{spt_str}</span>'
+        else:
+            spt_val = f'<span style="font-family:var(--mono);">{spt_str}</span>'
+    else:
+        spt_val = f'<span style="font-family:var(--mono);">{_num(spt, 2)}</span>'
+
+    psr_val = _ratio_to_pct(mc.get("probabilistic_sharpe"))
+    if _is_finite_number(psr_val):
+        f_psr = float(psr_val)
+        psr_str = _pct(f_psr, 1)
+        if f_psr >= 95.0:
+            psr_cell = f'<span style="color:#16a34a;font-weight:700;font-family:var(--mono);">{psr_str}</span>'
+        elif f_psr < 50.0:
+            psr_cell = f'<span style="color:#dc2626;font-weight:700;font-family:var(--mono);">{psr_str}</span>'
+        else:
+            psr_cell = f'<span style="font-family:var(--mono);">{psr_str}</span>'
+    else:
+        psr_cell = f'<span style="font-family:var(--mono);">{_pct(psr_val, 1)}</span>'
+
+    dsr_val = _ratio_to_pct(mc.get("deflated_sharpe"))
+    if _is_finite_number(dsr_val):
+        f_dsr = float(dsr_val)
+        dsr_str = _pct(f_dsr, 1)
+        if f_dsr >= 95.0:
+            dsr_cell = f'<span style="color:#16a34a;font-weight:700;font-family:var(--mono);">{dsr_str}</span>'
+        elif f_dsr < 50.0:
+            dsr_cell = f'<span style="color:#dc2626;font-weight:700;font-family:var(--mono);">{dsr_str}</span>'
+        else:
+            dsr_cell = f'<span style="font-family:var(--mono);">{dsr_str}</span>'
+    else:
+        dsr_cell = f'<span style="font-family:var(--mono);">{_pct(dsr_val, 1)}</span>'
+
     rows = [
         [
             _calc_label_html("Sharpe per trade", "sharpe_per_trade"),
-            _num(mc.get("sharpe_per_trade"), 2),
+            spt_val,
         ],
         [
             _calc_label_html(
                 "Probabilistic Sharpe Ratio (PSR)", "probabilistic_sharpe"
             ),
-            _pct(_ratio_to_pct(mc.get("probabilistic_sharpe")), 1),
+            psr_cell,
         ],
         [
             _calc_label_html("Deflated Sharpe Ratio (DSR)", "deflated_sharpe"),
-            _pct(_ratio_to_pct(mc.get("deflated_sharpe")), 1),
+            dsr_cell,
         ],
         [
             _calc_label_html(
@@ -3597,23 +4374,8 @@ def _render_statistical_inference(result: Dict[str, Any]) -> str:
     table = _table(["Metric", "Value"], rows)
 
     theory = _theory(
-        "PSR answers: the probability that the bot's TRUE Sharpe ratio is greater"
-        " than 0, after discounting for a short sample, skew, and fat tails in the"
-        " return distribution -- a good-looking Sharpe over a few dozen fat-tailed"
-        " trades is not evidence on par with a modest Sharpe over a few hundred"
-        " clean trades. DSR goes further: this bot was SELECTED because it was the"
-        " best candidate in a group -- the more candidates compared, the easier it"
-        ' is for a "best one" to appear purely by luck; DSR discounts exactly that'
-        " expected luck. MinTRL is the minimum number of additional trades the bot"
-        " needs before its Sharpe is reliable at the threshold being used -- the"
-        " larger this is relative to the current trade count, the less mature the"
-        " conclusion.",
-        "Probabilistic/Deflated Sharpe Ratio and MinTRL follow Bailey &amp; L&oacute;pez de"
-        " Prado (2012, 2014). The comparison benchmark used is SR* = 0 (a Sharpe"
-        ' with no edge at all) -- this is a benchmark this system CHOSE ITSELF to ask'
-        ' "is there a genuine edge", not one borrowed from elsewhere or from the bot'
-        " itself. DSR uses the number of candidates compared (selection_trials) to"
-        " discount the luck of having picked the best one.",
+        "Validates whether edge is genuine: PSR discounts non-normal skew/kurtosis; DSR discounts multiple-testing selection bias across candidate trials.",
+        "Bailey & López de Prado (2014): PSR(SR* = 0) and Deflated Sharpe accounting for variance and sample kurtosis."
     )
     return _section(
         "Statistical inference",
@@ -3673,24 +4435,28 @@ def _render_trade_metrics(result: Dict[str, Any]) -> str:
     for key, label, kind in _PERFORMANCE_ROWS:
         if key not in perf:
             continue
-        rows.append([_calc_label_html(label, key), _FORMATTERS[kind](perf.get(key))])
+        val = perf.get(key)
+        formatted_val = _FORMATTERS[kind](val)
+        if key in ("total_pnl", "expectancy", "sharpe_ratio", "sortino_ratio", "calmar_ratio") and _is_finite_number(val):
+            f_val = float(val)
+            if f_val > 0:
+                prefix = "+" if not str(formatted_val).startswith("+") else ""
+                val_cell = f'<span style="color:#16a34a;font-weight:700;font-family:var(--mono);">{prefix}{_esc(formatted_val)}</span>'
+            elif f_val < 0:
+                val_cell = f'<span style="color:#dc2626;font-weight:700;font-family:var(--mono);">{_esc(formatted_val)}</span>'
+            else:
+                val_cell = f'<span style="font-weight:600;font-family:var(--mono);">{_esc(formatted_val)}</span>'
+        elif key in ("max_drawdown_pct", "current_drawdown_pct") and _is_finite_number(val) and float(val) > 0:
+            val_cell = f'<span style="color:#dc2626;font-weight:600;font-family:var(--mono);">{_esc(formatted_val)}</span>'
+        else:
+            val_cell = f'<span style="font-family:var(--mono);">{_esc(formatted_val)}</span>'
+        rows.append([_calc_label_html(label, key), val_cell])
     if not rows:
         return ""
     table = _table(["Metric", "Value"], rows)
     theory = _theory(
-        "This is CLOSED BOOK data -- open positions are not included in these"
-        " figures (see the Traded assets section for open positions). A profit"
-        " factor below 1 means total losses exceed total profit -- the bot is"
-        " losing money overall, no matter how good the win rate looks."
-        " Sharpe/Sortino/Calmar are return per unit of risk (volatility, downside"
-        " volatility, drawdown, respectively) -- higher is better, but only"
-        " trustworthy once the sample size is large enough (see the Statistical"
-        " inference section).",
-        "Computed directly from the bot's public trade ledger on OKX copy-trading,"
-        " using the standard definition of each metric (profit factor = total"
-        " profit / total absolute loss, payoff ratio = average win / average loss,"
-        " Sharpe/Sortino/Calmar following the usual statistical formulas over the"
-        " per-trade return series).",
+        "Closed-book trade metrics. Profit factor < 1.0 indicates cumulative net loss. Sharpe/Sortino measure return per unit of volatility.",
+        "Direct transaction ledger extraction: PF = GrossProfit / GrossLoss, Expectancy = TotalPnL / TradeCount."
     )
     return _section("Trade metrics", table + theory, pair=True, anchor="so-lieu")
 
@@ -3776,7 +4542,7 @@ def _render_dominant_market_card(result: Dict[str, Any]) -> str:
         or {}
     )
     evidence = result.get("evidence") or {}
-    symbol = market.get("symbol") or evidence.get("traded_symbol") or "Primary market"
+    symbol = market.get("symbol") or evidence.get("traded_symbol") or "Premium Market"
     venue = market.get("venue_type") or "CEX"
     posture = market.get("posture") or (
         "STABLE" if market.get("available") else "UNDETERMINED"
@@ -3804,12 +4570,7 @@ def _render_dominant_market_card(result: Dict[str, Any]) -> str:
     # covers this module's own English fallback default above.
     posture_color = "#16a34a" if "ỔN" in posture or posture == "STABLE" else "#d97706"
 
-    tiles = [
-        _stat_tile("Market trend", trend_text, color=trend_color),
-        _stat_tile("Volatility level", vol_text),
-        _stat_tile("Order-book liquidity", liq_text),
-        _stat_tile("Data quality", quality_text),
-    ]
+    trend_style = f' style="color:{trend_color};"' if trend_color else ""
 
     evidence_bullets = (
         "".join(f"<li>{_esc(e)}</li>" for e in posture_evidence)
@@ -3834,15 +4595,34 @@ def _render_dominant_market_card(result: Dict[str, Any]) -> str:
         "</div>"
     )
 
-    # "Bằng chứng trạng thái" và "so sánh hiệu suất" (khi có) bọc chung trong
-    # `market-boxes` để CSS xếp chúng NGANG HÀNG bằng Grid trên tablet+ thay
-    # vì luôn xếp chồng dọc -- xem `.market-boxes` trong `_CSS`.
+    # Asset evaluation parameters view thẳng, không dùng card hover riêng lẻ
     body = (
         f'<div class="market-hero-card">'
-        f'<div class="market-hero-title">Market pair: <strong>{_esc(symbol)} / USDT ({_esc(venue)})</strong>'
-        f' <span class="badge" style="background:{posture_color}">STATUS: {_esc(posture)}</span></div>'
-        f'<div class="stat-row">{"".join(tiles)}</div>'
-        '<div class="market-boxes">'
+        f'<div class="market-specs-panel">'
+        f'  <div class="market-spec-hero">'
+        f'    <div class="market-spec-hero-title">Market pair: <strong>{_esc(symbol)} / USDT ({_esc(venue)})</strong></div>'
+        f'    <span class="badge" style="background:{posture_color}">STATUS: {_esc(posture)}</span>'
+        f'  </div>'
+        f'  <div class="market-spec-grid">'
+        f'    <div class="market-spec-item">'
+        f'      <span class="market-spec-label">Market trend</span>'
+        f'      <span class="market-spec-val"{trend_style}><strong>{_esc(trend_text)}</strong></span>'
+        f'    </div>'
+        f'    <div class="market-spec-item">'
+        f'      <span class="market-spec-label">Volatility level</span>'
+        f'      <span class="market-spec-val"><strong>{_esc(vol_text)}</strong></span>'
+        f'    </div>'
+        f'    <div class="market-spec-item">'
+        f'      <span class="market-spec-label">Order-book liquidity</span>'
+        f'      <span class="market-spec-val"><strong>{_esc(liq_text)}</strong></span>'
+        f'    </div>'
+        f'    <div class="market-spec-item">'
+        f'      <span class="market-spec-label">Data quality</span>'
+        f'      <span class="market-spec-val"><strong>{_esc(quality_text)}</strong></span>'
+        f'    </div>'
+        f'  </div>'
+        f'</div>'
+        f'<div class="market-boxes">'
         f'<div class="market-evidence-box">'
         f"<h4>Status evidence from Step 1 + 2:</h4>"
         f'<ul class="findings">{evidence_bullets}</ul>'
@@ -3872,21 +4652,17 @@ def _render_open_positions_audit(result: Dict[str, Any]) -> str:
     if all(v is None for v in (open_pos, open_loss, marked_pf, skew, kurt)):
         return ""
 
-    tiles = []
+    items = []
     if open_pos is not None:
-        tiles.append(
-            _stat_tile("Open positions", _int_text(open_pos), info_key="open_positions")
-        )
+        items.append(("Open positions", _int_text(open_pos), None, "open_positions"))
     if open_loss is not None:
         loss_color = (
             "#dc2626"
             if (_is_finite_number(open_loss) and float(open_loss) < 0)
             else None
         )
-        tiles.append(
-            _stat_tile(
-                "Unrealised loss", _money(open_loss), color=loss_color, info_key="open_loss"
-            )
+        items.append(
+            ("Unrealised loss", _money(open_loss), loss_color, "open_loss")
         )
     if open_loss_pct is not None:
         pct_val = (
@@ -3894,11 +4670,12 @@ def _render_open_positions_audit(result: Dict[str, Any]) -> str:
             if float(open_loss_pct) <= 1.0
             else float(open_loss_pct)
         )
-        tiles.append(
-            _stat_tile(
+        items.append(
+            (
                 "Unrealised loss / capital ratio",
                 _pct(pct_val, 1),
-                info_key="open_loss_to_capital_pct",
+                None,
+                "open_loss_to_capital_pct",
             )
         )
     if booked_pf is not None and marked_pf is not None:
@@ -3911,25 +4688,39 @@ def _render_open_positions_audit(result: Dict[str, Any]) -> str:
             )
             else None
         )
-        tiles.append(
-            _stat_tile(
+        items.append(
+            (
                 "Marked PF (mark-to-market)",
                 _num(marked_pf, 2),
-                color=pf_color,
-                info_key="marked_pf",
+                pf_color,
+                "marked_pf",
             )
         )
     if skew is not None:
         skew_color = (
             "#dc2626" if (_is_finite_number(skew) and float(skew) < -0.5) else None
         )
-        tiles.append(
-            _stat_tile(
-                "PnL skewness", _num(skew, 2), color=skew_color, info_key="pnl_skew"
-            )
+        items.append(
+            ("PnL skewness", _num(skew, 2), skew_color, "pnl_skew")
         )
     if kurt is not None:
-        tiles.append(_stat_tile("PnL kurtosis", _num(kurt, 2), info_key="pnl_kurtosis"))
+        items.append(("PnL kurtosis", _num(kurt, 2), None, "pnl_kurtosis"))
+
+    row_list = []
+    for label, val, color, key in items:
+        val_str = str(val).strip()
+        if val_str.startswith("-") or "-" in val_str:
+            final_color = "#ef4444"
+        else:
+            final_color = "#10b981"
+        val_style = f' style="color:{final_color};"'
+        row_list.append(
+            f'<div class="param-horizontal-row">'
+            f'<span class="param-horizontal-name">{_calc_label_html(label, key)}</span>'
+            f'<span class="param-horizontal-val"{val_style}>{_esc(val)}</span>'
+            f'</div>'
+        )
+    rows_html = "".join(row_list)
 
     deferred_notice = ""
     if _is_finite_number(booked_pf) and _is_finite_number(marked_pf):
@@ -3952,7 +4743,7 @@ def _render_open_positions_audit(result: Dict[str, Any]) -> str:
         "</div>"
     )
 
-    body = f'<div class="stat-row">{"".join(tiles)}</div>{deferred_notice}{hint}'
+    body = f'<div class="param-horizontal-list">{rows_html}</div>{deferred_notice}{hint}'
     # LƯU Ý: chỉ viết MỘT dấu `&` thô ở đây -- `_section()` tự đưa `title` qua
     # `_esc()` một lần rồi mới in ra. Trước đây chỗ này viết sẵn "&amp;" nên
     # bị escape hai lần (& -> &amp; -> &amp;amp;), hiển thị sai thành literal
@@ -4004,27 +4795,30 @@ def _render_closed_trades_table(result: Dict[str, Any], limit: int = 200) -> str
         pnl_val = t["realized_pnl"]
         run_val = t["running_pnl"]
         is_win = pnl_val > 0
-        badge = (
-            '<span class="badge-win">WIN</span>'
-            if is_win
-            else (
-                '<span class="badge-loss">LOSS</span>'
-                if pnl_val < 0
-                else '<span class="badge">BREAK-EVEN</span>'
-            )
-        )
-        pnl_cls = "text-profit" if is_win else ("text-loss" if pnl_val < 0 else "")
-        run_cls = "text-profit" if run_val > 0 else ("text-loss" if run_val < 0 else "")
-        pnl_str = f"{'+' if pnl_val > 0 else ''}{pnl_val:,.2f} USDT"
-        run_str = f"{'+' if run_val > 0 else ''}{run_val:,.2f} USDT"
+        if is_win:
+            badge = '<span class="badge-win" style="display:inline-block;background:rgba(22,163,74,0.15);color:#16a34a;border:1px solid rgba(22,163,74,0.35);font-family:var(--mono);font-weight:700;font-size:0.75rem;padding:0.15rem 0.5rem;border-radius:4px;">WIN</span>'
+            pnl_html = f'<span class="text-profit" style="color:#16a34a;font-weight:700;font-family:var(--mono);">+{pnl_val:,.2f} USDT</span>'
+        elif pnl_val < 0:
+            badge = '<span class="badge-loss" style="display:inline-block;background:rgba(220,38,38,0.15);color:#dc2626;border:1px solid rgba(220,38,38,0.35);font-family:var(--mono);font-weight:700;font-size:0.75rem;padding:0.15rem 0.5rem;border-radius:4px;">LOSS</span>'
+            pnl_html = f'<span class="text-loss" style="color:#dc2626;font-weight:700;font-family:var(--mono);">{pnl_val:,.2f} USDT</span>'
+        else:
+            badge = '<span class="badge" style="display:inline-block;background:rgba(156,163,175,0.15);color:#9ca3af;border:1px solid rgba(156,163,175,0.35);font-family:var(--mono);font-weight:700;font-size:0.75rem;padding:0.15rem 0.5rem;border-radius:4px;">BREAK-EVEN</span>'
+            pnl_html = f'<span style="font-weight:600;font-family:var(--mono);">{pnl_val:,.2f} USDT</span>'
+
+        if run_val > 0:
+            run_html = f'<strong class="text-profit" style="color:#16a34a;font-weight:700;font-family:var(--mono);">+{run_val:,.2f} USDT</strong>'
+        elif run_val < 0:
+            run_html = f'<strong class="text-loss" style="color:#dc2626;font-weight:700;font-family:var(--mono);">{run_val:,.2f} USDT</strong>'
+        else:
+            run_html = f'<strong style="font-weight:600;font-family:var(--mono);">{run_val:,.2f} USDT</strong>'
 
         rows.append(
             [
                 str(idx),
                 f'<span class="mono-symbol">{_esc(symbol)}</span>',
                 time_str,
-                f'<span class="{pnl_cls}">{_esc(pnl_str)}</span>',
-                f'<strong class="{run_cls}">{_esc(run_str)}</strong>',
+                pnl_html,
+                run_html,
                 badge,
             ]
         )
@@ -4168,16 +4962,8 @@ def _render_limited_growth(result: Dict[str, Any]) -> str:
         )
 
     theory = _theory(
-        "The two lines above measure GROWTH using two different public data"
-        " streams: the capital curve inferred from weekly PnL (accumulated across"
-        " each week OKX publishes) and the published return ratio (a snapshot on"
-        " the ranking profile's own separate timeline) -- the two time axes do NOT"
-        " line up, so they are not plotted on one chart, to avoid implying they are"
-        " the same series.",
-        "The weekly capital curve uses `Agent/backend/mcp/capital/equity_curve.py`'s"
-        " `EquityCurveBuilder` (equity = pnl / pnlRatio for each week); pnlRatio is"
-        " OKX's own `profile.pnlRatios` verbatim. There are no trades here, only"
-        " PnL/ratio aggregated by week or by snapshot point.",
+        "Comparative tracking: cumulative equity reconstructed from weekly PnL versus official OKX pnlRatio time series.",
+        "Equity reconstructed via EquityCurveBuilder: Equity(w) = PnL(w) / pnlRatio(w) per weekly reporting cycle."
     )
     return _section(
         "Growth & outcome composition", "".join(parts) + theory, anchor="tang-truong"
@@ -4359,18 +5145,8 @@ def _render_limited_drawdown(result: Dict[str, Any]) -> str:
             "the account was wiped out at least once by this measure."
         )
     theory = _theory(
-        "The max drawdown here is inferred from the WEEKLY capital curve "
-        "(equity = pnl / pnlRatio for each week OKX publishes), NOT from the "
-        "per-position trade ledger (this bot does not publish its trade "
-        "ledger). A FULL bot measures drawdown on capital at the exact moment "
-        "each trade closes -- a much finer-grained series -- so these two "
-        "figures should NOT be placed side by side as if they measured the "
-        "same thing.",
-        "Computed with `Agent/backend/mcp/capital/equity_curve.py`'s "
-        "`EquityCurveBuilder` (running peak minus the next trough on the "
-        "weekly equity series), taking the exact figure "
-        "`Agent/backend/analysis/limited.py`'s `_drawdown_component` already "
-        "used for scoring -- not recomputed.",
+        "Inferred weekly maximum drawdown (running peak minus trough). Finer trade-level ticks are unavailable for limited bots.",
+        "EquityCurveBuilder weekly capital series: MaxDD = max(1 - Equity(w) / Peak(w))."
     )
     return _section("Drawdown vs. capital", body + theory, anchor="sut-giam-von")
 
@@ -4538,10 +5314,11 @@ def _render_limited_dimensions(result: Dict[str, Any]) -> str:
 
 def _render_tab_report_limited(result: Dict[str, Any]) -> str:
     sections = [
+        _render_executive_essence(result),
         _render_conclusion(result),
+        _render_limited_growth(result),
         _render_limited_narrative(result),
         _render_limited_dimensions(result),
-        _render_limited_growth(result),
         _render_limited_monte_carlo(result),
     ]
     return "".join(s for s in sections if s)
@@ -4550,6 +5327,7 @@ def _render_tab_report_limited(result: Dict[str, Any]) -> str:
 def _render_tab_market_limited(result: Dict[str, Any]) -> str:
     sections = [
         _render_dominant_market_card(result),
+        _render_market_compatibility(result),
         _render_limited_market_scope(result),
         _render_limited_playstyle(result),
     ]
@@ -4559,6 +5337,8 @@ def _render_tab_market_limited(result: Dict[str, Any]) -> str:
 def _render_tab_trades_limited(result: Dict[str, Any]) -> str:
     sections = [
         _render_limited_public_stats(result),
+        _render_validation_section(result),
+        _render_scenario_lab(result),
         _render_limited_drawdown(result),
         _render_limited_open_positions(result),
         _render_limited_inference(result),
@@ -4568,14 +5348,322 @@ def _render_tab_trades_limited(result: Dict[str, Any]) -> str:
     return "".join(s for s in sections if s)
 
 
+
+# --------------------------------------------------------------------------- #
+# Deterministic insight sections.
+#
+# These render the objects `data.py` attaches under `evidence["insights"]` --
+# the SAME objects the dossier and /api/v2/dossier publish. Nothing here
+# computes a number: if a field is absent the section hides itself, which is
+# how every other optional section in this module already behaves.
+# --------------------------------------------------------------------------- #
+
+
+def _insights(result: Dict[str, Any]) -> Dict[str, Any]:
+    evidence = result.get("evidence") or {}
+    insights = evidence.get("insights")
+    return insights if isinstance(insights, dict) else {}
+
+
+_NO_INSIGHT_REASON = (
+    "This needs the bot's own closed-trade ledger. This page was built from a "
+    "record that does not carry it, so the section is shown empty rather than "
+    "dropped."
+)
+
+
+# Methodology text per insight section, shared by the populated and the empty
+# render. An empty section keeps its methodology note on purpose: a reader who
+# lands on a page that cannot compute one still learns what it would have shown
+# and how, which is also what keeps the block counts identical across the live
+# and saved-record paths.
+_INSIGHT_THEORY: Dict[str, Tuple[str, str]] = {
+    "in-one-look": (
+        "A description of observed operating character, not a recommendation. "
+        "Each line is measured; none of them is advice to act.",
+        "Built from the closed-trade ledger, the phase breakdown and the "
+        "deferred-loss profile. See Agent/backend/qc/reporting/insights.py.",
+    ),
+    "holdout": (
+        "The ledger is split by time and the same metrics are measured on each "
+        "part. A ratio near 1 means later trades behaved like earlier ones.",
+        "Holdout validation of observed performance -- not a re-optimised "
+        "strategy backtest. See Agent/backend/qc/reporting/validation.py.",
+    ),
+    "market-compatibility": (
+        "Compatibility is stated per market phase, never as one verdict for the "
+        "bot. A phase with no observed trade carries no numbers rather than a "
+        "borrowed estimate.",
+        "Trades are labelled with the market phase they were opened in "
+        "(`TradeLedgerItem.market_phase`). Reliability follows the same "
+        "thresholds as the phase breakdown: >=10 trades valid, 3-9 reference "
+        "only, <3 unrepresentative.",
+    ),
+    "scenario-lab": (
+        "Each row is a conditional what-if, never a forecast. A condition with "
+        "too few observed trades shows no numbers at all rather than a borrowed "
+        "estimate.",
+        "Stationary bootstrap (Politis &amp; Romano 1994) over this bot's own "
+        "closed trades. See Agent/backend/qc/reporting/scenarios.py.",
+    ),
+}
+
+
+def _insight_theory(anchor: str) -> str:
+    read_html, basis_html = _INSIGHT_THEORY[anchor]
+    return _theory(read_html, basis_html)
+
+
+def _insight_placeholder(title: str, anchor: str) -> str:
+    return _section(
+        title,
+        f'<p class="notice notice-neutral">{_esc(_NO_INSIGHT_REASON)}</p>'
+        + _insight_theory(anchor),
+        anchor=anchor,
+    )
+
+
+def _render_executive_essence(result: Dict[str, Any]) -> str:
+    """The shortest accurate description of the bot, at the top of the tab.
+
+    Deliberately first: the rest of the page is dense by design, and a reader
+    who stops after one card should still leave with an accurate impression
+    rather than whichever number happened to be largest.
+    """
+    if not _insights(result):
+        return _insight_placeholder("In one look", "in-one-look")
+    essence = _insights(result).get("executive_essence") or {}
+    if not essence:
+        return _insight_placeholder("In one look", "in-one-look")
+    rows = [
+        ("What it appears to do", essence.get("what_it_appears_to_do")),
+        ("Dominant observed behaviour", essence.get("dominant_behavior")),
+        ("Strongest supporting evidence", essence.get("strongest_positive_evidence")),
+        ("Strongest fragility", essence.get("strongest_fragility")),
+        ("Evidence reliability", essence.get("evidence_reliability")),
+        ("Most important unknown", essence.get("most_important_unknown")),
+    ]
+    items = "".join(
+        f'<div class="essence-row"><span class="essence-key">{_esc(label)}</span>'
+        f'<span class="essence-val">{_esc(str(value))}</span></div>'
+        for label, value in rows
+        if value
+    )
+    if not items:
+        return _insight_placeholder("In one look", "in-one-look")
+    return _section(
+        "In one look",
+        f'<div class="essence-grid">{items}</div>'
+        + _insight_theory("in-one-look"),
+        anchor="in-one-look",
+    )
+
+
+def _render_validation_section(result: Dict[str, Any]) -> str:
+    """Did what the early trades showed keep being true later?"""
+    if not _insights(result):
+        return _insight_placeholder("Did earlier results hold up later", "holdout")
+    validation = _insights(result).get("validation") or {}
+    if not validation:
+        return _insight_placeholder(
+            "Did earlier results hold up later", "holdout"
+        )
+    if validation.get("status") != "EVALUATED":
+        reasons = [str(r) for r in (validation.get("limitations") or [])]
+        if not reasons:
+            return _insight_placeholder(
+                "Did earlier results hold up later", "holdout"
+            )
+        return _section(
+            "Did earlier results hold up later",
+            f'<p class="notice notice-neutral">{_esc("; ".join(reasons))}</p>',
+            anchor="holdout",
+        )
+
+    rows = []
+    for fold in validation.get("folds") or []:
+        in_s = fold.get("in_sample") or {}
+        out_s = fold.get("out_of_sample") or {}
+        ratio = fold.get("profit_factor_ratio")
+        in_pf = in_s.get("profit_factor")
+        out_pf = out_s.get("profit_factor")
+        rows.append(
+            "<tr>"
+            f'<td class="dim-col-name">Window {_int_text(fold.get("fold_index"))}</td>'
+            f'<td class="dim-col-num">{_int_text(in_s.get("trades"))}</td>'
+            f'<td class="dim-col-num">{_num(in_pf, 2) if in_pf is not None else "&mdash;"}</td>'
+            f'<td class="dim-col-num">{_int_text(out_s.get("trades"))}</td>'
+            f'<td class="dim-col-num">{_num(out_pf, 2) if out_pf is not None else "&mdash;"}</td>'
+            f'<td class="dim-col-num">{_num(ratio, 2) if ratio is not None else "&mdash;"}</td>'
+            f'<td class="dim-col-status">{_esc(str(fold.get("reliability") or "UNKNOWN"))}</td>'
+            "</tr>"
+        )
+    headline = (
+        '<div class="score-basis-alert score-basis-normal">'
+        f'<span class="sb-badge-normal">{_esc(str(validation.get("stability_grade") or "UNKNOWN"))}</span> '
+        f'{_int_text(validation.get("oos_profitable_folds"))} of '
+        f'{_int_text(validation.get("folds_evaluated"))} later windows were in profit.'
+        "</div>"
+    )
+    table = (
+        '<table class="score-basis-table"><thead><tr>'
+        "<th>Window</th><th>Earlier trades</th><th>Earlier PF</th>"
+        "<th>Later trades</th><th>Later PF</th><th>Later/Earlier</th><th>Grade</th>"
+        f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
+    )
+    caveats = [str(c) for c in (validation.get("limitations") or [])]
+    caveat_html = (
+        f'<p class="notice notice-neutral">{_esc("; ".join(caveats))}</p>'
+        if caveats
+        else ""
+    )
+    return _section(
+        "Did earlier results hold up later",
+        headline
+        + table
+        + caveat_html
+        + _insight_theory("holdout"),
+        anchor="holdout",
+    )
+
+
+def _render_scenario_lab(result: Dict[str, Any]) -> str:
+    """Named what-ifs, each with an interval rather than a single number."""
+    if not _insights(result):
+        return _insight_placeholder("Scenario laboratory", "scenario-lab")
+    lab = _insights(result).get("scenario_laboratory") or {}
+    scenarios = lab.get("scenarios") or []
+    if not scenarios:
+        return _insight_placeholder("Scenario laboratory", "scenario-lab")
+    rows = []
+    for scenario in scenarios:
+        band = scenario.get("total_pnl") or {}
+        simulated = scenario.get("status") == "SIMULATED" and band.get("p50") is not None
+        label = str(scenario.get("name") or "")
+        if scenario.get("family") == "REGIME":
+            label = f"Behaviour in the {_phase_label_vi(label)} phase"
+        span = (
+            f'{_num(band.get("p05"), 0)} &hellip; {_num(band.get("p95"), 0)}'
+            if simulated
+            else "&mdash;"
+        )
+        loss = scenario.get("probability_of_loss_pct")
+        rows.append(
+            "<tr>"
+            f'<td class="dim-col-name"><strong>{_esc(label)}</strong></td>'
+            f'<td class="dim-col-num">{_int_text(scenario.get("sample_size"))}</td>'
+            f'<td class="dim-col-num">{_num(band.get("p50"), 0) if simulated else "&mdash;"}</td>'
+            f'<td class="dim-col-num">{span}</td>'
+            f'<td class="dim-col-num">{_pct(loss, 0) if loss is not None else "&mdash;"}</td>'
+            f'<td class="dim-col-status">{_esc(str(scenario.get("status") or ""))}</td>'
+            "</tr>"
+        )
+    untested = [_phase_label_vi(u) for u in (lab.get("untested_conditions") or [])]
+    untested_html = (
+        '<p class="notice notice-neutral">Never observed, so not simulated: '
+        f'{_esc(", ".join(untested))}</p>'
+        if untested
+        else ""
+    )
+    return _section(
+        "Scenario laboratory",
+        '<table class="score-basis-table"><thead><tr>'
+        "<th>Scenario</th><th>Trades</th><th>Median</th><th>5th&ndash;95th</th>"
+        "<th>Chance of loss</th><th>Status</th>"
+        f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
+        + untested_html
+        + _insight_theory("scenario-lab"),
+        anchor="scenario-lab",
+    )
+
+
+def _render_market_compatibility(result: Dict[str, Any]) -> str:
+    """Where this bot has actually traded, regime by regime.
+
+    Market-conditioned, so it belongs in the market tab rather than the
+    user-facing overview. A regime with no observed trade is shown as a row
+    with no numbers, not omitted -- leaving it out would show the reader only
+    the conditions that happened to go well.
+    """
+    if not _insights(result):
+        return _insight_placeholder("Market compatibility", "market-compatibility")
+    compat = _insights(result).get("market_compatibility") or {}
+    cells = compat.get("cells") or []
+    if not cells:
+        return _insight_placeholder("Market compatibility", "market-compatibility")
+
+    rows = []
+    for cell in cells:
+        observed = cell.get("observed_trades") or 0
+        pnl = cell.get("total_pnl")
+        wr = cell.get("win_rate")
+        tested = cell.get("status") == "OBSERVED" and observed > 0
+        rows.append(
+            "<tr>"
+            f'<td class="dim-col-name"><strong>{_esc(_phase_label_vi(cell.get("regime")))}</strong></td>'
+            f'<td class="dim-col-num">{_int_text(observed)}</td>'
+            f'<td class="dim-col-num">{_num(wr, 1) + "%" if tested and wr is not None else "&mdash;"}</td>'
+            f'<td class="dim-col-num">{_num(pnl, 0) if tested and pnl is not None else "&mdash;"}</td>'
+            f'<td class="dim-col-status">{_esc(str(cell.get("reliability") or "UNKNOWN"))}</td>'
+            "</tr>"
+        )
+
+    # Execution scenarios are a property of the market the bot trades in (spread,
+    # depth), so they sit here rather than with the bot-conditioned scenarios.
+    lab = _insights(result).get("scenario_laboratory") or {}
+    exec_rows = []
+    for scenario in lab.get("scenarios") or []:
+        if scenario.get("family") != "EXECUTION":
+            continue
+        band = scenario.get("total_pnl") or {}
+        simulated = scenario.get("status") == "SIMULATED" and band.get("p50") is not None
+        exec_rows.append(
+            "<tr>"
+            f'<td class="dim-col-name"><strong>{_esc(str(scenario.get("name") or ""))}</strong></td>'
+            f'<td class="dim-col-num">{_int_text(scenario.get("sample_size"))}</td>'
+            f'<td class="dim-col-num">{_num(band.get("p50"), 0) if simulated else "&mdash;"}</td>'
+            f'<td class="dim-col-num">'
+            f'{_num(band.get("p05"), 0) + " &hellip; " + _num(band.get("p95"), 0) if simulated else "&mdash;"}'
+            "</td>"
+            f'<td class="dim-col-status">{_esc(str(scenario.get("status") or ""))}</td>'
+            "</tr>"
+        )
+    exec_html = (
+        '<h3>Cost sensitivity</h3>'
+        '<table class="score-basis-table"><thead><tr>'
+        "<th>Scenario</th><th>Trades</th><th>Median</th><th>5th&ndash;95th</th><th>Status</th>"
+        f'</tr></thead><tbody>{"".join(exec_rows)}</tbody></table>'
+        if exec_rows
+        else ""
+    )
+
+    limitations = [str(x) for x in (compat.get("limitations") or [])]
+    limit_html = (
+        f'<p class="notice notice-neutral">{_esc("; ".join(limitations))}</p>'
+        if limitations
+        else ""
+    )
+    return _section(
+        "Market compatibility",
+        '<table class="score-basis-table"><thead><tr>'
+        "<th>Market phase</th><th>Trades</th><th>Win rate</th><th>Net PnL</th><th>Reliability</th>"
+        f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
+        + limit_html
+        + exec_html
+        + _insight_theory("market-compatibility"),
+        anchor="market-compatibility",
+    )
+
+
 def _render_tab_report(result: Dict[str, Any]) -> str:
     if result.get("status") == "LIMITED":
         return _render_tab_report_limited(result)
     sections = [
+        _render_executive_essence(result),
         _render_conclusion(result),
+        _render_growth_section(result),
         _render_narrative(result),
         _render_dimensions_section(result),
-        _render_growth_section(result),
         _render_monte_carlo(result),
     ]
     return "".join(s for s in sections if s)
@@ -4586,6 +5674,7 @@ def _render_tab_market(result: Dict[str, Any]) -> str:
         return _render_tab_market_limited(result)
     sections = [
         _render_dominant_market_card(result),
+        _render_market_compatibility(result),
         _render_market_coverage(result),
         _render_strategy_section(result),
     ]
@@ -4618,40 +5707,48 @@ def _render_drawdown_vs_capital(result: Dict[str, Any]) -> str:
     streak = profile.get("worst_losing_streak")
     gross = profile.get("gross_loss") or {}
 
-    tiles = [
-        _stat_tile(
-            "Worst single loss",
-            _loss_pct((worst or {}).get("pct_of_capital"))
-            if has_capital
-            else _money((worst or {}).get("pnl")),
-            color=_risk_color(None),
-        )
-        if worst
-        else _stat_tile("Worst single loss", "No losing trades yet"),
-        _stat_tile(
-            "Deepest drawdown episode",
-            _loss_pct((episode or {}).get("depth_pct"))
-            if has_capital
-            else _money(-(episode or {}).get("depth_abs", 0.0)),
-        )
-        if episode
-        else _stat_tile("Deepest drawdown episode", "No drawdown yet"),
-        _stat_tile(
-            "Most costly losing streak",
-            _loss_pct((streak or {}).get("pct_of_capital"))
-            if has_capital
-            else _money((streak or {}).get("total_loss")),
-        )
-        if streak
-        else _stat_tile("Most costly losing streak", "None"),
-        _stat_tile(
-            "Total gross loss",
-            _loss_pct(gross.get("pct_of_capital"))
-            if has_capital
-            else _money(gross.get("total")),
-        ),
+    worst_val = (
+        _loss_pct((worst or {}).get("pct_of_capital"))
+        if has_capital
+        else _money((worst or {}).get("pnl"))
+    ) if worst else "No losing trades yet"
+
+    episode_val = (
+        _loss_pct((episode or {}).get("depth_pct"))
+        if has_capital
+        else _money(-(episode or {}).get("depth_abs", 0.0))
+    ) if episode else "No drawdown yet"
+
+    streak_val = (
+        _loss_pct((streak or {}).get("pct_of_capital"))
+        if has_capital
+        else _money((streak or {}).get("total_loss"))
+    ) if streak else "None"
+
+    gross_val = (
+        _loss_pct(gross.get("pct_of_capital"))
+        if has_capital
+        else _money(gross.get("total"))
+    )
+
+    items = [
+        ("Worst single loss", worst_val, "#dc2626" if worst else None),
+        ("Deepest drawdown episode", episode_val, "#dc2626" if episode else None),
+        ("Most costly losing streak", streak_val, "#dc2626" if streak else None),
+        ("Total gross loss", gross_val, "#dc2626" if gross.get("total") else None),
     ]
-    body = f'<div class="stat-row">{"".join(tiles)}</div>'
+
+    param_row_list = []
+    for k, v, c in items:
+        val_style = f' style="color:{c};"' if c else ""
+        param_row_list.append(
+            f'<div class="param-horizontal-row">'
+            f'<span class="param-horizontal-name">{_esc(k)}</span>'
+            f'<span class="param-horizontal-val"{val_style}>{_esc(v)}</span>'
+            f'</div>'
+        )
+    param_rows_html = "".join(param_row_list)
+    body = f'<div class="param-horizontal-list">{param_rows_html}</div>'
 
     if not has_capital:
         body += (
@@ -4683,35 +5780,41 @@ def _render_drawdown_vs_capital(result: Dict[str, Any]) -> str:
             (float(r.value) for r in rows if r.value is not None), default=0.0
         )
         body += "<h3>Five worst losing trades</h3>" + _horizontal_bars(
-            rows, max_value=max(largest, 1.0)
+            rows, max_value=max(largest, 1.0), width=860.0, value_w=210.0
         )
 
     if episode:
         recovered = episode.get("recovered")
+        depth_val = -float(episode.get("depth_abs", 0.0))
+        depth_str = _money(depth_val) + (
+            f" · {_pct(episode.get('depth_pct'), 1)} of reference capital"
+            if _is_finite_number(episode.get("depth_pct"))
+            else ""
+        )
+        dur_hours = episode.get("duration_hours")
+        dur_str = f"{_num(dur_hours, 1)} hours" if _is_finite_number(dur_hours) else "—"
+        recovered_badge = (
+            '<span style="display:inline-block;background:rgba(22,163,74,0.15);color:#16a34a;border:1px solid rgba(22,163,74,0.35);font-family:var(--mono);font-weight:700;font-size:0.75rem;padding:0.15rem 0.5rem;border-radius:4px;">RECOVERED</span>'
+            if recovered
+            else '<span style="display:inline-block;background:rgba(220,38,38,0.15);color:#dc2626;border:1px solid rgba(220,38,38,0.35);font-family:var(--mono);font-weight:700;font-size:0.75rem;padding:0.15rem 0.5rem;border-radius:4px;">NOT RECOVERED</span>'
+        )
+        trough_str = _money(episode.get("trough_cum"))
+        trough_color = "#ef4444" if str(trough_str).startswith("-") else "#10b981"
         episode_rows = [
-            ["Capital peak before the fall", _money(episode.get("peak_cum"))],
-            ["Trough of the drawdown", _money(episode.get("trough_cum"))],
+            ["Capital peak before the fall", f'<span style="color:#10b981;font-weight:600;font-family:var(--mono);">+{_esc(_money(episode.get("peak_cum")))}</span>'],
+            ["Trough of the drawdown", f'<span style="color:{trough_color};font-weight:600;font-family:var(--mono);">{_esc(trough_str)}</span>'],
             [
                 "Depth",
-                _money(-float(episode.get("depth_abs", 0.0)))
-                + (
-                    f" &middot; {_pct(episode.get('depth_pct'), 1)} of reference capital"
-                    if _is_finite_number(episode.get("depth_pct"))
-                    else ""
-                ),
+                f'<span style="color:#ef4444;font-weight:700;font-family:var(--mono);">{_esc(depth_str)}</span>',
             ],
-            ["Trades from peak to trough", _int_text(episode.get("trade_count"))],
+            ["Trades from peak to trough", f'<span style="font-family:var(--mono);">{_esc(_int_text(episode.get("trade_count")))}</span>'],
             [
                 "Duration",
-                f"{_num(episode.get('duration_hours'), 1)} hours"
-                if _is_finite_number(episode.get("duration_hours"))
-                else "—",
+                f'<span style="font-family:var(--mono);">{_esc(dur_str)}</span>',
             ],
             [
                 "Recovered to the previous peak?",
-                '<span class="badge-win">RECOVERED</span>'
-                if recovered
-                else '<span class="badge-loss">NOT RECOVERED</span>',
+                recovered_badge,
             ],
         ]
         body += "<h3>Deepest drawdown episode</h3>" + _table(
@@ -4734,24 +5837,8 @@ def _render_drawdown_vs_capital(result: Dict[str, Any]) -> str:
         )
 
     theory = _theory(
-        "The four figures above measure the SIZE of losses, something the win"
-        " rate and profit factor do not say: a bot that wins 70% of its trades"
-        " can still wipe out an account if a single losing trade eats all its"
-        " capital. The worst single loss reflects stop-loss discipline and"
-        " position sizing; the deepest drawdown episode shows how long and how"
-        " many trades a copier had to endure before capital recovered; the most"
-        " costly losing streak shows the damage when the strategy hits an"
-        " unfavourable market phase.",
-        "Computed directly from the closed trade ledger (`close_time`,"
-        " `realized_pnl`), ordered by close time; the drawdown is measured as"
-        " the distance from the running peak of the cumulative profit/loss line"
-        " down to the next trough. The denominator for every percentage in this"
-        " section is a SINGLE reference-capital figure inferred from the actual"
-        " capital curve. Note the distinction: the &quot;Max drawdown&quot;"
-        " figure in the Trade metrics section uses a DIFFERENT denominator --"
-        " capital at the exact moment each trade closes (the weekly capital"
-        " curve), capped at 100% -- so the two ratios can differ without either"
-        " one being wrong.",
+        "Loss severity metrics: worst single trade loss, deepest drawdown duration, and recovery status. Quantifies capital stress under adverse conditions.",
+        "Closed trade ledger ordered by close_time: Drawdown = (Running Peak − Current Trough) / Reference Capital."
     )
     return _section("Drawdown vs. capital", body + theory, anchor="sut-giam-von")
 
@@ -4761,6 +5848,8 @@ def _render_tab_trades(result: Dict[str, Any]) -> str:
         return _render_tab_trades_limited(result)
     sections = [
         _render_trade_metrics(result),
+        _render_validation_section(result),
+        _render_scenario_lab(result),
         _render_drawdown_vs_capital(result),
         _render_open_positions_audit(result),
         _render_statistical_inference(result),
@@ -4770,26 +5859,58 @@ def _render_tab_trades(result: Dict[str, Any]) -> str:
     return "".join(s for s in sections if s)
 
 
+# Text shown in place of a panel a role does not receive. It is deliberately a
+# visible statement rather than an absent element: the design contract requires
+# withheld detail to be distinguishable from detail that was never measured.
+WITHHELD_BY_ROLE_HTML = (
+    '<section class="card" id="detail-withheld">'
+    "<h2>Detail withheld</h2>"
+    '<p class="withheld-note" data-withheld="DETAIL_WITHHELD_BY_ROLE">'
+    "This panel is not part of the user view. It was measured and is present in "
+    "the analysis; it is not shown here."
+    "</p></section>"
+)
+
+
 def _render_tabs_wrapper(
     tab1_content: str,
     tab2_content: str,
     tab3_content: str,
+    *,
+    hidden_panels: Sequence[str] = (),
 ) -> str:
+    """Assemble the three tabs.
+
+    `hidden_panels` names panel ids the current role does not receive. The
+    panel element and its semantic id ALWAYS remain -- they are a compatibility
+    contract that the SPA, tests and deep links all rely on -- so a hidden panel
+    keeps its shell and carries an explicit withheld notice instead of its body.
+    Removing the element outright is what the client used to do, and it made
+    "you may not see this" indistinguishable from "this does not exist".
+    """
+    hidden = set(hidden_panels)
+    if "panel-market" in hidden:
+        tab2_content = WITHHELD_BY_ROLE_HTML
+    if "panel-trades" in hidden:
+        tab3_content = WITHHELD_BY_ROLE_HTML
+    tab_label_attr = ""
+    if hidden:
+        tab_label_attr = f' data-hidden-panels="{" ".join(sorted(hidden))}"'
     return (
-        '<div class="tabs-control-wrapper">'
+        f'<div class="tabs-control-wrapper"{tab_label_attr}>'
         '<input type="radio" name="main_tabs" id="tab-nav-report" class="tab-nav-radio" checked style="display:none!important;position:absolute!important;opacity:0!important;pointer-events:none!important;">'
         '<input type="radio" name="main_tabs" id="tab-nav-market" class="tab-nav-radio" style="display:none!important;position:absolute!important;opacity:0!important;pointer-events:none!important;">'
         '<input type="radio" name="main_tabs" id="tab-nav-trades" class="tab-nav-radio" style="display:none!important;position:absolute!important;opacity:0!important;pointer-events:none!important;">'
         '<div class="tabs-header-container">'
         '<div class="tabs-nav-bar" role="tablist">'
         '<label class="tab-label label-report" for="tab-nav-report" id="label-tab-report" tabindex="0">'
-        '<span class="tab-icon">📊</span> <span class="tab-title">Analysis results</span>'
+        '<span class="tab-icon">📊</span> <span class="tab-title">Analyst Result</span>'
         "</label>"
         '<label class="tab-label label-market" for="tab-nav-market" id="label-tab-market" tabindex="0">'
-        '<span class="tab-icon">🌐</span> <span class="tab-title">Primary market</span>'
+        '<span class="tab-icon">🌐</span> <span class="tab-title">Premium Market</span>'
         "</label>"
         '<label class="tab-label label-trades" for="tab-nav-trades" id="label-tab-trades" tabindex="0">'
-        '<span class="tab-icon">📑</span> <span class="tab-title">Orders &amp; positions</span>'
+        '<span class="tab-icon">📑</span> <span class="tab-title">Other &amp; Position</span>'
         "</label>"
         "</div>"
         "</div>"
@@ -4828,9 +5949,9 @@ def _nav_items(tab_html: str) -> List[Tuple[str, str]]:
 
 def _render_nav(tab1_content: str, tab2_content: str, tab3_content: str) -> str:
     groups = (
-        ("report", "Analysis results", tab1_content),
-        ("market", "Primary market", tab2_content),
-        ("trades", "Orders & positions", tab3_content),
+        ("report", "Analyst Result", tab1_content),
+        ("market", "Premium Market", tab2_content),
+        ("trades", "Other & Position", tab3_content),
     )
     out: List[str] = []
     for tab_key, label, content in groups:
@@ -5802,6 +6923,7 @@ body {
 .narrative-card {
   background: var(--panel-2) !important;
   border: 1px solid var(--line) !important;
+}
 /* ==========================================================================
    Conclusion & Narrative Unified Styles (System Consistent)
    ========================================================================== */
@@ -5918,11 +7040,220 @@ body {
 }
 .conclusion-sub-title,
 .narrative-sub-title {
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  color: var(--ink, #f1f5f9) !important;
+}
+:root[data-theme="light"] .conclusion-sub-title,
+:root[data-theme="light"] .narrative-sub-title {
+  color: #0f172a !important;
+}
+
+/* Verdict Headline Value Badges (hover pill with soft warning colors) */
+.verdict-val-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  transition: all 0.18s ease;
+  cursor: default;
+}
+.verdict-val-badge.badge-high,
+.verdict-val-badge.badge-danger {
+  color: #f43f5e;
+}
+.verdict-val-badge.badge-high:hover,
+.verdict-val-badge.badge-danger:hover {
+  background: rgba(244, 63, 94, 0.15);
+  box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.35);
+}
+.verdict-val-badge.badge-weak,
+.verdict-val-badge.badge-elevated,
+.verdict-val-badge.badge-warning {
+  color: #f59e0b;
+}
+.verdict-val-badge.badge-weak:hover,
+.verdict-val-badge.badge-elevated:hover,
+.verdict-val-badge.badge-warning:hover {
+  background: rgba(245, 158, 11, 0.15);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35);
+}
+.verdict-val-badge.badge-low,
+.verdict-val-badge.badge-good,
+.verdict-val-badge.badge-safe {
+  color: #10b981;
+}
+.verdict-val-badge.badge-low:hover,
+.verdict-val-badge.badge-good:hover,
+.verdict-val-badge.badge-safe:hover {
+  background: rgba(16, 185, 129, 0.15);
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.35);
+}
+.verdict-val-badge.badge-acceptable {
+  color: #38bdf8;
+}
+.verdict-val-badge.badge-acceptable:hover {
+  background: rgba(56, 189, 248, 0.15);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+:root[data-theme="light"] .verdict-val-badge.badge-high,
+:root[data-theme="light"] .verdict-val-badge.badge-danger {
+  color: #e11d48;
+}
+:root[data-theme="light"] .verdict-val-badge.badge-high:hover,
+:root[data-theme="light"] .verdict-val-badge.badge-danger:hover {
+  background: rgba(225, 29, 72, 0.12);
+  box-shadow: 0 0 0 1px rgba(225, 29, 72, 0.3);
+}
+:root[data-theme="light"] .verdict-val-badge.badge-weak,
+:root[data-theme="light"] .verdict-val-badge.badge-elevated,
+:root[data-theme="light"] .verdict-val-badge.badge-warning {
+  color: #d97706;
+}
+:root[data-theme="light"] .verdict-val-badge.badge-weak:hover,
+:root[data-theme="light"] .verdict-val-badge.badge-elevated:hover,
+:root[data-theme="light"] .verdict-val-badge.badge-warning:hover {
+  background: rgba(217, 119, 6, 0.12);
+  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.3);
+}
+:root[data-theme="light"] .verdict-val-badge.badge-low,
+:root[data-theme="light"] .verdict-val-badge.badge-good,
+:root[data-theme="light"] .verdict-val-badge.badge-safe {
+  color: #15803d;
+}
+:root[data-theme="light"] .verdict-val-badge.badge-low:hover,
+:root[data-theme="light"] .verdict-val-badge.badge-good:hover,
+:root[data-theme="light"] .verdict-val-badge.badge-safe:hover {
+  background: rgba(21, 128, 61, 0.12);
+  box-shadow: 0 0 0 1px rgba(21, 128, 61, 0.3);
+}
+
+/* QUANT TERMINAL / AUDIT LOG TEXT VIEW */
+.quant-audit-terminal {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 8px 0 14px 0;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 10px 0;
+}
+:root[data-theme="light"] .quant-audit-terminal {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.quant-terminal-divider {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.14), rgba(255,255,255,0.03));
+  margin: 4px 14px;
+}
+:root[data-theme="light"] .quant-terminal-divider {
+  background: #e2e8f0;
+}
+.quant-audit-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.quant-audit-row {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  align-items: start;
+  column-gap: 20px;
+  padding: 8px 16px;
+  border-left: 3px solid transparent;
+  transition: all 0.15s ease;
+  cursor: default;
+}
+.quant-audit-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-left-color: #f59e0b;
+}
+:root[data-theme="light"] .quant-audit-row:hover {
+  background: rgba(241, 245, 249, 0.85);
+  border-left-color: #d97706;
+}
+.quant-audit-tag {
   font-size: 12px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-2);
+  color: #94a3b8;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+.quant-audit-row:hover .quant-audit-tag {
+  color: #f1f5f9;
+}
+:root[data-theme="light"] .quant-audit-tag {
+  color: #64748b;
+}
+:root[data-theme="light"] .quant-audit-row:hover .quant-audit-tag {
+  color: #0f172a;
+}
+.quant-audit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.quant-audit-main {
+  color: #cbd5e1;
+  word-break: break-word;
+}
+:root[data-theme="light"] .quant-audit-main {
+  color: #334155;
+}
+.quant-audit-consequence {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 2px;
+}
+.quant-consequence-arrow {
+  color: #f59e0b;
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.quant-consequence-text {
+  font-weight: 500;
+  color: #fde68a;
+}
+:root[data-theme="light"] .quant-consequence-arrow {
+  color: #d97706;
+}
+:root[data-theme="light"] .quant-consequence-text {
+  color: #b45309;
+}
+.quant-num {
+  font-weight: 700;
+  color: #f8fafc;
+}
+:root[data-theme="light"] .quant-num {
+  color: #0f172a;
+}
+.quant-num.quant-num-neg {
+  color: #f87171 !important;
+}
+:root[data-theme="light"] .quant-num.quant-num-neg {
+  color: #dc2626 !important;
+}
+.quant-num.quant-num-warn {
+  color: #fbbf24 !important;
+}
+:root[data-theme="light"] .quant-num.quant-num-warn {
+  color: #d97706 !important;
+}
+@media (max-width: 768px) {
+  .quant-audit-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
 }
 .conclusion-extra-line {
   margin: 0;
@@ -6534,41 +7865,51 @@ table tr:hover {
   color: #1e293b !important;
 }
 
-/* Formula Star Button */
+/* Formula Star Button - clean naked asterisk without circular wrapper or circular hover layout */
 .formula-star-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  border: 1px solid rgba(56, 189, 248, 0.4);
-  background: rgba(56, 189, 248, 0.12);
-  color: #38BDF8;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  line-height: 1;
-  padding: 0;
-  vertical-align: middle;
-  transition: all 0.15s ease;
-  margin-left: 4px;
+  display: inline-block !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  color: var(--accent, #38BDF8) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  line-height: 1 !important;
+  padding: 0 1px !important;
+  margin: 0 0 0 3px !important;
+  width: auto !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  vertical-align: baseline !important;
+  transition: color 0.15s ease !important;
+  transform: none !important;
 }
-.formula-star-btn:hover {
-  background: #38BDF8;
-  color: #0F172A;
-  border-color: #38BDF8;
-  transform: scale(1.15);
+.formula-star-btn:hover,
+.formula-star-btn:focus-visible {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  transform: none !important;
+  color: #7dd3fc !important;
+  text-decoration: underline !important;
 }
 :root[data-theme="light"] .formula-star-btn {
-  border-color: rgba(2, 132, 199, 0.35);
-  background: rgba(2, 132, 199, 0.1);
-  color: #0284c7;
+  background: transparent !important;
+  border: none !important;
+  color: #0284c7 !important;
 }
-:root[data-theme="light"] .formula-star-btn:hover {
-  background: #0284c7;
-  color: #ffffff;
-  border-color: #0284c7;
+:root[data-theme="light"] .formula-star-btn:hover,
+:root[data-theme="light"] .formula-star-btn:focus-visible {
+  background: transparent !important;
+  border: none !important;
+  transform: none !important;
+  color: #0369a1 !important;
 }
 
 .param-label {
@@ -7004,52 +8345,1303 @@ tbody tr:hover { background: var(--table-hover); }
   white-space: nowrap;
 }
 details.theory {
-  margin-top: 0.9rem;
-  border: 1px dashed var(--border);
+  margin-top: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  padding: 0.5rem 0.8rem;
+  background: rgba(15, 23, 42, 0.35);
+  padding: 0.4rem 0.75rem;
+  transition: all 0.2s ease;
+}
+:root[data-theme="light"] details.theory {
+  background: #f8fafc;
+  border-color: #e2e8f0;
 }
 details.theory summary {
   cursor: pointer;
   font-weight: 600;
-  font-size: var(--font-size-sm);
-  color: var(--muted);
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
 }
-.theory-body { font-size: var(--font-size-sm); margin-top: 0.5rem; color: var(--text); }
-.theory-body p { margin: 0.4rem 0; }
+details.theory[open] summary {
+  color: #38bdf8;
+  margin-bottom: 0.4rem;
+}
+.theory-body { font-size: var(--font-size-sm); margin-top: 0.25rem; color: var(--text); }
+.theory-body p { margin: 0.3rem 0; }
 .theory-body code { background: var(--track); padding: 0.05rem 0.3rem; border-radius: 4px; }
+.theory-quant-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 2px;
+}
+.theory-item {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+@media (max-width: 640px) {
+  .theory-item {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+.theory-tag {
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  padding: 1px 6px;
+  border-radius: 4px;
+  width: fit-content;
+}
+.theory-tag.theory-tag-formula {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.1);
+  border-color: rgba(167, 139, 250, 0.25);
+}
+.theory-text {
+  color: #cbd5e1;
+}
+:root[data-theme="light"] .theory-text {
+  color: #334155;
+}
+
+/* Score explanation notes - Quant Matrix View */
+.score-basis-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+.score-basis-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sb-section-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.score-basis-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: var(--mono, monospace);
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="light"] .score-basis-table {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+.score-basis-table th {
+  text-align: left;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="light"] .score-basis-table th {
+  background: #f1f5f9;
+  color: #64748b;
+  border-bottom-color: #e2e8f0;
+}
+.score-basis-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+}
+:root[data-theme="light"] .score-basis-table td {
+  border-bottom-color: #f1f5f9;
+  color: #334155;
+}
+.score-basis-table tr:last-child td {
+  border-bottom: none;
+}
+.score-basis-table .row-unmeasured td {
+  opacity: 0.6;
+}
+.dim-col-name strong {
+  font-family: var(--font, sans-serif);
+  color: #f1f5f9;
+  font-weight: 600;
+}
+:root[data-theme="light"] .dim-col-name strong {
+  color: #0f172a;
+}
+.dim-col-num {
+  font-weight: 700;
+}
+.q-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+.q-badge-ok {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.q-badge-neutral {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+.score-basis-alert {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.score-basis-veto {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+:root[data-theme="light"] .score-basis-veto {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+.score-basis-normal {
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #bae6fd;
+}
+:root[data-theme="light"] .score-basis-normal {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+  color: #0369a1;
+}
+.sb-badge-veto {
+  font-family: var(--mono, monospace);
+  font-size: 10.5px;
+  font-weight: 800;
+  background: #ef4444;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.sb-badge-normal {
+  font-family: var(--mono, monospace);
+  font-size: 10.5px;
+  font-weight: 700;
+  background: #0284c7;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.score-basis-math-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 4px;
+}
+@media (max-width: 640px) {
+  .score-basis-math-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.sb-math-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+}
+:root[data-theme="light"] .sb-math-col {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+.sb-label {
+  font-family: var(--mono, monospace);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+:root[data-theme="light"] .sb-label {
+  color: #64748b;
+}
+.sb-desc {
+  font-size: 11.5px;
+  color: #cbd5e1;
+}
+:root[data-theme="light"] .sb-desc {
+  color: #475569;
+}
 .findings { margin: 0.5rem 0 0; padding-left: 1.2rem; font-size: var(--font-size-sm); color: var(--ink-2, #cbd5e1); line-height: 1.6; }
 .findings li { margin: 0.25rem 0; }
 .findings li strong { color: var(--ink, #ffffff); font-weight: 600; }
+/* Expert Assessment - Modern Fintech Insight Cards */
+.expert-summary-box {
+  background: rgba(56, 189, 248, 0.04);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-left: 3px solid #38bdf8;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 0.5rem;
+  margin-bottom: 0.85rem;
+  box-sizing: border-box;
+}
+.expert-summary-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #38bdf8;
+  margin-bottom: 4px;
+}
+.expert-summary-text {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink, #ffffff);
+  font-weight: 500;
+}
+.expert-points-wrap {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+}
+.expert-points-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+}
+.expert-points-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.expert-points-count {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted, #94a3b8);
+}
+.expert-points-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 285px;
+  overflow-y: auto;
+  padding-right: 4px;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+.expert-points-feed::-webkit-scrollbar {
+  width: 5px;
+}
+.expert-points-feed::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+}
+.expert-point-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  padding: 9px 12px;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+.expert-point-card:hover {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(56, 189, 248, 0.3);
+  transform: translateX(2px);
+}
+.expert-point-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  line-height: 1.2;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.expert-point-content {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2, #cbd5e1);
+  flex: 1;
+}
+.expert-metric {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--ink, #ffffff);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme="light"] .expert-summary-box {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+  border-left-color: #0284c7;
+}
+:root[data-theme="light"] .expert-summary-label {
+  color: #0284c7;
+}
+:root[data-theme="light"] .expert-summary-text {
+  color: #0f172a;
+}
+:root[data-theme="light"] .expert-point-card {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+:root[data-theme="light"] .expert-point-card:hover {
+  background: #ffffff;
+  border-color: #0284c7;
+}
+:root[data-theme="light"] .expert-point-num {
+  color: #0284c7;
+  background: #e0f2fe;
+  border-color: #bae6fd;
+}
+:root[data-theme="light"] .expert-point-content {
+  color: #334155;
+}
+:root[data-theme="light"] .expert-metric {
+  color: #0f172a;
+  background: #f1f5f9;
+}
 svg { height: auto; }
 svg.bar-chart { display: block; margin-top: 0.6rem; max-width: 860px; }
 svg text { fill: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
 svg .bar-label, svg .bar-label-sm { fill: var(--ink-2, #cbd5e1); font-size: 12.5px; font-weight: 500; }
 svg .bar-value, svg .bar-value-sm { font-weight: 700; font-size: 12px; fill: var(--ink, #ffffff); }
-.horizon-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
-  gap: 1px;
-  background: var(--border);
-  border: 1px solid var(--border);
-  margin-top: 0.5rem;
+svg .bar-value.val-pos { fill: #10b981 !important; }
+svg .bar-value.val-neg { fill: #ef4444 !important; }
+
+/* Market Data Coverage */
+.cov-card-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
 }
-.horizon-card {
-  background: var(--card-bg);
-  padding: 13px 15px;
+.cov-benchmark-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.cov-benchmark-title {
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.cov-benchmark-metrics {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+}
+.cov-metric-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cov-metric-label {
+  color: var(--muted, #94a3b8);
+}
+.cov-metric-val {
+  color: var(--ink, #ffffff);
+  font-weight: 700;
+}
+.cov-metric-sep {
+  color: var(--border, rgba(255, 255, 255, 0.15));
+}
+.cov-status-badge {
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.cov-status-under {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+.cov-status-met {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+.cov-bar-wrapper {
+  position: relative;
+  width: 100%;
+  margin: 16px 0 8px;
+}
+.cov-target-line {
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  width: 2px;
+  border-left: 2px dashed #f59e0b;
+  z-index: 10;
+  pointer-events: none;
+}
+.cov-target-pin {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  transform: translateX(-50%);
+  font-family: var(--mono, monospace);
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #f59e0b;
+  background: var(--card-bg, #0b1120);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  white-space: nowrap;
+}
+.cov-stacked-bar {
+  display: flex;
+  width: 100%;
+  height: 38px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  box-sizing: border-box;
+}
+.cov-bar-seg {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: all 0.18s ease;
+  box-sizing: border-box;
+  border-right: 1px solid rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+.cov-bar-seg:hover {
+  filter: brightness(1.18);
+  transform: translateY(-1px);
+  z-index: 5;
+}
+.cov-bar-seg:last-child {
+  border-right: none;
+}
+.cov-seg-inner {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.cov-seg-resolved .cov-seg-inner {
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+}
+.cov-seg-unresolved {
+  background: repeating-linear-gradient(45deg, rgba(148, 163, 184, 0.1), rgba(148, 163, 184, 0.1) 6px, rgba(148, 163, 184, 0.22) 6px, rgba(148, 163, 184, 0.22) 12px) !important;
+  border-right: 1px dashed rgba(148, 163, 184, 0.3);
+}
+.cov-seg-unresolved .cov-seg-inner {
+  color: var(--muted, #cbd5e1);
+}
+.cov-seg-unallocated {
+  background: repeating-linear-gradient(-45deg, rgba(148, 163, 184, 0.06), rgba(148, 163, 184, 0.06) 5px, rgba(148, 163, 184, 0.14) 5px, rgba(148, 163, 184, 0.14) 10px) !important;
+}
+.cov-seg-unallocated .cov-seg-inner {
+  color: var(--muted, #94a3b8);
+  font-size: 10.5px;
+}
+.cov-sublabel-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11.5px;
+  margin-top: 4px;
+  padding: 0 2px;
+}
+.cov-sublabel-col {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cov-sublabel-resolved {
+  color: #10b981;
+}
+.cov-sublabel-unresolved {
+  color: var(--muted, #94a3b8);
+}
+.cov-icon-resolved {
+  color: #10b981;
+  font-weight: 700;
+}
+.cov-icon-unresolved {
+  color: #f59e0b;
+  font-weight: 700;
+}
+.cov-warning-box {
+  border-left: 3px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+  border-radius: 6px;
+  padding: 11px 15px;
+  margin-top: 8px;
+}
+.cov-warning-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  color: #f59e0b;
+  margin-bottom: 4px;
+  letter-spacing: 0.04em;
+}
+.cov-warning-body {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink, #e2e8f0);
+}
+.cov-dim-pill {
+  display: inline-block;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+  margin: 0 2px;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+.cov-dim-pill:hover {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: #f59e0b;
+  color: #ffffff;
+  text-decoration: none;
+}
+
+/* Light mode overrides for market coverage */
+:root[data-theme="light"] .cov-benchmark-title {
+  color: #64748b !important;
+}
+:root[data-theme="light"] .cov-metric-val {
+  color: #0f172a !important;
+}
+:root[data-theme="light"] .cov-metric-sep {
+  color: #cbd5e1 !important;
+}
+:root[data-theme="light"] .cov-target-pin {
+  background: #ffffff !important;
+  color: #d97706 !important;
+  border-color: rgba(217, 119, 6, 0.3) !important;
+}
+:root[data-theme="light"] .cov-stacked-bar {
+  background: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+:root[data-theme="light"] .cov-seg-unresolved {
+  background: repeating-linear-gradient(45deg, rgba(100, 116, 139, 0.08), rgba(100, 116, 139, 0.08) 6px, rgba(100, 116, 139, 0.16) 6px, rgba(100, 116, 139, 0.16) 12px) !important;
+  border-right-color: #cbd5e1 !important;
+}
+:root[data-theme="light"] .cov-seg-unresolved .cov-seg-inner {
+  color: #475569 !important;
+}
+:root[data-theme="light"] .cov-warning-box {
+  background: #fffbeb !important;
+  border-color: #d97706 !important;
+}
+:root[data-theme="light"] .cov-warning-head {
+  color: #b45309 !important;
+}
+:root[data-theme="light"] .cov-warning-body {
+  color: #1e293b !important;
+}
+:root[data-theme="light"] .cov-dim-pill {
+  background: #fef3c7 !important;
+  border-color: #fde68a !important;
+  color: #92400e !important;
+}
+:root[data-theme="light"] .cov-dim-pill:hover {
+  background: #fde68a !important;
+  color: #78350f !important;
+}
+
+/* Multi-horizon comparison matrix */
+.hz-matrix-wrap {
+  width: 100%;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  background: var(--card-bg, #0e1526);
+  overflow-x: auto;
+  overflow-y: visible;
+  max-height: none;
+  margin-top: 0.25rem;
+  margin-bottom: 0.65rem;
+  box-sizing: border-box;
+}
+.hz-matrix-table {
+  width: 100%;
+  min-width: 320px;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: auto;
+  margin: 0;
+}
+.hz-matrix-table th {
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted, #94a3b8);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+.hz-matrix-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--ink, #e2e8f0);
+  font-size: 12px;
+  vertical-align: middle;
+}
+.hz-matrix-row {
+  transition: background 0.15s ease;
+}
+.hz-matrix-row:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+.hz-matrix-table tr:last-child td {
+  border-bottom: none;
+}
+.hz-matrix-table .col-hz {
+  width: 22%;
+  text-align: left;
+}
+.hz-matrix-table .col-sample {
+  width: 18%;
+  text-align: left;
+}
+.hz-matrix-table .col-pop {
+  width: 34%;
+  text-align: left;
+}
+.hz-matrix-table .col-loss-ruin {
+  width: 26%;
+  text-align: right;
+  white-space: nowrap;
+}
+.hz-pill {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+.hz-pill-short {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+.hz-pill-medium {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+.hz-pill-long {
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(14, 165, 233, 0.3);
+}
+.hz-sample {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted, #94a3b8);
+  font-variant-numeric: tabular-nums;
+}
+.hz-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.hz-progress-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  min-width: 36px;
+}
+.hz-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.hz-progress-val {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  min-width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hz-loss-val, .hz-ruin-val {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.hz-divider {
+  color: var(--muted, #64748b);
+  margin: 0 3px;
+  opacity: 0.6;
+}
+.hz-insight-callout {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.4;
+  margin-top: 0.5rem;
+  margin-bottom: 0.75rem;
+  box-sizing: border-box;
+}
+.hz-insight-icon {
+  font-size: 13px;
+  flex: 0 0 auto;
+  line-height: 1.3;
+}
+.hz-insight-body {
+  flex: 1;
+}
+.hz-insight-decay {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+.hz-insight-decay strong {
+  color: #ef4444;
+}
+.hz-insight-warn {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: #fde68a;
+}
+.hz-insight-warn strong {
+  color: #f59e0b;
+}
+.hz-insight-positive {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #a7f3d0;
+}
+.hz-insight-positive strong {
+  color: #10b981;
+}
+.hz-insight-info {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: #bfdbfe;
+}
+.hz-insight-info strong {
+  color: #60a5fa;
+}
+
+/* Key Probabilities KPI Badges & Table */
+.kp-kpi-footer {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+}
+.kp-kpi-sublabel {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted, #94a3b8);
+  margin-top: 1px;
+  margin-bottom: 4px;
+}
+.kp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.kp-badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.kp-badge-safe {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+.kp-badge-safe .kp-badge-dot {
+  background: #10b981;
+}
+.kp-badge-warn {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+.kp-badge-warn .kp-badge-dot {
+  background: #f59e0b;
+}
+.kp-badge-danger {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+.kp-badge-danger .kp-badge-dot {
+  background: #ef4444;
+}
+.kp-subhead-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.65rem;
+  margin-bottom: 0.35rem;
+}
+.kp-subhead-title {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.kp-subhead-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted, #94a3b8);
+}
+.kp-table-wrap {
+  width: 100%;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  background: var(--card-bg, #0e1526);
+  overflow-x: auto;
+  overflow-y: visible;
+  max-height: none;
+  margin-bottom: 0.5rem;
+  box-sizing: border-box;
+}
+.kp-table {
+  width: 100%;
+  min-width: 320px;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: auto;
+  margin: 0;
+}
+.kp-table th {
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted, #94a3b8);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+.kp-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--ink, #e2e8f0);
+  font-size: 12px;
+  vertical-align: middle;
+}
+.kp-table tr:last-child td {
+  border-bottom: none;
+}
+.kp-table .col-streak {
+  width: 28%;
+  text-align: left;
+  white-space: nowrap;
+}
+.kp-table .col-obs {
+  width: 24%;
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.kp-table .col-base {
+  width: 24%;
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.kp-table .col-excess {
+  width: 24%;
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.kp-streak-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink, #e2e8f0);
+}
+.kp-streak-row {
+  transition: background 0.15s ease;
+}
+.kp-streak-row:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+.th-sub {
+  font-size: 8.5px;
+  font-weight: 400;
+  text-transform: none;
+  opacity: 0.75;
+}
+
+/* Light Mode Overrides for Monte Carlo pair */
+:root[data-theme="light"] .hz-matrix-wrap {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+:root[data-theme="light"] .hz-matrix-table th {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #64748b !important;
+}
+:root[data-theme="light"] .hz-matrix-table td {
+  border-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+:root[data-theme="light"] .hz-matrix-row:hover,
+:root[data-theme="light"] .kp-streak-row:hover {
+  background: #f8fafc !important;
+}
+:root[data-theme="light"] .hz-progress-track {
+  background: rgba(0, 0, 0, 0.07) !important;
+}
+:root[data-theme="light"] .hz-insight-decay {
+  background: #fef2f2 !important;
+  border-color: #fecaca !important;
+  color: #991b1b !important;
+}
+:root[data-theme="light"] .hz-insight-decay strong {
+  color: #b91c1c !important;
+}
+:root[data-theme="light"] .hz-insight-warn {
+  background: #fffbeb !important;
+  border-color: #fde68a !important;
+  color: #92400e !important;
+}
+:root[data-theme="light"] .hz-insight-warn strong {
+  color: #b45309 !important;
+}
+:root[data-theme="light"] .hz-insight-positive {
+  background: #f0fdf4 !important;
+  border-color: #bbf7d0 !important;
+  color: #166534 !important;
+}
+:root[data-theme="light"] .hz-insight-positive strong {
+  color: #15803d !important;
+}
+:root[data-theme="light"] .hz-insight-info {
+  background: #eff6ff !important;
+  border-color: #bfdbfe !important;
+  color: #1e40af !important;
+}
+:root[data-theme="light"] .hz-insight-info strong {
+  color: #1d4ed8 !important;
+}
+:root[data-theme="light"] .kp-streak-pill {
+  color: #0f172a !important;
+}
+:root[data-theme="light"] .kp-subhead-title {
+  color: #64748b !important;
+}
+
+/* Monte Carlo paired 2-column layout */
+.mc-pair-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  align-items: stretch;
+  margin-top: 1rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+@media (max-width: 1080px) {
+  .mc-pair-row {
+    grid-template-columns: 1fr !important;
+  }
+}
+.mc-pair-cell {
+  background: var(--surface-2, rgba(255, 255, 255, 0.035));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.09));
+  border-radius: 10px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: auto;
+  min-height: auto;
+  box-sizing: border-box;
+}
+.mc-pair-cell h3 {
+  margin: 0 0 0.75rem 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink, #ffffff);
+}
+.mc-pair-cell details.theory,
+.mc-full-row details.theory {
+  margin-top: auto;
+}
+.mc-full-row {
+  background: var(--surface-2, rgba(255, 255, 255, 0.035));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.09));
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
   min-width: 0;
 }
-.horizon-title { font-weight: 700; font-size: var(--font-size-sm); letter-spacing: 0.03em; color: var(--ink-3, #94a3b8); }
-.horizon-trades { font-size: var(--font-size-xs); color: var(--ink-3, #94a3b8); margin-top: 0.15rem; }
-.horizon-pop { font-size: var(--font-size-lg); font-weight: 700; margin-top: 0.3rem; font-variant-numeric: tabular-nums; }
-.horizon-sub { font-size: var(--font-size-xs); color: var(--ink-3, #94a3b8); margin-top: 0.25rem; }
-.horizon-label { margin-top: 0.5rem; font-size: var(--font-size-sm); font-weight: 600; }
+.mc-full-row h3 {
+  margin: 0 0 0.75rem 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink, #ffffff);
+}
+.mc-pair-cell .table-scroll {
+  margin-top: 0.25rem;
+  margin-bottom: 0.5rem;
+  max-height: 180px;
+  overflow-y: auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+}
+.mc-pair-cell .table-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.mc-pair-cell .table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mc-pair-cell .table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+}
+.mc-pair-cell .table-scroll thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2, #141b2d);
+  z-index: 2;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="light"] .mc-pair-cell .table-scroll {
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+  border-color: rgba(0, 0, 0, 0.06);
+}
+:root[data-theme="light"] .mc-pair-cell .table-scroll thead th {
+  background: #f8fafc;
+  box-shadow: 0 1px 0 #e2e8f0;
+}
+/* Key Probabilities Layout - Seamless & Aligned */
+.kp-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.25rem;
+  margin-bottom: 0.75rem;
+  width: 100%;
+}
+.kp-kpi-card {
+  background: var(--card-bg, #0e1526);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  padding: 11px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.kp-kpi-value {
+  font-family: var(--mono);
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ink, #ffffff);
+  font-variant-numeric: tabular-nums;
+}
+.kp-kpi-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+}
+.kp-table-wrap {
+  width: 100%;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  background: var(--card-bg, #0e1526);
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 180px;
+  margin-bottom: 0.5rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+.kp-table-wrap::-webkit-scrollbar {
+  width: 5px;
+}
+.kp-table-wrap::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+}
+.kp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+  margin: 0;
+}
+.kp-table th {
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted, #94a3b8);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.kp-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--ink, #e2e8f0);
+  font-size: 12px;
+}
+.kp-table tr:last-child td {
+  border-bottom: none;
+}
+.kp-table .col-streak {
+  text-align: left;
+  width: 44%;
+}
+.kp-table .col-obs,
+.kp-table .col-base,
+.kp-table .col-excess {
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  width: 18.6%;
+}
+:root[data-theme="light"] .kp-kpi-card {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+:root[data-theme="light"] .kp-table-wrap {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+:root[data-theme="light"] .kp-table th {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+:root[data-theme="light"] .kp-table td {
+  border-color: #f1f5f9;
+}
+@media (max-width: 900px) {
+  .mc-pair-row {
+    grid-template-columns: 1fr;
+  }
+}
 .not-found { text-align: center; padding: 2.5rem 1.2rem; }
 .not-found h1 { font-size: var(--font-size-lg); }
 svg.line-chart { display: block; margin-top: 0.6rem; max-width: 1000px; }
-svg .line-axis-label { fill: var(--ink-3, #94a3b8); font-size: 11px; }
-svg .line-marker { font-weight: 600; font-size: 10.5px; }
-svg.line-chart { display: block; width: 100%; height: auto; overflow: visible; }
+svg .line-marker { font-weight: 700; font-size: 11px; }
+svg .line-marker.line-marker-trough { fill: #f87171 !important; font-weight: 700 !important; font-size: 11px !important; }
+svg .line-marker.line-marker-peak { fill: #34d399 !important; font-weight: 700 !important; font-size: 11px !important; }
+:root[data-theme="light"] svg .line-marker.line-marker-trough { fill: #dc2626 !important; }
+:root[data-theme="light"] svg .line-marker.line-marker-peak { fill: #15803d !important; }
 svg .line-end-label { font-weight: 700; font-size: 13px; fill: var(--ink, #ffffff); }
 svg.pie-chart { display: block; margin-top: 0.4rem; max-width: 460px; margin-inline: auto; }
 svg .pie-label { font-weight: 600; font-size: 11.5px; fill: var(--ink, #ffffff); }
@@ -7140,8 +9732,8 @@ svg .pie-empty { fill: var(--ink-3, #94a3b8); font-size: 12px; }
   margin-top: 1rem;
   margin-bottom: 1rem;
   padding: 9px 16px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
   border-left: 3px solid var(--primary-accent);
   border-radius: 8px;
   display: flex;
@@ -7150,14 +9742,14 @@ svg .pie-empty { fill: var(--ink-3, #94a3b8); font-size: 12px; }
   justify-content: space-between;
   gap: 12px;
   font-size: 0.84rem;
-  color: var(--text-secondary);
+  color: var(--ink-2);
 }
 .snapshot-badge {
   display: inline-flex;
   align-items: center;
   padding: 3px 8px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 5px;
   font-size: 0.72rem;
   font-weight: 700;
@@ -7170,7 +9762,7 @@ svg .pie-empty { fill: var(--ink-3, #94a3b8); font-size: 12px; }
   min-width: 240px;
 }
 .snapshot-text strong {
-  color: var(--text-primary);
+  color: var(--ink);
 }
 .snapshot-actions {
   display: inline-flex;
@@ -7333,19 +9925,241 @@ footer.report-footer {
   display: none !important;
 }
 .tab-panel.active-tab-panel {
-  display: block !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1.5rem !important;
+  width: 100% !important;
 }
 #tab-nav-report:checked ~ .tab-panels > .panel-report {
-  display: block !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1.5rem !important;
+  width: 100% !important;
 }
 #tab-nav-market:checked ~ .tab-panels > .panel-market {
-  display: block !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1.5rem !important;
+  width: 100% !important;
 }
 #tab-nav-trades:checked ~ .tab-panels > .panel-trades {
-  display: block !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1.5rem !important;
+  width: 100% !important;
 }
 .market-hero-card {
   margin-top: 0.5rem;
+}
+.market-specs-panel {
+  background: var(--card-bg, #111827);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+.market-spec-hero {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: var(--track, rgba(255, 255, 255, 0.02));
+}
+.market-spec-hero-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text, #f9fafb);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.market-spec-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border, rgba(255, 255, 255, 0.08));
+}
+.market-spec-item {
+  background: var(--card-bg, #111827);
+  padding: 11px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: none !important;
+  transform: none !important;
+  cursor: default !important;
+}
+.market-spec-item:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+.market-spec-label {
+  font-family: var(--mono, monospace);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #9ca3af);
+}
+.market-spec-val {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text, #f9fafb);
+  line-height: 1.25;
+}
+.market-hero-card .stat-tile,
+.market-hero-card .stat-tile:hover {
+  transform: none !important;
+  transition: none !important;
+  box-shadow: none !important;
+  cursor: default !important;
+}
+#cach-choi {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+}
+#cach-choi .table-scroll {
+  width: 100% !important;
+  overflow-x: auto !important;
+  margin-top: 1rem;
+}
+#cach-choi table {
+  width: 100% !important;
+  min-width: 780px;
+  border-collapse: collapse;
+}
+#cach-choi th, #cach-choi td {
+  padding: 11px 14px !important;
+  font-size: 13px !important;
+  vertical-align: middle !important;
+}
+#cach-choi th {
+  background: var(--track, rgba(255, 255, 255, 0.04)) !important;
+  font-family: var(--mono, monospace) !important;
+  font-size: 11px !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: var(--muted, #9ca3af) !important;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1)) !important;
+}
+#cach-choi td {
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06)) !important;
+}
+
+/* Horizontal parameter list (Drawdown vs. capital & Open-position audit) */
+.param-horizontal-list {
+  background: var(--card-bg, #111827);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+  margin: 0.75rem 0 1.25rem;
+}
+.param-horizontal-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+.param-horizontal-row:last-child {
+  border-bottom: none;
+}
+.param-horizontal-name {
+  font-family: var(--mono, monospace);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #9ca3af);
+  display: flex;
+  align-items: center;
+  flex: 0 0 clamp(280px, 50%, 350px);
+  max-width: 350px;
+}
+.param-horizontal-name .metric-label-row {
+  display: inline-flex !important;
+  align-items: baseline !important;
+  gap: 2px !important;
+  width: auto !important;
+}
+.param-horizontal-name .metric-label-row .param-label {
+  flex: 0 1 auto !important;
+  text-align: left !important;
+}
+.param-horizontal-name .metric-label-row .formula-star-btn {
+  flex: 0 0 auto !important;
+  margin-left: 2px !important;
+}
+.param-horizontal-val {
+  font-family: var(--mono, monospace);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text, #f9fafb);
+  text-align: right;
+  margin-left: auto;
+}
+
+/* Metric label row for inline alignment of formula stars */
+.metric-label-row {
+  display: inline-flex !important;
+  align-items: baseline !important;
+  gap: 2px !important;
+  width: auto !important;
+}
+.metric-label-row .param-label,
+.metric-label-row .metric-name {
+  flex: 0 1 auto;
+  text-align: left;
+}
+.metric-label-row .formula-star-btn {
+  flex: 0 0 auto;
+  margin-left: 2px;
+}
+
+/* Drawdown vs. capital & Most recent closed trades full width */
+#sut-giam-von,
+#danh-sach-lenh {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+}
+#sut-giam-von .table-scroll,
+#danh-sach-lenh .table-scroll {
+  width: 100% !important;
+  overflow-x: auto !important;
+}
+
+/* Metric tables in Trade metrics and Statistical inference */
+#so-lieu table,
+#suy-luan table {
+  width: 100% !important;
+  table-layout: fixed !important;
+}
+#so-lieu table th:first-child,
+#so-lieu table td:first-child,
+#suy-luan table th:first-child,
+#suy-luan table td:first-child {
+  width: 68% !important;
+}
+#so-lieu table th:last-child,
+#so-lieu table td:last-child,
+#suy-luan table th:last-child,
+#suy-luan table td:last-child {
+  width: 32% !important;
+  text-align: right !important;
+}
+
+/* Traded assets 5-row view limit with vertical scroll */
+#tai-san .table-scroll {
+  max-height: 275px !important;
+  overflow-y: auto !important;
+}
+#tai-san thead th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 2 !important;
+  background: var(--track, #1e293b) !important;
 }
 .market-hero-title {
   font-size: var(--font-size-lg);
@@ -7509,61 +10323,150 @@ footer.report-footer {
   cursor: not-allowed;
 }
 #rich-formula-tooltip {
-  position: fixed;
-  z-index: 99999;
-  pointer-events: none;
-  max-width: 380px;
-  background: rgba(15, 23, 42, 0.96);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 10px;
-  padding: 12px 16px;
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45), 0 0 1px rgba(255, 255, 255, 0.2);
-  color: #f1f5f9;
-  font-size: 12.5px;
-  line-height: 1.5;
-  opacity: 0;
-  transform: translateY(6px);
-  transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  position: fixed !important;
+  z-index: 99999 !important;
+  pointer-events: none !important;
+  max-width: 400px !important;
+  background: rgba(15, 23, 42, 0.96) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border: 1px solid rgba(56, 189, 248, 0.22) !important;
+  border-radius: 12px !important;
+  padding: 13px 16px !important;
+  box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.06), 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+  color: #f1f5f9 !important;
+  font-size: 12.5px !important;
+  line-height: 1.55 !important;
+  opacity: 0 !important;
+  transform: translateY(6px) scale(0.98) !important;
+  transition: opacity 0.16s cubic-bezier(0.16, 1, 0.3, 1), transform 0.16s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 #rich-formula-tooltip.is-visible {
-  opacity: 1;
-  transform: translateY(0);
+  opacity: 1 !important;
+  transform: translateY(0) scale(1) !important;
 }
-.rich-tip-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  font-size: 13.5px;
-  color: #38bdf8;
-  margin-bottom: 6px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+#rich-formula-tooltip .rich-tip-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  margin-bottom: 9px !important;
+  padding-bottom: 8px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
-.rich-tip-formula-box {
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-family: var(--mono, monospace);
-  font-size: 11.5px;
-  color: #34d399;
-  margin-bottom: 8px;
-  word-break: break-word;
+#rich-formula-tooltip .rich-tip-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 22px !important;
+  height: 22px !important;
+  font-size: 12px !important;
+  border-radius: 6px !important;
+  background: rgba(56, 189, 248, 0.12) !important;
+  border: 1px solid rgba(56, 189, 248, 0.28) !important;
+  flex-shrink: 0 !important;
 }
-.rich-tip-desc {
-  color: #cbd5e1;
-  font-size: 12px;
-  line-height: 1.45;
+#rich-formula-tooltip .rich-tip-title {
+  font-weight: 700 !important;
+  font-size: 13.5px !important;
+  letter-spacing: -0.01em !important;
+  color: #38bdf8 !important;
 }
-.rich-tip-footer {
-  margin-top: 8px;
-  font-size: 10.5px;
-  color: #64748b;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+#rich-formula-tooltip .rich-tip-formula-box {
+  background: rgba(8, 14, 26, 0.85) !important;
+  border: 1px solid rgba(56, 189, 248, 0.2) !important;
+  border-left: 3px solid #38bdf8 !important;
+  border-radius: 7px !important;
+  padding: 8px 11px !important;
+  font-family: var(--mono, 'JetBrains Mono', monospace) !important;
+  font-size: 11.5px !important;
+  line-height: 1.55 !important;
+  color: #a7f3d0 !important;
+  margin-bottom: 10px !important;
+  word-break: break-word !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+}
+#rich-formula-tooltip .rich-tip-formula-box strong,
+#rich-formula-tooltip .rich-tip-formula-label {
+  color: #38bdf8 !important;
+  font-weight: 700 !important;
+  margin-right: 5px !important;
+}
+#rich-formula-tooltip .rich-tip-formula-code {
+  color: #34d399 !important;
+  font-weight: 600 !important;
+}
+#rich-formula-tooltip .rich-tip-desc {
+  color: #cbd5e1 !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+#rich-formula-tooltip .rich-tip-footer {
+  margin-top: 8px !important;
+  font-size: 10.5px !important;
+  color: #94a3b8 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+/* Harmonious Light Mode Overrides */
+#rich-formula-tooltip.theme-light,
+#rich-formula-tooltip[data-theme="light"],
+:root[data-theme="light"] #rich-formula-tooltip {
+  background: rgba(255, 255, 255, 0.98) !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 18px 40px -8px rgba(15, 23, 42, 0.16), 0 4px 12px -2px rgba(15, 23, 42, 0.06), 0 0 0 1px rgba(226, 232, 240, 0.9) !important;
+  color: #0f172a !important;
+}
+#rich-formula-tooltip.theme-light .rich-tip-header,
+#rich-formula-tooltip[data-theme="light"] .rich-tip-header,
+:root[data-theme="light"] #rich-formula-tooltip .rich-tip-header {
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+#rich-formula-tooltip.theme-light .rich-tip-icon,
+#rich-formula-tooltip[data-theme="light"] .rich-tip-icon,
+:root[data-theme="light"] #rich-formula-tooltip .rich-tip-icon {
+  background: rgba(2, 132, 199, 0.08) !important;
+  border: 1px solid rgba(2, 132, 199, 0.25) !important;
+  color: #0284c7 !important;
+}
+#rich-formula-tooltip.theme-light .rich-tip-title,
+#rich-formula-tooltip[data-theme="light"] .rich-tip-title,
+:root[data-theme="light"] #rich-formula-tooltip .rich-tip-title {
+  color: #0284c7 !important;
+}
+#rich-formula-tooltip.theme-light .rich-tip-formula-box,
+#rich-formula-tooltip[data-theme="light"] .rich-tip-formula-box,
+:root[data-theme="light"] #rich-formula-tooltip .rich-tip-formula-box {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  border-left: 3px solid #0284c7 !important;
+  color: #065f46 !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+}
+#rich-formula-tooltip.theme-light .rich-tip-formula-box strong,
+#rich-formula-tooltip.theme-light .rich-tip-formula-label,
+#rich-formula-tooltip[data-theme="light"] .rich-tip-formula-box strong,
+#rich-formula-tooltip[data-theme="light"] .rich-tip-formula-label,
+:root[data-theme="light"] #rich-formula-tooltip .rich-tip-formula-box strong,
+:root[data-theme="light"] #rich-formula-tooltip .rich-tip-formula-label {
+  color: #0284c7 !important;
+}
+#rich-formula-tooltip.theme-light .rich-tip-formula-code,
+#rich-formula-tooltip[data-theme="light"] .rich-tip-formula-code,
+:root[data-theme="light"] #rich-formula-tooltip .rich-tip-formula-code {
+  color: #047857 !important;
+  font-weight: 600 !important;
+}
+#rich-formula-tooltip.theme-light .rich-tip-desc,
+#rich-formula-tooltip[data-theme="light"] .rich-tip-desc,
+:root[data-theme="light"] #rich-formula-tooltip .rich-tip-desc {
+  color: #334155 !important;
+}
+#rich-formula-tooltip.theme-light .rich-tip-footer,
+#rich-formula-tooltip[data-theme="light"] .rich-tip-footer,
+:root[data-theme="light"] #rich-formula-tooltip .rich-tip-footer {
+  color: #64748b !important;
 }
 .card-hint {
   margin-top: 0.85rem;
@@ -7635,38 +10538,168 @@ footer.report-footer {
      comment phía trên `.card-primary`), chỉ đổi CÁCH XẾP trên màn rộng:
      mặc định MỌI mục vẫn chiếm TRỌN bề ngang, chỉ những mục đã được xác
      nhận đủ ngắn mới ghép đôi qua `.card-pair` (`_section(..., pair=True)`). */
-  .tab-panel.active-tab-panel {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1.25rem;
-    align-items: start;
-  }
+  .tab-panel.active-tab-panel,
   #tab-nav-report:checked ~ .tab-panels > .panel-report,
   #tab-nav-market:checked ~ .tab-panels > .panel-market,
   #tab-nav-trades:checked ~ .tab-panels > .panel-trades {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1.25rem;
-    align-items: start;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1.25rem !important;
+    align-items: stretch !important;
+    width: 100% !important;
   }
-  .tab-panel > .card { margin-top: 0; grid-column: 1 / -1; }
-  /* Ghép đôi theo id (không đổi markup -- test khoá đúng chuỗi
-     `class="card" id="thi-truong"`): mục văn bản/biểu đồ gọn đứng cạnh nhau,
-     bảng rộng (danh sách lệnh, cách chơi theo pha, Monte Carlo) vẫn trọn hàng. */
+  .tab-panel > .card { margin-top: 0; width: 100% !important; max-width: 100% !important; grid-column: 1 / -1 !important; }
   .tab-panel > .card.card-pair,
   .tab-panel > #nhan-dinh, .tab-panel > #diem-chieu,
   .tab-panel > #thi-truong-chinh, .tab-panel > #thi-truong,
   .tab-panel > #so-lieu, .tab-panel > #vi-the-mo,
   .tab-panel > #suy-luan, .tab-panel > #tai-san,
-  .tab-panel > #tang-truong, .tab-panel > #monte-carlo { grid-column: auto; }
+  .tab-panel > #tang-truong { width: 100% !important; max-width: 100% !important; grid-column: 1 / -1 !important; }
 }
 
 /* Màn rất rộng: ô số và mục ghép có thêm chỗ, tăng khoảng thở như nora. */
-@media (min-width: 1600px) {
-  .main { padding: 24px 40px 72px; }
-  #tab-nav-report:checked ~ .tab-panels > .panel-report,
-  #tab-nav-market:checked ~ .tab-panels > .panel-market,
-  #tab-nav-trades:checked ~ .tab-panels > .panel-trades { gap: 1.5rem; }
+/* Quick Risk Metrics Strip (Tầng 1) */
+.quick-risk-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin: 14px 0 16px 0;
+  padding: 12px 14px;
+  background: var(--surface-2, rgba(255,255,255,0.02));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 8px;
+}
+.qrs-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--surface, rgba(255,255,255,0.03));
+  border-radius: 6px;
+  border-left: 3px solid var(--border, #475569);
+}
+.qrs-item.qrs-danger {
+  border-left-color: #ef4444;
+  background: rgba(239, 68, 68, 0.07);
+}
+.qrs-item.qrs-warn {
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.07);
+}
+.qrs-item.qrs-safe {
+  border-left-color: #10b981;
+  background: rgba(16, 185, 129, 0.07);
+}
+.qrs-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #94a3b8);
+}
+.qrs-value {
+  font-family: var(--mono, monospace);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink, #ffffff);
+}
+.qrs-danger .qrs-value { color: #ef4444; }
+.qrs-warn .qrs-value { color: #f59e0b; }
+.qrs-safe .qrs-value { color: #10b981; }
+
+/* Verdict Action Directive Callout */
+.verdict-action-callout {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.verdict-action-callout.action-danger {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+.verdict-action-callout.action-warning {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+.verdict-action-callout.action-success {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+.action-callout-badge {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.action-danger .action-callout-badge { color: #f87171; }
+.action-warning .action-callout-badge { color: #fbbf24; }
+.action-success .action-callout-badge { color: #34d399; }
+.action-callout-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink, #e2e8f0);
+}
+
+/* Unified Monte Carlo Multi-Horizon Panel (Tầng 4) */
+.mc-unified-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  background: var(--surface, rgba(255,255,255,0.02));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 8px;
+  padding: 16px 18px;
+}
+.mc-unified-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+  padding-bottom: 10px;
+}
+.mc-unified-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink, #ffffff);
+}
+.mc-unified-subtitle {
+  font-size: 11px;
+  color: var(--muted, #94a3b8);
+  margin-top: 3px;
+}
+.mc-unified-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.mc-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted, #94a3b8);
+}
+.mc-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.mc-unified-svg {
+  width: 100%;
+  max-width: 760px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
 }
 """
 
@@ -7731,9 +10764,9 @@ def _render_snapshot_banner(
     )
     return (
         '<div class="snapshot-banner">'
-        '<span class="snapshot-badge">CACHED SNAPSHOT</span>'
+        '<span class="snapshot-badge">SNAPSHOT</span>'
         '<span class="snapshot-text">'
-        f"Snapshot taken at <strong>{when}</strong> (Vietnam time, GMT+7){stale_clause}."
+        f"Snapshot taken at: <strong>{when}</strong> (Vietnam time, GMT+7){stale_clause}"
         "</span>"
         f'<span class="snapshot-actions">{refresh_link}</span>'
         "</div>"
@@ -7753,6 +10786,7 @@ def render_bot_report_html(
     snapshot_at_ms: Optional[int] = None,
     refresh_url: Optional[str] = None,
     is_stale: bool = False,
+    hidden_panels: Sequence[str] = (),
 ) -> str:
     """Render the full standalone HTML page for one `/api/analyze`-shaped
     result dict (see `WebDataService.analyze`'s contract). Never raises on a
@@ -7783,13 +10817,15 @@ def render_bot_report_html(
     sidebar_html = ""
     if status == "NOT_FOUND":
         body = _render_not_found_body(result)
-        title = f"Not found · {name}"
+        title = f"Nora - Risk Management · Not found · {name}"
     else:
         header_html, side_blocks = _render_header(result)
         tab1_content = _render_tab_report(result)
         tab2_content = _render_tab_market(result)
         tab3_content = _render_tab_trades(result)
-        tabs_html = _render_tabs_wrapper(tab1_content, tab2_content, tab3_content)
+        tabs_html = _render_tabs_wrapper(
+            tab1_content, tab2_content, tab3_content, hidden_panels=hidden_panels
+        )
         body = f"{header_html}{tabs_html}"
         if not (tab1_content or tab2_content or tab3_content):
             # Nuốt lặng lẽ: một `result` HỢP LỆ mà cả ba tab ra rỗng thì
@@ -7812,9 +10848,13 @@ def render_bot_report_html(
             )
             body = _render_not_found_body(result)
         else:
-            nav_html = _render_nav(tab1_content, tab2_content, tab3_content)
+            nav_html = _render_nav(
+                tab1_content,
+                "" if "panel-market" in set(hidden_panels) else tab2_content,
+                "" if "panel-trades" in set(hidden_panels) else tab3_content,
+            )
             sidebar_html = _render_sidebar(side_blocks, nav_html)
-        title = f"Bot report: {name}"
+        title = f"Nora - Risk Management · {name}"
 
     footer = (
         '<footer class="report-footer">Automated assessment based on public'
@@ -7906,55 +10946,21 @@ def render_bot_report_html(
         "</head>\n<body>\n"
         f"{top_header}"
         f'<div class="page">{sidebar_html}'
-        f'<div class="main">{admin_banner}{snapshot_banner}{body}{footer}{_FORMULA_MODAL_HTML}</div>'
+        f'<div class="main">{admin_banner}{snapshot_banner}{body}{footer}</div>'
         "</div>\n"
         f"{_RUNTIME_SCRIPT}\n"
         "</body>\n</html>\n"
     )
 
 
-_FORMULA_MODAL_HTML = """<div id="formula-modal" class="formula-modal-backdrop" onclick="if(event.target===this)closeFormulaModal()">
-  <div class="formula-modal-card" role="dialog" aria-modal="true" aria-labelledby="formula-modal-title">
-    <div class="formula-modal-header">
-      <h3 id="formula-modal-title">Formula details</h3>
-      <button type="button" class="formula-modal-close" onclick="closeFormulaModal()" aria-label="Close">&times;</button>
-    </div>
-    <div class="formula-modal-body">
-      <div class="formula-field">
-        <label>Formula:</label>
-        <pre id="formula-modal-formula"></pre>
-      </div>
-      <div class="formula-field">
-        <label>Criteria &amp; scale:</label>
-        <p id="formula-modal-desc"></p>
-      </div>
-    </div>
-  </div>
-</div>"""
+_FORMULA_MODAL_HTML = ""
 
 
 _RUNTIME_SCRIPT = (
     '<script id="report-runtime">\n'
     f'window.METRIC_INFO = {json.dumps(METRIC_FORMULA_INFO, ensure_ascii=False)};\n'
-    """window.openFormulaModal = function(key) {
-  var item = (window.METRIC_INFO || {})[key];
-  if (!item) return;
-  var titleEl = document.getElementById('formula-modal-title');
-  var formulaEl = document.getElementById('formula-modal-formula');
-  var descEl = document.getElementById('formula-modal-desc');
-  var modal = document.getElementById('formula-modal');
-  if (titleEl) titleEl.textContent = item.title || key;
-  if (formulaEl) formulaEl.textContent = item.formula || 'Not available yet';
-  if (descEl) descEl.textContent = item.desc || '';
-  if (modal) modal.classList.add('is-open');
-};
-window.closeFormulaModal = function() {
-  var modal = document.getElementById('formula-modal');
-  if (modal) modal.classList.remove('is-open');
-};
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') window.closeFormulaModal();
-});
+    """window.openFormulaModal = function(key) {};
+window.closeFormulaModal = function() {};
 (function() {
   try {
     // Chuyển tiếp mượt mà vào SPA để giữ header cố định, không load lại trang
@@ -8157,24 +11163,44 @@ document.addEventListener('keydown', function(e) {
         var data = getTooltipData(e.target);
         if (!data) return;
 
-        tip.innerHTML = 
-          '<div class="rich-tip-header"><span>📐</span><span>' + (data.title || 'Formula') + '</span></div>' +
-          (data.formula ? '<div class="rich-tip-formula-box"><strong>Formula:</strong> ' + data.formula + '</div>' : '') +
+        var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+        tip.className = (isLight ? 'theme-light is-visible' : 'theme-dark is-visible');
+        tip.setAttribute('data-theme', isLight ? 'light' : 'dark');
+
+        tip.innerHTML =
+          '<div class="rich-tip-header"><span class="rich-tip-icon">📐</span><span class="rich-tip-title">' + (data.title || 'Formula') + '</span></div>' +
+          (data.formula ? '<div class="rich-tip-formula-box"><strong class="rich-tip-formula-label">Formula:</strong> <span class="rich-tip-formula-code">' + data.formula + '</span></div>' : '') +
           (data.desc ? '<div class="rich-tip-desc">' + data.desc + '</div>' : '');
 
-        tip.classList.add('is-visible');
         positionTip(e);
       });
 
       document.addEventListener('mousemove', function(e) {
-        if (tip.classList.contains('is-visible')) {
-          positionTip(e);
+        if (tip) {
+          if (!tip.classList.contains('is-visible')) {
+            var data = getTooltipData(e.target);
+            if (data) {
+              var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+              tip.className = (isLight ? 'theme-light is-visible' : 'theme-dark is-visible');
+              tip.setAttribute('data-theme', isLight ? 'light' : 'dark');
+
+              tip.innerHTML =
+                '<div class="rich-tip-header"><span class="rich-tip-icon">📐</span><span class="rich-tip-title">' + (data.title || 'Formula') + '</span></div>' +
+                (data.formula ? '<div class="rich-tip-formula-box"><strong class="rich-tip-formula-label">Formula:</strong> <span class="rich-tip-formula-code">' + data.formula + '</span></div>' : '') +
+                (data.desc ? '<div class="rich-tip-desc">' + data.desc + '</div>' : '');
+              positionTip(e);
+            }
+          } else {
+            positionTip(e);
+          }
         }
       });
 
       document.addEventListener('mouseout', function(e) {
-        var data = getTooltipData(e.target);
-        if (data) {
+        if (e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('[data-formula], [data-metric-key], .param-label, .bar-label, .formula-star-btn')) {
+          return;
+        }
+        if (tip) {
           tip.classList.remove('is-visible');
         }
       });

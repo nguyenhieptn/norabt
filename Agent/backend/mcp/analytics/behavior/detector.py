@@ -123,7 +123,7 @@ class BehavioralPatternDetector:
         loss_chases = 0
         reentries = 0
         averaging_events = 0
-        for previous, current in zip(ordered[:-1], ordered[1:]):
+        for previous, current in zip(ordered[:-1], ordered[1:], strict=False):
             gap_ms = current.open_time - previous.close_time
             if previous.realized_pnl < 0 and 0 <= gap_ms <= 60 * 60 * 1000:
                 loss_chases += 1
@@ -240,7 +240,7 @@ class BehavioralPatternDetector:
                     loss_by_entry = any(
                         _is_adverse_entry(side, prior.entry_price, later.entry_price)
                         for prior, later in zip(
-                            ordered_members[:-1], ordered_members[1:]
+                            ordered_members[:-1], ordered_members[1:], strict=False
                         )
                     )
 

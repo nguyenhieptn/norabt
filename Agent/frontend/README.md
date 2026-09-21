@@ -2,8 +2,8 @@
 
 Vite + React SPA phục vụ 3 màn hình phía trước của agent-web (định danh,
 tra cứu/phân tích cho `user`, danh sách + tra cứu/phân tích cho `admin`).
-Build ra `Agent/web/dist/`, được `Agent/backend/web/app.py` phục vụ tại `/`
-(+ `/assets/*` cho bundle JS/CSS) -- xem `Agent/deploy/README.md`'s "Bước
+Build ra `Agent/frontend/dist/`, được `Agent/backend/web/app.py` phục vụ tại `/`
+(+ `/assets/*` cho bundle JS/CSS) -- xem `Agent/docker/README.md`'s "Bước
 2.5 -- Build frontend" cho quy trình build/triển khai đầy đủ.
 
 ## Chạy dev
@@ -24,7 +24,7 @@ bash build.sh
 `build.sh` ép `taskset -c 0-3` + `NODE_OPTIONS=--max-old-space-size=2560` --
 máy triển khai chạy 15 site production khác dưới ràng buộc cứng ≤12
 core/≤14GB RAM cho toàn bộ phần việc, không riêng agent-web (xem
-`Agent/deploy/README.md`). Không sourcemap trong bundle (xem
+`Agent/docker/README.md`). Không sourcemap trong bundle (xem
 `vite.config.js`'s `build.sourcemap: false`).
 
 ## Cấu trúc
@@ -50,7 +50,7 @@ src/
                                 trang chi tiết server-render
     BotSummaryCard.jsx          thẻ tóm tắt bot (tên/AUM/PnL/hạng/số người
                                 copy/danh sách tài sản kèm trạng thái)
-  styles/global.css            @import Agent/web/tokens.css (xem dưới) + CSS
+  styles/global.css            @import Agent/frontend/tokens.css (xem dưới) + CSS
                                 thuần cho toàn bộ SPA
 ```
 
@@ -60,7 +60,7 @@ src/
 `Agent/backend/web/app.py`). Mọi route khác (`/api/*`, `/bot/<code>`,
 `/admin` -- một trang HTML server-render KHÁC, không phải route SPA cùng
 tên, xem dưới --, `/{userref}_{code}`, `/healthz`, `/assets/*`) là route
-thật của Starlette, và nginx (`Agent/deploy/nginx-agent*.conf.template`) cố
+thật của Starlette, và nginx (`Agent/nginx/nginx-agent*.conf.template`) cố
 ý 404 mọi đường dẫn KHÁC danh sách đó để chặn dò quét. Nếu SPA dùng
 `BrowserRouter` (URL thật kiểu `/user`, `/admin`), một F5 (hard refresh)
 trên `/user` sẽ đi thẳng tới nginx trước khi JS kịp chạy -- và `/user` không
@@ -96,16 +96,16 @@ lúc.
 
 ## Design token dùng chung (Việc 3)
 
-`src/styles/global.css` `@import "../../../web/tokens.css"` thẳng file
-`Agent/web/tokens.css` -- KHÔNG copy, KHÔNG code-gen. Đây là file DUY NHẤT
+`src/styles/global.css` `@import "../../tokens.css"` thẳng file
+`Agent/frontend/tokens.css` -- KHÔNG copy, KHÔNG code-gen. Đây là file DUY NHẤT
 khai màu 4 bậc xếp loại (NGUY HIỂM/TIỀM ẨN/TIỀM NĂNG/AN TOÀN + trạng thái
 trung tính), thang chữ, khoảng cách, bán kính -- phía Python
 (`Agent/backend/web/report_page.py`) đọc CHÍNH file này lúc runtime (một
 file read + regex nhỏ, xem module đó), không phải một bản chép tay riêng.
-Sửa một giá trị trong `Agent/web/tokens.css` là đổi cả SPA lẫn trang
+Sửa một giá trị trong `Agent/frontend/tokens.css` là đổi cả SPA lẫn trang
 report/admin server-render cùng lúc, không cần sửa gì ở đây.
 
-`@import` xuyên biên hai dự án (`Agent/frontend/` gọi vào `Agent/web/`, hai
+`@import` xuyên biên hai dự án (trước đây `Agent/frontend/` gọi vào `Agent/web/` khi hai
 thư mục anh em, không lồng nhau) hoạt động bình thường dưới `vite build`
 production vì đó là một lần resolve file lúc BUILD (Vite dùng
 postcss-import/rollup xử lý `@import` CSS khi build), không phải một request

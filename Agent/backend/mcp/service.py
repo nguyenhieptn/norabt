@@ -137,7 +137,7 @@ class BotObservationService:
         self._timeline_cache: Dict[str, Optional[PhaseTimeline]] = {}
         self.evaluation_mode = evaluation_mode
         # Defaults to the on-disk crawl output -- every existing caller keeps
-        # reading exactly what Agent/scripts/crawl_bots.py wrote. Passing a
+        # reading exactly what Agent/none/scripts/crawl_bots.py wrote. Passing a
         # LiveBotDataSource here is the only thing that changes when a caller
         # wants OKX read straight into this analysis instead.
         self._bot_source = bot_source or FileBotDataSource(self.data_dir)
@@ -164,7 +164,7 @@ class BotObservationService:
         freshness in place of a file's mtime.
 
         `observed_at_ms` is the explicit field a source can set; every payload
-        Agent/scripts/crawl_bots.py has ever written predates that field, so
+        Agent/none/scripts/crawl_bots.py has ever written predates that field, so
         for on-disk data this always falls back to the file's own mtime --
         byte-identical to what this method replaces. A live payload always
         sets observed_at_ms itself (there is no file to stat), so the fallback
@@ -345,7 +345,7 @@ class BotObservationService:
     # mỗi symbol CHƯA có trong `self._timeline_cache` cần đọc (tới) 5 file
     # JSON candle trên đĩa, độc lập hoàn toàn với mọi symbol khác. Đây là
     # I/O (đọc file, không phải tính toán CPU thuần), nên luồng vẫn có lợi
-    # dù máy này chỉ cấp 2 CPU cho container (xem Agent/deploy/docker-
+    # dù máy này chỉ cấp 2 CPU cho container (xem Agent/docker/docker-
     # compose.yml's `cpus: 2`): GIL được nhả ra trong lúc chờ hệ điều hành
     # trả dữ liệu file, y hệt lý do luồng có lợi cho việc chờ mạng OKX.
     # `_PHASE_TIMELINE_MAX_WORKERS = 6` là TRẦN CỨNG do chủ dự án đặt cho
@@ -701,6 +701,27 @@ class BotObservationService:
         timelines = self._phase_timelines(
             {base_symbol(trade.symbol) for trade in trades if trade.symbol}
         )
+        # Đóng dấu phase lên TỪNG lệnh, không chỉ vào bảng tổng hợp.
+        # `StrategyPhaseAnalyzer.analyze` dưới đây vẫn tính đúng nhãn đó cho
+        # từng lệnh rồi bỏ đi sau khi gom nhóm; giữ lại ở đây cho phép mọi phân
+        # tích theo regime về sau LỌC lệnh thật thay vì tái dựng chuỗi PnL từ
+        # dòng tổng hợp. Lệnh không có timeline giữ `None` (không đo được),
+        # lệnh có timeline nhưng ngoài phạm vi nến nhận `"UNKNOWN"` -- hai việc
+        # khác nhau.
+        trades = [
+            trade.model_copy(
+                update={
+                    "market_phase": (
+                        timelines[base_symbol(trade.symbol)]
+                        .phase_at(trade.open_time)
+                        .value
+                        if trade.symbol and base_symbol(trade.symbol) in timelines
+                        else None
+                    )
+                }
+            )
+            for trade in trades
+        ]
         strategy = StrategyPhaseAnalyzer.analyze(
             trades,
             timelines,

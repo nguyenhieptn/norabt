@@ -283,7 +283,7 @@ _PROGRESS_EVERY = 10  # print a progress line every N pages during a long backfi
 # OKX market-data endpoints (candles/books/rubik stats) sit in a different
 # rate-limit bucket than the signed copytrading endpoints OkxClient's retry/
 # backoff was tuned for, so this module throttles itself instead of relying on
-# OkxClient. 0.6s matches the delay Agent/scripts/crawl_market_data.py already
+# OkxClient. 0.6s matches the delay Agent/none/scripts/crawl_market_data.py already
 # uses against these same endpoints in production without ever being throttled
 # by OKX -- reused here as a conservative, field-proven STARTING pace (see
 # AdaptiveThrottle below) rather than a number ever confirmed against OKX's
@@ -522,7 +522,7 @@ _DEX_ASSET_NOT_IN_REGISTRY_REASON = (
 # inputs not because OKX cannot answer a DEX asset's own instrument (PEPE-USDT-SWAP
 # genuinely exists on OKX), but because the crawl this class must match never
 # populated them for a DEX asset in the first place: `run_dex()` in
-# Agent/scripts/crawl_market_data.py only ever calls candles/ticks/pool for a
+# Agent/none/scripts/crawl_market_data.py only ever calls candles/ticks/pool for a
 # DEX asset, never orderbook/flow -- those steps only run inside `run_cex()`.
 # Fabricating a live orderbook/OI/taker-flow/sentiment reading for a DEX asset
 # would be new data the original crawl standard never had an equivalent for,
@@ -550,8 +550,8 @@ _DEX_ONLY_INPUT_NOT_APPLICABLE_TO_CEX_REASON = (
 
 # -- DexScreener + GoPlus: the two non-OKX providers the original crawl uses
 # for pool_liquidity.json and token_security.json (see
-# Agent/scripts/crawl_market_data.py::crawl_pool_liquidity() and
-# Agent/scripts/crawl_token_security.py::crawl_asset()). Endpoint URLs, the
+# Agent/none/scripts/crawl_market_data.py::crawl_pool_liquidity() and
+# Agent/none/scripts/crawl_token_security.py::crawl_asset()). Endpoint URLs, the
 # price-tolerance constant, and the EVM chain-id map below are copied
 # byte-for-byte from those two scripts so a live read walks the exact same
 # request shape the crawl standard does.
@@ -775,12 +775,12 @@ def _sentiment_label(ls_ratio: float) -> str:
     return "NEUTRAL (longs and shorts balanced)"
 
 
-# -- macro correlation math, ported verbatim from Agent/scripts/build_macro_context.py --
+# -- macro correlation math, ported verbatim from Agent/none/scripts/build_macro_context.py --
 
 
 def _log_returns(closes: Dict[int, float], stamps: List[int]) -> List[float]:
     out = []
-    for prev, curr in zip(stamps[:-1], stamps[1:]):
+    for prev, curr in zip(stamps[:-1], stamps[1:], strict=False):
         a, b = closes.get(prev), closes.get(curr)
         if a and b and a > 0 and b > 0:
             out.append(math.log(b / a))
@@ -788,11 +788,21 @@ def _log_returns(closes: Dict[int, float], stamps: List[int]) -> List[float]:
 
 
 def _pearson(xs: List[float], ys: List[float]) -> Optional[float]:
+    # HAI CHUỖI PHẢI BẰNG ĐỘ DÀI. `n` lấy từ `xs` rồi dùng luôn để chia
+    # trung bình của `ys`, nên lệch độ dài không chỉ làm `zip` cắt cụt mà
+    # còn cho ra MỘT TRUNG BÌNH SAI -- hệ số tương quan khi đó sai âm thầm,
+    # không có dấu hiệu nào. Nơi gọi duy nhất hiện cắt cả hai về
+    # `min(len(...))` trước khi gọi, nên điều kiện này luôn đúng; khẳng định
+    # nó ở đây để một nơi gọi mới không lặng lẽ phá.
+    if len(xs) != len(ys):
+        raise ValueError(
+            f"_pearson cần hai chuỗi bằng độ dài, nhận {len(xs)} và {len(ys)}"
+        )
     n = len(xs)
     if n < 2:
         return None
     mx, my = sum(xs) / n, sum(ys) / n
-    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=False))
     vx = sum((x - mx) ** 2 for x in xs)
     vy = sum((y - my) ** 2 for y in ys)
     if vx <= 0 or vy <= 0:
@@ -801,11 +811,19 @@ def _pearson(xs: List[float], ys: List[float]) -> Optional[float]:
 
 
 def _beta(asset_returns: List[float], ref_returns: List[float]) -> Optional[float]:
+    # Cùng lý do như `_pearson` ngay trên: `n` lấy từ chuỗi thứ nhất nhưng
+    # dùng để chia trung bình của chuỗi thứ hai. Beta nuôi ống kính
+    # `market_alignment`, nên một con số sai ở đây đi thẳng vào điểm rủi ro.
+    if len(asset_returns) != len(ref_returns):
+        raise ValueError(
+            f"_beta cần hai chuỗi bằng độ dài, nhận "
+            f"{len(asset_returns)} và {len(ref_returns)}"
+        )
     n = len(asset_returns)
     if n < 2:
         return None
     ma, mr = sum(asset_returns) / n, sum(ref_returns) / n
-    cov = sum((a - ma) * (r - mr) for a, r in zip(asset_returns, ref_returns))
+    cov = sum((a - ma) * (r - mr) for a, r in zip(asset_returns, ref_returns, strict=False))
     var = sum((r - mr) ** 2 for r in ref_returns)
     return cov / var if var > 0 else None
 
@@ -1651,7 +1669,7 @@ class LiveMarketDataSource(MarketDataSource):
             ) from exc
         ts = int(series[0][0])
         current, previous = oi[0], oi[1]
-        deltas = [a - b for a, b in zip(oi[:-1], oi[1:])]
+        deltas = [a - b for a, b in zip(oi[:-1], oi[1:], strict=False)]
         sigma = statistics.pstdev(deltas) if len(deltas) > 1 else 0.0
         delta = current - previous
         zscore = delta / sigma if sigma else None

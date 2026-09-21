@@ -31,7 +31,7 @@ class DrawdownUnderwaterAnalyzer:
         underwater_start: Optional[int] = None
         peak_value = 0.0
         last_timestamp = ordered[-1].close_time
-        for trade, equity_delta in zip(ordered, cumulative[1:]):
+        for trade, equity_delta in zip(ordered, cumulative[1:], strict=False):
             if equity_delta >= peak_value:
                 if underwater_start is not None:
                     max_underwater_ms = max(
@@ -53,7 +53,7 @@ class DrawdownUnderwaterAnalyzer:
         if capital and capital.supports_historical_pct and curve is not None:
             # Each drawdown is scaled by the equity actually in force at that time.
             ratios = []
-            for trade, amount in zip(ordered, drawdown_amounts[1:]):
+            for trade, amount in zip(ordered, drawdown_amounts[1:], strict=False):
                 equity = curve.equity_at(trade.close_time)
                 if equity and equity > 0:
                     raw = amount / equity

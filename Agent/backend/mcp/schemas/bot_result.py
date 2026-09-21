@@ -195,6 +195,14 @@ class TradeLedgerItem(BaseModel):
     realized_pnl: float
     realized_pnl_pct: Optional[float] = None
     return_basis: str = "ABSOLUTE_PNL"
+    # Phase thị trường tại thời điểm MỞ lệnh (`MarketPhase`, xem
+    # `analytics/strategy/phases.py`). `None` khi bản ghi được dựng trước khi
+    # trường này tồn tại; `"UNKNOWN"` khi có timeline nhưng giờ mở lệnh nằm
+    # ngoài phạm vi nến -- hai trạng thái KHÁC nhau và không được gộp.
+    # Trước đây nhãn này được tính cho từng lệnh rồi vứt đi ngay sau khi gom
+    # nhóm (`StrategyPhaseAnalyzer.analyze`), buộc mọi phân tích theo regime về
+    # sau phải tái dựng lại từ dòng tổng hợp.
+    market_phase: Optional[str] = None
     initial_risk: Optional[float] = Field(default=None, gt=0.0)
     r_multiple: Optional[float] = None
     fee: Optional[float] = None

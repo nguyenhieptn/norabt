@@ -20,7 +20,7 @@ the rest of the report.
 
 Feature flag: `NORABT_NARRATIVE_BACKEND` (unset by default -- see
 `select_backend_from_env`). Every test in this project's suite runs with a
-clean `NORABT_*` environment (Agent/test/conftest.py's autouse fixture), so
+clean `NORABT_*` environment (Agent/none/test/conftest.py's autouse fixture), so
 leaving it unset here means "feature entirely off" is also this module's
 tested default: `generate_narrative`/`generate_narrative_sync` return `None`
 immediately, with NO subprocess ever spawned -- see their own docstrings.
@@ -34,7 +34,7 @@ Two backends, one seam (`NarrativeBackend.generate(prompt) -> BackendResult`):
     `resolve_claude_binary()` (see the "`claude` binary resolution" section
     below): on this project's own uncontainerized dev box that is simply
     `claude` off PATH, same as always; in the deployed container (see
-    Agent/deploy/docker-compose.yml) the CLI has no PATH entry at all -- it
+    Agent/docker/docker-compose.yml) the CLI has no PATH entry at all -- it
     is a read-only-mounted, self-contained ~224MB binary living under
     `/opt/claude/versions/<version>`, resolved to the highest version
     present on every cache refresh so a host-side `claude` self-update
@@ -149,7 +149,7 @@ DEFAULT_CLI_EFFORT = (
 # straight off PATH (this module was originally written and measured that
 # way), but a container has no such PATH entry: the CLI is a ~224MB
 # self-contained binary that lives only on the HOST (see
-# Agent/deploy/docker-compose.yml, which mounts it in read-only). Three-step
+# Agent/docker/docker-compose.yml, which mounts it in read-only). Three-step
 # priority, cheapest/most-specific first:
 #
 #   1. `NORABT_CLAUDE_BIN` (`ENV_CLAUDE_BIN`) -- a direct override naming one
@@ -373,7 +373,7 @@ def claude_credentials_available() -> bool:
     """Cheap existence+readability check ONLY -- never parses the file,
     never checks token expiry (a session token can be present-but-expired;
     this process has no way to tell without actually calling the CLI, which
-    a healthz probe must never do -- see Agent/deploy/README.md's own
+    a healthz probe must never do -- see Agent/docker/README.md's own
     caveat about this exact limitation)."""
     return os.access(claude_credentials_path(), os.R_OK)
 
@@ -594,7 +594,7 @@ class NarrativeContext:
     (per-phase trade counts, win rates, PnL, ...) belongs in `numbers`
     instead, as a `NumberSpec`, so the number-lock gate can verify it. See
     `test_prompt_strategy_profile_context_never_contains_a_digit` in
-    `Agent/test/test_narrative.py`.
+    `Agent/none/test/test_narrative.py`.
 
     `phase_table_vi` (default "" -- every pre-existing caller/test is
     unaffected) is the textual pha × cách-đánh cross-tab -- one line per
@@ -1396,7 +1396,7 @@ class NarrativeBackend:
 # feature flag/tokens this module and its siblings read) are never in this
 # list and therefore never reach the child process, regardless of what is
 # set in the parent -- see module docstring's "minimal, allow-listed
-# subprocess environment" and Agent/test/test_narrative.py's own assertion
+# subprocess environment" and Agent/none/test/test_narrative.py's own assertion
 # on this exact property.
 _SUBPROCESS_ENV_ALLOWLIST: Tuple[str, ...] = (
     "PATH",
