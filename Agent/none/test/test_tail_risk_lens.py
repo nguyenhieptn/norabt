@@ -9,9 +9,9 @@ fields existed.
 
 from __future__ import annotations
 
-from Agent.backend.mcp.schemas.bot_result import BotResult, SimulationResults
-from Agent.backend.qc.evaluator.lenses.tail_risk import TailRiskLens
-from Agent.backend.qc.schemas.risk_assessment import EvidenceStatus
+from Agent.backend.bot.mcp.schemas.bot_result import BotResult, SimulationResults
+from Agent.backend.report.qc.evaluator.lenses.tail_risk import TailRiskLens
+from Agent.backend.report.qc.schemas.risk_assessment import EvidenceStatus
 
 
 def _sim(**overrides) -> SimulationResults:

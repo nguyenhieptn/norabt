@@ -22,14 +22,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
-import Agent.backend.sources.market_source as market_source
+import Agent.backend.external.sources.market_source as market_source
 from Agent.backend.market.features import structure as structure_module
 from Agent.backend.market.features.liquidity import LiquidityFeatureExtractor
 from Agent.backend.market.features.orderflow import OrderflowFeatureExtractor
 from Agent.backend.market.features.structure import StructureFeatureExtractor
-from Agent.backend.mcp.analytics.strategy.phases import build_timeline
-from Agent.backend.okx.client import OkxApiError
-from Agent.backend.sources.market_source import (
+from Agent.backend.bot.mcp.analytics.strategy.phases import build_timeline
+from Agent.backend.external.okx.client import OkxApiError
+from Agent.backend.external.sources.market_source import (
     AdaptiveThrottle,
     CandleCache,
     FileMarketDataSource,
@@ -100,7 +100,7 @@ def _no_delay_source(client: Any, **kwargs: Any) -> LiveMarketDataSource:
 
 
 def test_file_source_reads_existing_files_and_resolves_venue(tmp_path: Path) -> None:
-    market_dir = tmp_path / "cex" / "BTC" / "market"
+    market_dir = tmp_path / "market" / "cex" / "BTC"
     market_dir.mkdir(parents=True)
     candles_payload = {"candles": [{"timestamp": 1, "close": 100.0}], "exchange": "OKX"}
     (market_dir / "ohlcv_1h_2023_present.json").write_text(json.dumps(candles_payload))
@@ -146,7 +146,7 @@ def test_file_source_rejects_bad_venue_type(tmp_path: Path) -> None:
 
 
 def _write_cex_fixture(tmp_path: Path) -> FileMarketDataSource:
-    market_dir = tmp_path / "cex" / "BTC" / "market"
+    market_dir = tmp_path / "market" / "cex" / "BTC"
     market_dir.mkdir(parents=True)
     (market_dir / "orderbook_l2.json").write_text(
         json.dumps(
@@ -636,7 +636,7 @@ def test_resolve_venue_dex_is_out_of_scope_for_live_source() -> None:
 def test_file_source_ticks_and_from_ticks_are_unchanged() -> None:
     repo_root = Path(__file__).resolve().parents[3]  # .../norabt
     data_dir = repo_root / "Agent" / "data"
-    assert (data_dir / "dex" / "PEPE" / "market" / "ticks_100ms_stream.json").exists()
+    assert (data_dir / "market" / "dex" / "PEPE" / "ticks_100ms_stream.json").exists()
 
     source = FileMarketDataSource(data_dir)
     payload, error = source.get_ticks("PEPE", "DEX")

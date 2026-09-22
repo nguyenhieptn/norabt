@@ -30,14 +30,14 @@ from typing import Any, Dict, Set
 import pytest
 
 from Agent.backend.infra.config import config
-from Agent.backend.sources.bot_source import BotDataSource
-from Agent.backend.sources.market_source import MarketDataSource
+from Agent.backend.external.sources.bot_source import BotDataSource
+from Agent.backend.external.sources.market_source import MarketDataSource
 from Agent.backend.market.service import MarketDataUnavailableError
 from Agent.backend.web.data import WebDataService
 from Agent.backend.web.report_page import render_bot_report_html
 
 DATA_DIR = Path(config.DATA_DIR)
-_FIXTURE_BOT_DIR = DATA_DIR / "cex" / "MU" / "bot" / "bot_BB3398A957270A39"
+_FIXTURE_BOT_DIR = DATA_DIR / "trade" / "bot_BB3398A957270A39"
 VALID_CODE = "BB3398A957270A39"
 
 # Phone viewport this product targets; anything wider must be able to shrink.

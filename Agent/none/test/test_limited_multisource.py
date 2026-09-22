@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from Agent.backend.analysis.limited import (
+from Agent.backend.bot.analysis.limited import (
     STATUS_LIMITED,
     _CONFIDENCE_CEILING_ABSOLUTE,
     assess_limited_bot,

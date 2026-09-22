@@ -85,7 +85,7 @@ Dự án đã có sẵn nền tảng vững chắc trong codebase, sẵn sàng �
   - `backend/qc/scoring/fusion.py` & `verdict.py`: Hệ thống 2 trục và cơ chế sàn phủ quyết.
 - **AI / Agent Layer:**
   - `backend/qc/reporting/narrative.py`: Bộ sinh nhận định chuyên môn với 3 Validation Gates.
-  - `backend/agent_server.py`: MCP Server chuẩn hỗ trợ `stdio` và `streamable HTTP` (6 tools kiểm toán bot).
+  - `backend/scripts/agent_server.py`: MCP Server chuẩn hỗ trợ `stdio` và `streamable HTTP` (6 tools kiểm toán bot).
   - `docs/ideallm.md`: Hợp đồng thiết kế tương tác LLM chuyên sâu.
 
 ---
@@ -95,7 +95,7 @@ Dự án đã có sẵn nền tảng vững chắc trong codebase, sẵn sàng �
 ### Giai đoạn 1: Chuẩn bị nộp bài (Hạn chót: 25/09/2026)
 1. **Hoàn thiện UI Narrative:** Hiển thị khối *"Nora AI Risk Executive Briefing"* nổi bật ở đầu trang chi tiết bot trên giao diện web.
 2. **Pre-cache dữ liệu Demo:** Quét và cache sẵn kết quả phân tích + đoạn văn AI cho top 10 bot tiêu biểu (có cả bot tốt, bot sụt vốn cao và bot dính `HIDDEN RISK`) để demo mượt mà, không bị độ trễ API.
-3. **Kích hoạt MCP Endpoint:** Kiểm thử lệnh khởi động `python3 -m Agent.backend.agent_server --transport http --port 8765` để chứng minh khả năng tích hợp Machine-to-Machine.
+3. **Kích hoạt MCP Endpoint:** Kiểm thử lệnh khởi động `python3 -m Agent.backend.scripts.agent_server --transport http --port 8765` để chứng minh khả năng tích hợp Machine-to-Machine.
 
 ### Giai đoạn 2: Chuẩn bị Live Demo chung kết tại Singapore (07/10/2026)
 1. **Interactive Q&A Widget:** Thêm khung chat nhỏ tại frontend cho phép gõ câu hỏi: *"Hỏi Nora AI về bot này"*.

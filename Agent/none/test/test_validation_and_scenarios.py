@@ -6,11 +6,11 @@ import numpy as np
 import pytest
 
 from Agent.backend.pipeline import RiskSupervisionPipeline
-from Agent.backend.qc.reporting.scenarios import (
+from Agent.backend.report.qc.reporting.scenarios import (
     MIN_SCENARIO_TRADES,
     build_scenario_laboratory,
 )
-from Agent.backend.qc.reporting.validation import (
+from Agent.backend.report.qc.reporting.validation import (
     MIN_LEDGER_FOR_SPLIT,
     build_folds,
     build_out_of_sample_validation,
@@ -88,7 +88,7 @@ def test_profit_factor_is_undefined_without_a_realized_loss(bot_and_market):
     bot, _ = bot_and_market
     winners = [t for t in bot.trade_ledger_summary if t.realized_pnl > 0][:10]
     assert winners
-    from Agent.backend.qc.reporting.validation import _window_metrics
+    from Agent.backend.report.qc.reporting.validation import _window_metrics
 
     metrics = _window_metrics(winners)
     assert metrics.profit_factor is None

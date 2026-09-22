@@ -10,16 +10,16 @@ from Agent.backend.control.schemas.control_decision import (
     ExecutionStatus,
 )
 from Agent.backend.market.schemas.market_result import MarketResult
-from Agent.backend.mcp.schemas.bot_result import BotResult
+from Agent.backend.bot.mcp.schemas.bot_result import BotResult
 from Agent.backend.pipeline import RiskSupervisionPipeline
-from Agent.backend.qc.schemas.risk_assessment import (
+from Agent.backend.report.qc.schemas.risk_assessment import (
     BotRiskAssessment,
     EvidenceStatus,
     RiskTier,
     RiskTrend,
 )
-from Agent.backend.qc.service import QCCoreService
-from Agent.backend.universe.registry import UniverseRegistry
+from Agent.backend.report.qc.service import QCCoreService
+from Agent.backend.market.universe.registry import UniverseRegistry
 from Agent.none.test.conftest import FIXED_AS_OF_MS
 
 

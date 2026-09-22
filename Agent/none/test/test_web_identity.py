@@ -288,7 +288,7 @@ def test_profile_store_error_never_wraps_a_non_oserror_failure(
 
 # --------------------------------------------------------------------------- #
 # user_ref path-traversal safety -- the same discipline this project already
-# applies elsewhere (Agent/backend/agent_server.py's _require_token,
+# applies elsewhere (Agent/backend/scripts/agent_server.py's _require_token,
 # Agent/backend/web/data.py's validate_unique_code): a malicious user_ref
 # must never escape `users_root`.
 # --------------------------------------------------------------------------- #

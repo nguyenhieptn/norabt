@@ -1,7 +1,7 @@
 # Đưa OKX Risk Supervisor MCP server lên OKX AI Marketplace (okx.ai)
 
 Tài liệu khảo sát kỹ thuật + code cho việc bán 6 tool chấm điểm rủi ro
-bot copy-trading (`Agent/backend/agent_server.py`) theo lượt gọi trên OKX AI
+bot copy-trading (`Agent/backend/scripts/agent_server.py`) theo lượt gọi trên OKX AI
 Marketplace, thanh toán qua chuẩn x402.
 
 **Trạng thái hiện tại (đã cập nhật):** cổng thanh toán x402 đã được hiện
@@ -229,7 +229,7 @@ from x402.server import x402ResourceServer
 ## Phần 2 -- Khung code đã dựng (cập nhật: verify thật + nối vào agent_server.py)
 
 File chạm tới trong lượt này: `Agent/backend/payments/x402.py` (sửa),
-`Agent/backend/agent_server.py` (sửa), `Agent/none/test/test_payments.py`,
+`Agent/backend/scripts/agent_server.py` (sửa), `Agent/none/test/test_payments.py`,
 `Agent/none/test/test_agent_server.py`, tài liệu này. Không đụng
 `sources/*`, `mcp/service.py`, `market/service.py`, `live/*`,
 `run_report.py`, `run_compare.py`, `qc/*`, và không đụng
@@ -455,15 +455,15 @@ thật trong test -- luôn qua `facilitator_client=` (test_payments.py) hoặc
 
 | # | Việc cần làm | Trạng thái | Ghi chú |
 |---|---|---|---|
-| 1 | Server có tool để bán (6 MCP tool) | **Đã có** | `Agent/backend/agent_server.py` |
+| 1 | Server có tool để bán (6 MCP tool) | **Đã có** | `Agent/backend/scripts/agent_server.py` |
 | 2 | Server chạy được qua HTTP (không chỉ stdio) | **Đã có** | OKX yêu cầu HTTP để marketplace gọi từ xa |
-| 3 | Tự host server (bắt buộc theo OKX) | **Chưa** | Cần server public, có domain/SSL, người vận hành tự chịu trách nhiệm |
+| 3 | Tự host server (bắt buộc theo OKX) | **Đã hoàn thành** | Server Docker production chạy tại `https://agent.expsolution.io` (cổng 8770 loopback behind Nginx + SSL Cloudflare) |
 | 4 | Cấu trúc dữ liệu giá + payload 402 | **Đã có** | `Agent/backend/payments/x402.py` |
 | 5 | Verify thanh toán thật (gọi facilitator) | **Đã có code, chưa test được với credential thật** | `verify_payment()` gọi facilitator OKX thật qua `OkxClient`; test dùng `facilitator_client=` giả lập vì chưa có `OKX_X402_API_KEY/SECRET/PASSPHRASE` thật -- **chưa từng gọi mạng thật tới facilitator** |
 | 6 | Nối `x402.py` vào `agent_server.py` | **Đã xong** | `_require_payment()`, xem Phần 2. 402 challenge nhúng trong `ToolError` message (không phải header HTTP thật) -- xem "Giới hạn kỹ thuật của SDK" |
 | 6b | Chống phát lại (replay) | **Có, giới hạn** | Chỉ in-memory một tiến trình -- xem mục riêng ở Phần 2, cần nâng cấp lên kho dùng chung trước khi chạy multi-worker thật |
-| 7 | Đăng ký ASP tại okx.ai | **Chưa -- cần người thật** | https://www.okx.ai/tutorial/asp (duyệt trong 24h theo tài liệu) |
-| 8 | Tạo Agentic Wallet (ví nhận tiền) | **Chưa -- cần người thật** | Chưa tìm ra link portal cụ thể trong khảo sát này; xuất hiện trong docs OKX như một bước riêng, cần tra thêm khi đến bước này |
+| 7 | Đăng ký ASP tại okx.ai / OnchainOS | **Đã hoàn thành** | Đã đăng ký thành công với **Agentic ID: `13753`**, **Service SID: `40700`**, Tên dịch vụ: `"Bot risk assessment"`, Endpoint: `https://agent.expsolution.io/api/analyze` |
+| 8 | Tạo Agentic Wallet (ví nhận tiền) | **Đã cấu hình** | Ví nhận tiền trên X Layer đã liên kết qua OnchainOS, token USDT (`0x779ded0c9e1022225f8e0630b35a9b54be713736`) |
 | 9 | Lấy API key/secret/passphrase từ OKX Developer Portal (biến `OKX_X402_API_KEY/API_SECRET/API_PASSPHRASE`) | **Chưa -- cần người thật** | Định dạng giống hệt OKX Trade API (`OK-ACCESS-*` HMAC-SHA256) nhưng đây là bộ key khác, không dùng chung với `OKX_API_KEY` hiện có trong `Agent/.env.example` |
 | 9b | Ví/token nhận tiền (`X402_PAY_TO_ADDRESS`, `X402_ASSET_ADDRESS`) | **Chưa -- cần người thật** | Địa chỉ ví EVM thật trên X Layer + địa chỉ hợp đồng USDC (hoặc token OKX chỉ định) |
 | 10 | Test trên X Layer Testnet + Mock Merchant | **Chưa** | Cần phê duyệt riêng trước khi chạy (theo ràng buộc "Heavy Run Approval" đã ghi trong bộ nhớ dự án) |

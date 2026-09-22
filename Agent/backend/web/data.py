@@ -5,7 +5,7 @@ it live (expensively) only once a user opts in.
 Four data sources feed the dashboard:
 
   1. `list_bots()` / `list_markets()` -- plain reads of what the batch report
-     (`Agent/backend/run_report.py`) already wrote to `data/assessment/**`
+     (`Agent/backend/scripts/run_report.py`) already wrote to `data/assessment/**`
      and `data/analysis/**`. No network, no live scoring.
   2. `leaderboard()` -- OKX's own lead-trader ranking, fetched live and
      cached briefly, used to power a search-box "did you mean" suggestion
@@ -52,13 +52,13 @@ from Agent.backend.infra.config import config
 from Agent.backend.infra.quality import EvaluationMode
 from Agent.backend.live.ratelimit import TokenBucket
 from Agent.backend.market.service import MarketDataUnavailableError, MarketService
-from Agent.backend.mcp.service import BotObservationService
-from Agent.backend.okx.client import OkxApiError, OkxClient, OkxError
+from Agent.backend.bot.mcp.service import BotObservationService
+from Agent.backend.external.okx.client import OkxApiError, OkxClient, OkxError
 from Agent.backend.pipeline import RiskSupervisionPipeline
-from Agent.backend.qc.evaluator.common import tier_for
-from Agent.backend.qc.reporting import narrative
-from Agent.backend.qc.scoring.verdict import VERDICT_BASIS_VI, label_from_scores
-from Agent.backend.sources.bot_source import (
+from Agent.backend.report.qc.evaluator.common import tier_for
+from Agent.backend.llm import narrative
+from Agent.backend.report.qc.scoring.verdict import VERDICT_BASIS_VI, label_from_scores
+from Agent.backend.external.sources.bot_source import (
     HISTORY_PATH,
     LEAD_TRADERS_PATH,
     LEADERBOARD_PAGE_SIZE,
@@ -72,13 +72,13 @@ from Agent.backend.sources.bot_source import (
     LedgerUnavailableError,
     LiveBotDataSource,
 )
-from Agent.backend.sources.bot_source import STATUS_NOT_FOUND as _SOURCE_NOT_FOUND
-from Agent.backend.sources.market_source import LiveMarketDataSource, MarketDataSource
+from Agent.backend.external.sources.bot_source import STATUS_NOT_FOUND as _SOURCE_NOT_FOUND
+from Agent.backend.external.sources.market_source import LiveMarketDataSource, MarketDataSource
 
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
-# Soft seam with Agent/backend/analysis/limited.py.
+# Soft seam with Agent/backend/bot/analysis/limited.py.
 #
 # That module is written by another agent, in parallel with this one, to
 # score a bot whose order book OKX refuses to disclose (error 60004 on the
@@ -93,7 +93,7 @@ logger = logging.getLogger(__name__)
 # module's own responsibility) is completely unaffected either way.
 #
 # `assess_from_error(exc)` is the confirmed real signature (see
-# Agent/backend/analysis/limited.py and Agent/none/test/test_limited_assessment.py):
+# Agent/backend/bot/analysis/limited.py and Agent/none/test/test_limited_assessment.py):
 # it takes the `LedgerUnavailableError` itself (duck-typed on
 # .status/.code/.profile/.stats/.weekly/str(exc)) and returns the exact
 # `/api/analyze` response contract dict. Still wrapped in its own broad
@@ -101,7 +101,7 @@ logger = logging.getLogger(__name__)
 # closed (a clean Vietnamese error) rather than crash this endpoint.
 # --------------------------------------------------------------------------- #
 try:
-    from Agent.backend.analysis.limited import assess_from_error  # type: ignore
+    from Agent.backend.bot.analysis.limited import assess_from_error  # type: ignore
 except ImportError:
     assess_from_error = None  # type: ignore[assignment]
 
@@ -190,7 +190,7 @@ class PerIpRateLimiter:
     """Sliding-window request cap per source IP, enforced inside the app.
 
     WHY in the app and not only in nginx: this process may not even be
-    behind a reverse proxy (a bare `python3 -m Agent.backend.run_web` on a
+    behind a reverse proxy (a bare `python3 -m Agent.backend.scripts.run_web` on a
     dev box, or a first deploy), and one `/api/analyze` call alone spends
     several seconds of CPU and several requests against OKX's own 5-req/2s
     copytrading budget (shared with every other caller of this process, see
@@ -267,7 +267,7 @@ def _int(value: Any) -> Optional[int]:
 
 def _base_symbol(inst_id: Any) -> Optional[str]:
     """ "ETH-USDT-SWAP" -> "ETH". Mirrors
-    Agent/backend/mcp/positions/snapshot.py's identical helper of the same
+    Agent/backend/bot/mcp/positions/snapshot.py's identical helper of the same
     name (off-limits to import from here -- see this module's own docstring
     on the sources/analysis/mcp boundary), kept in lock-step deliberately: a
     trade ledger row's `instId` and an open position's `instId` use the same
@@ -383,8 +383,8 @@ def _read_json_documents(root: Path, pattern: str) -> List[Dict[str, Any]]:
 
 
 def list_scored_bots(data_dir: Path) -> List[Dict[str, Any]]:
-    """The bots step 3 already scored: one assessment.json per bot, read
-    straight off disk (data/assessment/<venue>/<asset>/bot/<name>/assessment.json).
+    """The bots step 3 already scored: one latest.json per bot, read
+    straight off disk (data/report/<bot_id>/latest.json).
 
     Raw documents, Vietnamese-keyed (`bot`, `khuyen_nghi`, `cham_diem`,
     `bang_chung`, ...) exactly as `run_report.py` wrote them -- NOT the
@@ -394,7 +394,7 @@ def list_scored_bots(data_dir: Path) -> List[Dict[str, Any]]:
     `WebDataService.list_bots`) never pays for normalization it does not
     need.
     """
-    return _read_json_documents(Path(data_dir) / "assessment", "**/assessment.json")
+    return _read_json_documents(Path(data_dir) / "report", "*/latest.json")
 
 
 # --------------------------------------------------------------------------- #
@@ -533,9 +533,9 @@ def list_bot_listing_rows(data_dir: Path) -> List[Dict[str, Any]]:
 
 def list_markets(data_dir: Path) -> List[Dict[str, Any]]:
     """The assets step 2 already analysed: one market.json per asset
-    (data/analysis/<venue>/<asset>/market/market.json).
+    (data/market/<venue>/<asset>/market.json).
     """
-    return _read_json_documents(Path(data_dir) / "analysis", "**/market/market.json")
+    return _read_json_documents(Path(data_dir) / "market", "**/market.json")
 
 
 # --------------------------------------------------------------------------- #
@@ -551,7 +551,7 @@ def list_markets(data_dir: Path) -> List[Dict[str, Any]]:
 # read the already-computed verdict back off disk instead of recomputing it.
 #
 # `assessment_to_analyze_result` below turns one `assessment.json` document
-# (see `Agent/backend/qc/reporting/assessment_store.py`'s `build_assessment`
+# (see `Agent/backend/report/qc/reporting/assessment_store.py`'s `build_assessment`
 # for the exact Vietnamese-keyed shape it writes) into the SAME dict shape
 # `WebDataService.analyze()` returns for a FULL bot (see `_full_result`
 # above), so `report_page.py`'s `render_bot_report_html` renders either one
@@ -661,22 +661,17 @@ _ANALYSIS_PERFORMANCE_ENRICH_KEYS: Tuple[str, ...] = (
 def _find_bot_subpath(
     data_dir: Path, root_name: str, code: str, filename: str
 ) -> Optional[Path]:
-    """One file for `code` under `data_dir/<root_name>/**/bot/*__<code>/<filename>`
-    -- the shared lookup both `assessment/.../assessment.json` (the
-    canonical step-3 record) and `analysis/.../{performance,monte_carlo}.json`
-    (the optional step-2 enrichment) use below. `code` has already passed
-    `validate_unique_code` (alnum-only) by the time either caller reaches
-    this, so it is safe to interpolate directly into a glob pattern -- no
-    path-traversal characters (`.`, `/`) can survive that validation.
+    """One file for `code` under the unified `data_dir/<root_name>/<code>/<filename>`
+    layout -- the shared lookup both `report/<code>/latest.json` (the
+    canonical step-3 record) and `report/<code>/{performance,monte_carlo}.json`
+    (the optional step-2 enrichment) use below. `root_name` is always
+    `"report"` today; kept as a parameter (not inlined) because both callers
+    already named their own root explicitly before the two trees were
+    unified, and a second root reappearing later (as it once did with
+    `assessment`/`analysis`) should not require touching this helper again.
     """
-    root = Path(data_dir) / root_name
-    if not root.is_dir():
-        return None
-    try:
-        matches = sorted(root.glob(f"**/bot/*__{code}/{filename}"))
-    except OSError:
-        return None
-    return matches[0] if matches else None
+    path = Path(data_dir) / root_name / code / filename
+    return path if path.is_file() else None
 
 
 def _read_json_document(path: Optional[Path]) -> Optional[Dict[str, Any]]:
@@ -696,7 +691,7 @@ def find_assessment_document(data_dir: Path, code: str) -> Optional[Dict[str, An
     "analyze live".
     """
     return _read_json_document(
-        _find_bot_subpath(data_dir, "assessment", code, "assessment.json")
+        _find_bot_subpath(data_dir, "report", code, "latest.json")
     )
 
 
@@ -704,15 +699,15 @@ def sibling_analysis_documents(
     data_dir: Path, code: str
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Best-effort `(performance.json, monte_carlo.json)` for the SAME `code`
-    from `data/analysis/**` -- see this module's section docstring above.
+    from `data/report/<code>/` -- see this module's section docstring above.
     Either or both come back `None` when not on disk/unreadable; never
     raises.
     """
     perf = _read_json_document(
-        _find_bot_subpath(data_dir, "analysis", code, "performance.json")
+        _find_bot_subpath(data_dir, "report", code, "performance.json")
     )
     mc = _read_json_document(
-        _find_bot_subpath(data_dir, "analysis", code, "monte_carlo.json")
+        _find_bot_subpath(data_dir, "report", code, "monte_carlo.json")
     )
     return perf, mc
 
@@ -720,24 +715,30 @@ def sibling_analysis_documents(
 def find_bot_market_document(
     data_dir: Path, code: str, symbol: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
-    """Best-effort `market.json` from `data/analysis/<venue>/<symbol>/market/market.json`
-    associated with this bot's dominant traded market."""
-    perf_path = _find_bot_subpath(data_dir, "analysis", code, "performance.json")
-    if perf_path is not None:
-        try:
-            market_candidate = perf_path.parent.parent.parent / "market" / "market.json"
-            if market_candidate.is_file():
-                return _read_json_document(market_candidate)
-        except (ValueError, OSError):
-            pass
+    """Best-effort `market.json` from `data/market/<venue>/<symbol>/market.json`
+    associated with this bot's dominant traded market.
+
+    The unified layout no longer nests `report/<code>/performance.json` under
+    a venue/asset directory, so the venue/symbol pair can no longer be read
+    off that file's PATH -- it is read from its own `slot` field instead
+    (written as `f"{venue_type}/{symbol}"` by
+    `Agent.backend.report.qc.reporting.analysis_store.persist`).
+    """
+    perf_doc = _read_json_document(
+        _find_bot_subpath(data_dir, "report", code, "performance.json")
+    )
+    slot = perf_doc.get("slot") if perf_doc else None
+    if isinstance(slot, str) and "/" in slot:
+        venue, _, sym = slot.partition("/")
+        market_candidate = Path(data_dir) / "market" / venue.lower() / sym.upper() / "market.json"
+        if market_candidate.is_file():
+            return _read_json_document(market_candidate)
     if symbol:
         sym_clean = symbol.strip().upper()
-        root = Path(data_dir) / "analysis"
+        root = Path(data_dir) / "market"
         if root.is_dir():
             try:
-                for candidate in sorted(
-                    root.glob(f"**/{sym_clean}/market/market.json")
-                ):
+                for candidate in sorted(root.glob(f"*/{sym_clean}/market.json")):
                     doc = _read_json_document(candidate)
                     if doc is not None:
                         return doc
@@ -814,7 +815,7 @@ def _string_list(value: Any) -> List[str]:
 # Tên trường của `SimulationResults`, dùng để mang qua mọi chỉ số mô phỏng
 # mà bản ghi đã lưu thật sự có -- xem vòng lặp trong
 # `assessment_to_analyze_result` bên dưới.
-from Agent.backend.mcp.schemas.bot_result import SimulationResults as _SimulationResults
+from Agent.backend.bot.mcp.schemas.bot_result import SimulationResults as _SimulationResults
 
 _SIMULATION_FIELDS = tuple(_SimulationResults.model_fields)
 
@@ -828,7 +829,7 @@ def assessment_to_analyze_result(
     market_doc: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Reshape one `assessment.json` document (see
-    `Agent/backend/qc/reporting/assessment_store.py`'s `build_assessment` for
+    `Agent/backend/report/qc/reporting/assessment_store.py`'s `build_assessment` for
     the exact shape written) into the SAME dict `WebDataService.analyze()`
     returns for a FULL bot -- see this module's section docstring above for
     the full contract and its one honest gap (no `closed_trade_series`, no
@@ -998,7 +999,7 @@ def assessment_to_analyze_result(
     traded_symbol = bot.get("traded_symbol") or bot.get("asset_context")
 
     # Việc 2: `bot.identity.symbol_exposure_share`/`observed_symbols`
-    # (Agent/backend/mcp/service.py::_resolve_identity_market) được
+    # (Agent/backend/bot/mcp/service.py::_resolve_identity_market) được
     # `assessment_store.py::build_assessment` ghi xuống `bang_chung` từ Việc
     # này trở đi -- đọc lại nguyên trạng, degrade về `[]`/`{}`/`None` cho
     # file CŨ (ghi trước khi ba khoá này tồn tại) thay vì lỗi.
@@ -1129,7 +1130,7 @@ def assessment_to_analyze_result(
 
 # Metrics a LIMITED assessment cannot produce without a visible ledger --
 # used only for the "assess_from_error unavailable/failed" fallback below;
-# once Agent/backend/analysis/limited.py's own result comes back cleanly, its
+# once Agent/backend/bot/analysis/limited.py's own result comes back cleanly, its
 # own `unavailable` list replaces this wholesale (see the soft-import block's
 # docstring).
 _LIMITED_UNAVAILABLE_FIELDS = [
@@ -1168,7 +1169,7 @@ def _empty_result(status: str, code: str, text: List[str]) -> Dict[str, Any]:
         "assets": [],
         "text": text,
         # `None` for every non-FULL status: the narrative feature (see
-        # Agent/backend/qc/reporting/narrative.py) is only ever generated
+        # Agent/backend/llm/narrative.py) is only ever generated
         # from a FULL result's own scored numbers -- NOT_FOUND/LIMITED have
         # no such numbers to narrate. The key is always PRESENT (never
         # omitted), same "giữ khoá để người gọi không phải đoán" contract
@@ -1254,7 +1255,7 @@ def pending_result(code: str, text: List[str]) -> Dict[str, Any]:
 
 
 def _limited_fallback_result(code: str, detail: str) -> Dict[str, Any]:
-    """LIMITED response used whenever Agent/backend/analysis/limited.py is
+    """LIMITED response used whenever Agent/backend/bot/analysis/limited.py is
     missing, raises, or returns something that is not the expected contract
     shape -- see the soft-import block's docstring for why this must never
     itself raise.
@@ -1276,7 +1277,7 @@ def _limited_fallback_result(code: str, detail: str) -> Dict[str, Any]:
 def _explanation_vi(code: str, result: Any) -> List[str]:
     """A short Vietnamese narrative for a freshly-scored (FULL) bot.
 
-    Deliberately NOT `Agent.backend.qc.reporting.reasons.recommendation_vi`:
+    Deliberately NOT `Agent.backend.report.qc.reporting.reasons.recommendation_vi`:
     that function takes a `BotEvaluationRow`, a shape only
     `CohortAssessmentService.scan()` builds (it fills ~100 fields from a
     cohort-wide scan pass -- rank among other bots, portfolio-relative
@@ -1336,7 +1337,7 @@ def _asset_states_from_bot_result(bot: Any) -> List[Dict[str, Any]]:
     together with THIS field is future work, not part of this change.
 
     `open_positions` entries already carry a resolved base symbol (see
-    Agent/backend/mcp/positions/snapshot.py's own `_base_symbol`), but
+    Agent/backend/bot/mcp/positions/snapshot.py's own `_base_symbol`), but
     `trade_ledger_summary` entries keep the raw OKX instId shape
     ("ETH-USDT-SWAP", see TradeLedgerManager.parse_trade_list_with_diagnostics)
     -- hence `_base_symbol` is applied here only to the closed side.
@@ -1405,7 +1406,7 @@ def _closed_trade_series_from_bot_result(bot: Any) -> List[Dict[str, Any]]:
     `close_time`/`realized_pnl`, nothing else from the ledger.
 
     `bot.trade_ledger_summary` (`List[TradeLedgerItem]`, see
-    Agent/backend/mcp/schemas/bot_result.py) already IS exactly the right
+    Agent/backend/bot/mcp/schemas/bot_result.py) already IS exactly the right
     population: one row per CLOSED trade, both `close_time` and
     `realized_pnl` are non-optional fields on that model, and the lenses
     already scoring this bot (`return_r_quality.py`, `behavioral_risk.py`)
@@ -1430,10 +1431,10 @@ def _closed_trade_series_from_bot_result(bot: Any) -> List[Dict[str, Any]]:
 
 # --------------------------------------------------------------------------- #
 # Strategy/behavioural evidence -- Việc 1's own bug report: `bot.
-# strategy_observations`/`bot.behavioral_observations` (Agent/backend/mcp/
+# strategy_observations`/`bot.behavioral_observations` (Agent/backend/bot/mcp/
 # schemas/bot_result.py) are fully computed for every bot (see
-# Agent/backend/mcp/analytics/strategy/profile.py /
-# Agent/backend/mcp/analytics/behavior/detector.py) and already drive two QC
+# Agent/backend/bot/mcp/analytics/strategy/profile.py /
+# Agent/backend/bot/mcp/analytics/behavior/detector.py) and already drive two QC
 # lenses (strategy_drift.py, behavioral_risk.py) -- but neither ever reached
 # `evidence`, so a reader could see the SCORE those lenses produced without
 # ever seeing the underlying "how does this bot actually trade" observation
@@ -1481,7 +1482,7 @@ _ENTRY_STYLE_VI: Dict[str, str] = {
 
 # `observed_profile` is a DIFFERENT vocabulary from the three maps above --
 # it comes from `BotObservationService._strategy_observations`
-# (Agent/backend/mcp/service.py), kept in English there because it doubles
+# (Agent/backend/bot/mcp/service.py), kept in English there because it doubles
 # as the normalization key matched against a bot's own declared strategy
 # text (see that function's own comment: translating it would silently
 # change which declared strings match, a scoring input this task must not
@@ -1880,7 +1881,7 @@ def _phase_breakdown_table_vi(strategy: Any) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Narrative (Agent/backend/qc/reporting/narrative.py) -- an OPTIONAL, off-by-
+# Narrative (Agent/backend/llm/narrative.py) -- an OPTIONAL, off-by-
 # default LLM-authored paragraph that turns this FULL result's own already-
 # scored numbers into readable Vietnamese prose. See that module's own
 # docstring for the full design (feature flag, gates, fail-closed
@@ -1894,7 +1895,7 @@ def _phase_breakdown_table_vi(strategy: Any) -> str:
 
 
 def _narrative_numbers(result: Any) -> List["narrative.NumberSpec"]:
-    """Every number `Agent/backend/qc/reporting/narrative.py`'s prompt is
+    """Every number `Agent/backend/llm/narrative.py`'s prompt is
     allowed to mention for this bot, pulled straight from the same
     `BotRiskAssessment`/`BotResult` objects `_full_result` below reads --
     never re-derived from the trimmed JSON shape that function BUILDS, so
@@ -2101,7 +2102,7 @@ def _narrative_numbers(result: Any) -> List["narrative.NumberSpec"]:
             )
     # Derived ratio: how much of the closed-book profit factor evaporates
     # once every still-open position is marked to market -- the same
-    # relationship Agent/backend/qc/reporting/reasons.py's own
+    # relationship Agent/backend/report/qc/reporting/reasons.py's own
     # `_proof_points` highlights by hand for the offline batch report,
     # precomputed here for the same reason as the AUM ratio above.
     if (
@@ -2394,7 +2395,7 @@ def _insights_evidence(result: Any) -> Dict[str, Any]:
     available" shell, which is the behaviour the renderer already has.
     """
     try:
-        from Agent.backend.qc.reporting.dossier import build_analysis_dossier
+        from Agent.backend.report.qc.reporting.dossier import build_analysis_dossier
 
         dossier = build_analysis_dossier(result)
         payload = dossier.model_dump(mode="json")
@@ -2460,7 +2461,7 @@ def _full_result(
             "universe_eligible": result.universe_eligible,
             "eligibility_reason": result.eligibility_reason,
             "performance": _live_performance_evidence(bot),
-            # The deterministic insight modules (Agent/backend/qc/reporting/).
+            # The deterministic insight modules (Agent/backend/report/qc/reporting/).
             # They are attached here, once, so the HTML report renders the SAME
             # objects the dossier and the JSON endpoint publish -- rather than
             # re-deriving a second, slightly different version of each in the
@@ -2758,7 +2759,7 @@ def _fmt_int(value: Any) -> str:
 
 # Vietnamese labels for every code `unavailable` can carry -- both the FULL
 # pipeline's own ("market_context", see `_full_result`) and
-# Agent/backend/analysis/limited.py's (the rest; see that module's
+# Agent/backend/bot/analysis/limited.py's (the rest; see that module's
 # ALWAYS_UNAVAILABLE/MONTE_CARLO_KEY/PSR_DSR_KEY and the extra keys it
 # appends per-bot: "drawdown_pct", "win_ratio", "profile"). A key this dict
 # does not recognise (future field added on either side) still renders --
@@ -2783,7 +2784,7 @@ def _unavailable_label(key: str) -> str:
 
 def _mc_section_lines(mc: Optional[Dict[str, Any]]) -> List[str]:
     """Bullet lines summarising `mc` (either FULL's `SimulationResults` dump
-    or Agent/backend/analysis/limited.py's own, smaller Monte Carlo payload
+    or Agent/backend/bot/analysis/limited.py's own, smaller Monte Carlo payload
     -- both are plain dicts using the same field names, since the latter is
     `result.model_dump()` of a result from the very same simulation engine,
     see that module's `_monte_carlo_component_and_payload`). Every field is
@@ -3598,7 +3599,7 @@ class WebDataService:
                 return cached
         result = self._analyze_live(code, progress=progress)
         # Added on top of every status (FULL/LIMITED/NOT_FOUND alike, and
-        # regardless of whether Agent/backend/analysis/limited.py produced
+        # regardless of whether Agent/backend/bot/analysis/limited.py produced
         # the LIMITED payload or the in-module fallback did) -- see
         # build_report_markdown/build_report_url's own docstrings. Attached
         # here, once, before caching: a cache hit within the TTL window then
@@ -3645,7 +3646,7 @@ class WebDataService:
             # already classified this into LIMITED (a real, opaque bot) or
             # NOT_FOUND (no endpoint knows this code at all), see that
             # class's own docstring. That classification does NOT depend on
-            # Agent/backend/analysis/limited.py; only the detailed scoring
+            # Agent/backend/bot/analysis/limited.py; only the detailed scoring
             # for the LIMITED case does (see _handle_ledger_unavailable).
             return self._handle_ledger_unavailable(exc)
         except BotSourceError as exc:
@@ -3678,7 +3679,7 @@ class WebDataService:
         `BotObservationService.get_bot_result()` insists a real directory
         exist on disk at `<data_dir>/<venue>/<asset>/bot/<folder>` before it
         will even ask its bot_source for anything (see `_find_bot_dir` in
-        `Agent/backend/mcp/service.py`, off-limits here) -- true even when
+        `Agent/backend/bot/mcp/service.py`, off-limits here) -- true even when
         that source is a LiveBotDataSource that never reads the directory's
         *contents*. Every existing caller only ever asks about bots that
         were already crawled once, so that directory already exists for
@@ -3721,13 +3722,11 @@ class WebDataService:
         before this method returns -- the 5th and last of the 5 stages this
         task's progress bar reports (plan_progress.md mục A).
         """
-        bot_dir = (
-            self._scratch_dir
-            / _SCRATCH_VENUE.lower()
-            / _SCRATCH_ASSET
-            / "bot"
-            / f"bot_{code}"
-        )
+        # Unified layout: `_find_bot_dir` (mcp/service.py) now only checks
+        # `<data_dir>/trade/<folder>` -- no more venue/asset segregation, so
+        # the one empty leaf directory it needs to see is `trade/bot_<code>`,
+        # not the old `<venue>/<asset>/bot/<folder>` nesting.
+        bot_dir = self._scratch_dir / "trade" / f"bot_{code}"
         bot_dir.mkdir(parents=True, exist_ok=True)
         bot_service = BotObservationService(
             self._scratch_dir,
@@ -3771,7 +3770,7 @@ class WebDataService:
         `exc.status` (LIMITED or NOT_FOUND) is already the right answer --
         `LiveBotDataSource._classify_blocked_ledger` decided it by checking
         whether the leaderboard/stats/weekly endpoints still know this code,
-        which has nothing to do with `Agent/backend/analysis/limited.py`.
+        which has nothing to do with `Agent/backend/bot/analysis/limited.py`.
         That module only adds the DETAILED scoring/text for the LIMITED
         case (a full risk/quality/confidence assessment built from whatever
         survives 60004); its absence -- or a failure inside it -- degrades
@@ -3782,14 +3781,14 @@ class WebDataService:
         if assess_from_error is None:
             return self._ledger_unavailable_fallback(
                 exc,
-                "The reduced-scoring module (Agent/backend/analysis/limited.py) "
+                "The reduced-scoring module (Agent/backend/bot/analysis/limited.py) "
                 "is not ready in this version of the service, so a more "
                 "detailed LIMITED result cannot be returned for this bot yet.",
             )
         try:
             # `data_dir`: quần thể bot đã chấm nằm trên đĩa, là cơ sở để
             # chấm điểm bằng HẠNG PHÂN VỊ thay vì ngưỡng tự đặt (xem
-            # `Agent/backend/analysis/population_reference.py`). Không
+            # `Agent/backend/bot/analysis/population_reference.py`). Không
             # truyền thì module kia tự rơi về nhánh "chưa đủ quần thể".
             payload = assess_from_error(exc, data_dir=self.data_dir)
         except Exception as inner:  # noqa: BLE001 - a sibling module must
@@ -3810,7 +3809,7 @@ class WebDataService:
                 "The reduced-scoring module returned data that does not "
                 "match the /api/analyze contract shape.",
             )
-        # Agent/backend/analysis/limited.py is off-limits here and owned by a
+        # Agent/backend/bot/analysis/limited.py is off-limits here and owned by a
         # parallel task -- it predates this task's `assets` field and has no
         # reason to know about it. A LIMITED/NOT_FOUND bot has no visible
         # ledger by definition (that is what LedgerUnavailableError means),
@@ -3820,7 +3819,7 @@ class WebDataService:
         # Same reasoning as `assets` immediately above, for the narrative
         # feature (see `_empty_result`'s own comment): a LIMITED/NOT_FOUND
         # bot never has the FULL scored-numbers set a narrative is built
-        # from, and `Agent/backend/analysis/limited.py` predates this
+        # from, and `Agent/backend/bot/analysis/limited.py` predates this
         # field entirely, so this only guarantees the key is present.
         payload.setdefault("narrative", None)
         return payload

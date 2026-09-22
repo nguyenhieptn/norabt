@@ -1,7 +1,7 @@
 """Việc 4 -- narrative generated in the persisted-assessment write path,
 not just the live `/api/analyze` one.
 
-`Agent/backend/run_report.py`'s `build_assessment_extras` re-fetches each
+`Agent/backend/scripts/run_report.py`'s `build_assessment_extras` re-fetches each
 scored row's own `BotResult` (read-only, never a second scoring pass -- see
 that function's own module-level comment for why) to fill in the strategy/
 behavioural fields `BotEvaluationRow` cannot carry, and -- unless
@@ -20,15 +20,15 @@ from types import SimpleNamespace
 
 import pytest
 
-import Agent.backend.run_report as run_report
-from Agent.backend.mcp.schemas.bot_result import (
+import Agent.backend.scripts.run_report as run_report
+from Agent.backend.bot.mcp.schemas.bot_result import (
     BehavioralObservations,
     HorizonOutcome,
     PhasePerformance,
     StrategyObservations,
 )
-from Agent.backend.qc.reporting.assessment_store import build_assessments
-from Agent.backend.qc.reporting.cohort import BotEvaluationRow
+from Agent.backend.report.qc.reporting.assessment_store import build_assessments
+from Agent.backend.report.qc.reporting.cohort import BotEvaluationRow
 
 
 def _row(**overrides: Any) -> BotEvaluationRow:
@@ -206,7 +206,7 @@ def test_no_narrative_flag_skips_generation_entirely(
 def test_failed_refetch_degrades_extras_to_none_without_raising(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from Agent.backend.mcp.service import BotDataUnavailableError
+    from Agent.backend.bot.mcp.service import BotDataUnavailableError
 
     def _must_not_be_called(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("generate_narrative_sync must not be called")

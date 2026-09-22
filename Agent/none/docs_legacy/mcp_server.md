@@ -1,6 +1,6 @@
 # MCP Server: Risk Supervisor cho AI Agent
 
-`Agent/backend/agent_server.py` đóng gói 3 bước chấm điểm rủi ro bot copy-trading
+`Agent/backend/scripts/agent_server.py` đóng gói 3 bước chấm điểm rủi ro bot copy-trading
 OKX (market observation → bot/MCP analytics → QC fusion) thành 6 MCP tool, để
 Claude Code, OKX Agent Trade Kit hoặc bất kỳ MCP client nào gọi trực tiếp thay vì
 đọc JSON tay.
@@ -16,7 +16,7 @@ Luôn chạy từ thư mục gốc repo (`/home/ubuntu/norabt`), vì import tron
 
 ```bash
 cd /home/ubuntu/norabt
-python3 -m Agent.backend.agent_server
+python3 -m Agent.backend.scripts.agent_server
 ```
 
 Mặc định server dùng **stdio transport** — không mở cổng mạng, giao tiếp qua
@@ -47,9 +47,9 @@ cả)**; **muốn agent gọi được từ xa/lên marketplace thì mới chuy�
 
 ```bash
 cd /home/ubuntu/norabt
-python3 -m Agent.backend.agent_server --transport http
+python3 -m Agent.backend.scripts.agent_server --transport http
 # hoặc chỉ định host/port:
-python3 -m Agent.backend.agent_server --transport http --host 127.0.0.1 --port 8765
+python3 -m Agent.backend.scripts.agent_server --transport http --host 127.0.0.1 --port 8765
 ```
 
 Mặc định `--host 127.0.0.1` (chỉ máy này gọi được) và `--port 8765`. Đây là
@@ -61,7 +61,7 @@ người vận hành phải tự khai `--host 0.0.0.0`. Khi đó server in ra m�
 báo tiếng Việt** trên stderr, vì server chưa có cơ chế xác thực:
 
 ```bash
-python3 -m Agent.backend.agent_server --transport http --host 0.0.0.0 --port 8765
+python3 -m Agent.backend.scripts.agent_server --transport http --host 0.0.0.0 --port 8765
 ```
 
 ```
@@ -87,7 +87,7 @@ claude mcp add okx-risk-supervisor http://<host>:<port>/mcp -t http
 Đường dẫn mặc định là `/mcp` (ví dụ `http://127.0.0.1:8765/mcp` khi chạy local
 để thử). Cách này dùng khi client và server **không** ở cùng máy — nếu vẫn
 đang chạy trên cùng máy thì cách `claude mcp add ... -- python3 -m
-Agent.backend.agent_server` (stdio, xem bên dưới) vẫn đơn giản hơn.
+Agent.backend.scripts.agent_server` (stdio, xem bên dưới) vẫn đơn giản hơn.
 
 ## Cắm vào Claude Code
 
@@ -95,7 +95,7 @@ Cách 1 — dùng lệnh `claude mcp add` (khuyến nghị, tự ghi vào cấu 
 Claude Code):
 
 ```bash
-claude mcp add okx-risk-supervisor -- python3 -m Agent.backend.agent_server
+claude mcp add okx-risk-supervisor -- python3 -m Agent.backend.scripts.agent_server
 ```
 
 Chạy lệnh này từ `/home/ubuntu/norabt` để Claude Code ghi đúng working
@@ -108,7 +108,7 @@ Cách 2 — khai báo tay trong `.mcp.json` ở gốc repo:
   "mcpServers": {
     "okx-risk-supervisor": {
       "command": "python3",
-      "args": ["-m", "Agent.backend.agent_server"],
+      "args": ["-m", "Agent.backend.scripts.agent_server"],
       "cwd": "/home/ubuntu/norabt"
     }
   }
@@ -129,7 +129,7 @@ Cách 2 — khai báo tay trong `.mcp.json` ở gốc repo:
 `venue_type` chỉ nhận `CEX` hoặc `DEX` (không phân biệt hoa/thường ở input,
 nhưng lỗi và log luôn dùng chữ hoa). `verdict` chỉ nhận một trong SÁU giá trị
 hệ thống thật sự sinh ra (xem `VALID_VERDICTS` trong
-`Agent/backend/agent_server.py` — nguồn duy nhất):
+`Agent/backend/scripts/agent_server.py` — nguồn duy nhất):
 
 | Nhãn | Nghĩa |
 |---|---|

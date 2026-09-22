@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 #
-# Image for `python3 -m Agent.backend.run_web` -- the Starlette/uvicorn HTTP
+# Image for `python3 -m Agent.backend.scripts.run_web` -- the Starlette/uvicorn HTTP
 # dashboard defined in Agent/backend/web/app.py (routes: /, /api/bots,
 # /api/markets, /api/leaderboard, /api/analyze, /healthz). See
-# Agent/deploy/README.md for the full deploy runbook and
-# Agent/deploy/docker-compose.yml for how this image is actually run.
+# Agent/docker/README.md for the full deploy runbook and
+# Agent/docker/docker-compose.yml for how this image is actually run.
 #
 # Build context: this Dockerfile is built with context=Agent/ (one level up
-# from this file), not the repo root and not Agent/deploy/ itself -- see
-# docker-compose.yml's `build.context: ..` and Agent/deploy/.dockerignore's
+# from this file), not the repo root and not Agent/docker/ itself -- see
+# docker-compose.yml's `build.context: ..` and Agent/docker/.dockerignore's
 # own header comment for exactly why. Every COPY below is therefore relative
 # to Agent/.
 
@@ -20,7 +20,7 @@
 FROM python:3.12-slim AS builder
 
 # Why 3.12 and not 3.14 (what developer machines in this repo actually run,
-# see Agent/deploy/README.md's "Ghi chú" section for the full reasoning):
+# see Agent/docker/README.md's "Ghi chú" section for the full reasoning):
 #   - This is meant to run 24/7 taking requests from the internet --
 #     predictable third-party wheel support matters more here than running
 #     the newest interpreter.
@@ -80,7 +80,7 @@ WORKDIR /app
 # Agent/data (bot ledgers, ~260MB), Agent/.env (OKX credentials) and
 # Agent/test can never end up in the image, regardless of which
 # .dockerignore Docker happens to apply for this build context (see
-# Agent/deploy/.dockerignore's own header comment). Destination paths keep
+# Agent/docker/.dockerignore's own header comment). Destination paths keep
 # the "Agent/..." prefix on purpose: the code imports itself as
 # `Agent.backend...`, which only resolves correctly when run with a working
 # directory that has an `Agent/` package folder directly inside it -- exactly
@@ -102,7 +102,7 @@ EXPOSE 8770
 # forwarding targets the container's own network-namespace interface, not
 # its loopback, so binding to run_web.py's own default of 127.0.0.1 here
 # would make the app completely unreachable from outside the container even
-# though it is running fine (see Agent/deploy/README.md's "agent không lên"
+# though it is running fine (see Agent/docker/README.md's "agent không lên"
 # troubleshooting entry). This is still safe end to end: docker-compose.yml
 # publishes the container's 8770 only to the HOST's 127.0.0.1
 # ("127.0.0.1:8770:8770"), so the process is reachable from the host's own
@@ -116,4 +116,4 @@ EXPOSE 8770
 #
 # The container healthcheck itself lives in docker-compose.yml (single
 # source of truth for it, see that file), not duplicated here.
-CMD ["python3", "-m", "Agent.backend.run_web", "--host", "0.0.0.0", "--port", "8770"]
+CMD ["python3", "-m", "Agent.backend.scripts.run_web", "--host", "0.0.0.0", "--port", "8770"]

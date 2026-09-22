@@ -1,11 +1,11 @@
 """Discover bot ledgers on disk and parse them the same way the product does.
 
-Mirrors how Agent/backend/sources/bot_source.py's FileBotDataSource and
-Agent/backend/mcp/service.py read a bot snapshot: two JSON files,
+Mirrors how Agent/backend/external/sources/bot_source.py's FileBotDataSource and
+Agent/backend/bot/mcp/service.py read a bot snapshot: two JSON files,
 overview.json and trade_list.json, under
 data_dir/<cex|dex>/<asset>/bot/<folder>/. This module only reads them (never
 writes into the real data tree) and hands the raw ledger to the exact same
-Agent.backend.mcp.trades.ledger.TradeLedgerManager the product uses, so
+Agent.backend.bot.mcp.trades.ledger.TradeLedgerManager the product uses, so
 "how many closed trades this bot has" and "what each trade's close_time and
 realized_pnl are" mean the same thing here as they do inside a real
 assessment.
@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from Agent.backend.mcp.schemas.bot_result import TradeLedgerItem
-from Agent.backend.mcp.trades.ledger import TradeLedgerManager
+from Agent.backend.bot.mcp.schemas.bot_result import TradeLedgerItem
+from Agent.backend.bot.mcp.trades.ledger import TradeLedgerManager
 
 VENUE_TYPES = ("CEX", "DEX")
 

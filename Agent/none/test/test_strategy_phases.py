@@ -6,13 +6,13 @@ from typing import List
 
 import pytest
 
-from Agent.backend.mcp.analytics.strategy.phases import (
+from Agent.backend.bot.mcp.analytics.strategy.phases import (
     MarketPhase,
     PhaseTimeline,
     build_timeline,
 )
-from Agent.backend.mcp.analytics.strategy.profile import StrategyPhaseAnalyzer
-from Agent.backend.mcp.schemas.bot_result import PositionSide, TradeLedgerItem
+from Agent.backend.bot.mcp.analytics.strategy.profile import StrategyPhaseAnalyzer
+from Agent.backend.bot.mcp.schemas.bot_result import PositionSide, TradeLedgerItem
 
 HOUR_MS = 3_600_000
 START_MS = 1_780_000_000_000

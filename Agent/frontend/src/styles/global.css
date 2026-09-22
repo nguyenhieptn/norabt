@@ -460,6 +460,31 @@ button {
   color: var(--ink-2);
 }
 
+.user-badge-capsule.user-badge-client {
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+}
+
+:root[data-theme="light"] .user-badge-capsule.user-badge-client {
+  background: rgba(2, 132, 199, 0.08);
+  border-color: rgba(2, 132, 199, 0.28);
+}
+
+.user-badge-capsule.user-badge-client .user-badge-pulse {
+  background: #38BDF8;
+  box-shadow: 0 0 8px #38BDF8;
+}
+
+.user-badge-capsule.user-badge-client .user-badge-label {
+  color: #38BDF8;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+:root[data-theme="light"] .user-badge-capsule.user-badge-client .user-badge-label {
+  color: #0284C7;
+}
+
 .theme-btn {
   height: 30px;
   padding: 0 10px;
@@ -7052,3 +7077,173 @@ details.theory[open] summary {
 :root[data-theme="light"] .kp-stat-sub {
   color: #64748b;
 }
+
+/* =============================================================================
+   LOCKED PREMIUM TAB TEASER CARD
+   ============================================================================= */
+.card-locked {
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.95), rgba(15, 23, 42, 0.92)) !important;
+  border: 1px solid rgba(56, 189, 248, 0.25) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  border-radius: var(--radius-md, 8px) !important;
+  padding: 36px 32px !important;
+  margin: 20px 0 !important;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+:root[data-theme="light"] .card-locked {
+  background: linear-gradient(135deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.95)) !important;
+  border-color: rgba(2, 132, 199, 0.25) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+}
+
+.card-locked::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #38BDF8, #818CF8, transparent);
+}
+
+.locked-card-container {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.locked-badge-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.locked-status-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #F59E0B;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.locked-plan-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38BDF8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.locked-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink, #F9FAFB);
+  margin: 0 0 10px 0;
+  letter-spacing: -0.01em;
+}
+
+.locked-subtitle {
+  font-size: 14px;
+  color: var(--ink-2, #9CA3AF);
+  margin: 0 0 24px 0;
+  line-height: 1.6;
+}
+
+.locked-features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  width: 100%;
+  margin-bottom: 28px;
+  text-align: left;
+}
+
+.locked-feature-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 16px;
+  transition: border-color 0.2s ease;
+}
+
+:root[data-theme="light"] .locked-feature-item {
+  background: rgba(15, 23, 42, 0.03);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.locked-feature-item:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.locked-feature-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink, #E2E8F0);
+  margin-bottom: 6px;
+}
+
+.locked-feature-desc {
+  font-size: 12px;
+  color: var(--ink-2, #94A3B8);
+  line-height: 1.5;
+}
+
+.locked-action-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.locked-note {
+  font-size: 13px;
+  color: var(--ink-2, #9CA3AF);
+  max-width: 560px;
+  line-height: 1.6;
+  margin: 0 !important;
+}
+
+.btn-upgrade-plan {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #0284C7, #2563EB);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 6px;
+  padding: 11px 26px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+}
+
+.btn-upgrade-plan:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+}
+
+.tab-label-locked {
+  opacity: 0.9;
+}
+
+.tab-label-locked .tab-icon {
+  filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.8));
+}
+

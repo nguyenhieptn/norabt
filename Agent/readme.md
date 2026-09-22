@@ -239,10 +239,10 @@ Mỗi lần chạy ghi một bản ghi vào `Agent/data/state/assessments/<bot_i
 Mỗi bước của kiến trúc có một báo cáo riêng, không gộp chung thành một bảng dày đặc.
 
 ```bash
-python3 -m Agent.backend.run_report --report market   # Bước 1: chế độ thị trường
-python3 -m Agent.backend.run_report --report bot      # Bước 2: đo từng bot theo asset
-python3 -m Agent.backend.run_report --report qc       # Bước 3: xếp hạng rủi ro
-python3 -m Agent.backend.run_report --report all      # cả ba, kèm backlog dữ liệu
+python3 -m Agent.backend.scripts.run_report --report market   # Bước 1: chế độ thị trường
+python3 -m Agent.backend.scripts.run_report --report bot      # Bước 2: đo từng bot theo asset
+python3 -m Agent.backend.scripts.run_report --report qc       # Bước 3: xếp hạng rủi ro
+python3 -m Agent.backend.scripts.run_report --report all      # cả ba, kèm backlog dữ liệu
 ```
 
 **Bước 1 — thị trường.** Mỗi asset một dòng: chế độ thị trường viết thành câu tiếng Việt
@@ -288,8 +288,8 @@ Khi một bot có nhiều snapshot trùng, hệ thống chọn bản **giàu pro
 Dọn thư mục trùng:
 
 ```bash
-python3 -m Agent.backend.run_prune           # chạy thử, không xoá
-python3 -m Agent.backend.run_prune --apply   # xoá thật
+python3 -m Agent.backend.scripts.run_prune           # chạy thử, không xoá
+python3 -m Agent.backend.scripts.run_prune --apply   # xoá thật
 ```
 
 Phần cuối báo cáo là **backlog dữ liệu**: mỗi mục thiếu đi kèm phạm vi, mô tả, các chiều đánh giá sẽ mở khóa và bot bị ảnh hưởng, sắp theo độ ưu tiên.
@@ -297,7 +297,7 @@ Phần cuối báo cáo là **backlog dữ liệu**: mỗi mục thiếu đi kè
 Đánh giá một bot đơn lẻ:
 
 ```bash
-python3 -m Agent.backend.run_pipeline BTC --bot bot_top_performer --venue CEX
+python3 -m Agent.backend.scripts.run_pipeline BTC --bot bot_top_performer --venue CEX
 ```
 
 ## Nguyên tắc dữ liệu
@@ -342,7 +342,7 @@ Crawl 132 bot tốn khoảng **8 phút** (6 request/bot, delay 0.6s); Monte Carl
 
 ## Bán qua MCP / OKX AI Marketplace (x402)
 
-`backend/agent_server.py` phơi 6 tool MCP (`assess_bot`, `get_market`...) qua chuẩn Model
+`backend/scripts/agent_server.py` phơi 6 tool MCP (`assess_bot`, `get_market`...) qua chuẩn Model
 Context Protocol. Mỗi lời gọi tool có thể bị tính phí vi mô qua **x402** (`backend/payments/x402.py`):
 client gọi không kèm thanh toán → server trả HTTP 402 kèm yêu cầu giá → client ký thanh toán và
 gọi lại → server xác minh THẬT bằng một lệnh gọi HTTP tới facilitator của OKX

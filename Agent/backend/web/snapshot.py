@@ -56,7 +56,7 @@ Configuration is entirely through `NORABT_SNAPSHOT_REDIS_URL`
 (`ENV_VAR_REDIS_URL` below), read LIVE on every call (same "no import-time
 snapshot of the environment" pattern `access.is_protected()`/
 `data.py`'s `report_base_url()` already use elsewhere in this project) --
-NOT `REDIS_URL` (that variable belongs to `Agent/backend/qc/**`'s own
+NOT `REDIS_URL` (that variable belongs to `Agent/backend/report/qc/**`'s own
 project-"nora" pipeline against db0, and is out of scope for this module to
 even read). Leaving `NORABT_SNAPSHOT_REDIS_URL` UNSET (the default) disables
 this entire module: every function below becomes a guaranteed no-op that

@@ -12,16 +12,16 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
-import Agent.backend.okx.client as client_module
+import Agent.backend.external.okx.client as client_module
 from Agent.backend.infra.config import config
-from Agent.backend.okx.client import (
+from Agent.backend.external.okx.client import (
     DEFAULT_USER_AGENT,
     OkxApiError,
     OkxClient,
     OkxCredentialsMissing,
     OkxTransportError,
 )
-from Agent.backend.okx.credentials import OkxCredentials
+from Agent.backend.external.okx.credentials import OkxCredentials
 
 FIXED_TIMESTAMP = "2020-12-08T09:08:57.715Z"
 
@@ -62,7 +62,7 @@ def _install_fake_urlopen(
     Every real call is recorded (method/url/headers/body) so tests can assert
     on what was actually sent without a real socket ever opening.
     """
-    import Agent.backend.okx.client as client_module
+    import Agent.backend.external.okx.client as client_module
 
     def fake_urlopen(request, timeout=None):
         if calls is not None:

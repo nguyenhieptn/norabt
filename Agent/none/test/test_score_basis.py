@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from Agent.backend.analysis.limited import STATUS_LIMITED, assess_limited_bot
+from Agent.backend.bot.analysis.limited import STATUS_LIMITED, assess_limited_bot
 from Agent.backend.web import score_basis
 
 

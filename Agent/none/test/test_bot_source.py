@@ -17,12 +17,12 @@ import pytest
 
 from Agent.backend.infra.config import config
 from Agent.backend.live.ratelimit import TokenBucket
-from Agent.backend.mcp.positions.snapshot import PositionSnapshotParser
-from Agent.backend.mcp.schemas.bot_result import PositionSide
-from Agent.backend.mcp.service import BotObservationService
-from Agent.backend.mcp.trades.ledger import TradeLedgerManager
-from Agent.backend.okx.client import OkxApiError, OkxTransportError
-from Agent.backend.sources.bot_source import (
+from Agent.backend.bot.mcp.positions.snapshot import PositionSnapshotParser
+from Agent.backend.bot.mcp.schemas.bot_result import PositionSide
+from Agent.backend.bot.mcp.service import BotObservationService
+from Agent.backend.bot.mcp.trades.ledger import TradeLedgerManager
+from Agent.backend.external.okx.client import OkxApiError, OkxTransportError
+from Agent.backend.external.sources.bot_source import (
     HISTORY_PATH,
     LEAD_TRADERS_PATH,
     LEADERBOARD_PAGE_SIZE,
@@ -63,7 +63,7 @@ def make_trade(
 ) -> Dict[str, Any]:
     """One closed trade shaped exactly like a real OKX
     public-subpositions-history row (field-for-field identical to a sample
-    pulled from Agent/data/cex/ETH/bot/bot_74F7C7A53CD18275/trade_list.json)."""
+    pulled from Agent/data/trade/bot_74F7C7A53CD18275/trade_list.json)."""
     return {
         "ccy": "USDT",
         "closeAvgPx": "2463.2",
@@ -161,7 +161,7 @@ def make_stats(
 
 
 class FakeOkxClient:
-    """Stands in for Agent.backend.okx.client.OkxClient. Models real OKX
+    """Stands in for Agent.backend.external.okx.client.OkxClient. Models real OKX
     cursor pagination (`after=<subPosId>` means "strictly after this row") so
     LiveBotDataSource's own pagination loop is exercised for real, not just a
     canned per-call return value.
@@ -317,7 +317,7 @@ def test_live_payload_has_every_key_the_file_payload_has():
     provenance) would not fail loudly -- it would just make step 2 mis-grade
     the bot. Compares against a real, already-crawled bot in Agent/data.
     """
-    real_dir = Path(config.DATA_DIR) / "cex" / "ETH" / "bot" / "bot_74F7C7A53CD18275"
+    real_dir = Path(config.DATA_DIR) / "trade" / "bot_74F7C7A53CD18275"
     assert real_dir.is_dir(), "fixture bot missing from Agent/data"
     file_source = FileBotDataSource(Path(config.DATA_DIR))
     file_overview = file_source.get_overview("74F7C7A53CD18275", bot_dir=real_dir)
@@ -698,7 +698,7 @@ def test_overview_key_set_matches_file_source_for_a_real_bot():
     would have caught the original gap (nick_name/aum/pnl/roi/calmar all
     silently blank) before it ever reached a report.
     """
-    real_dir = Path(config.DATA_DIR) / "cex" / "ETH" / "bot" / "bot_74F7C7A53CD18275"
+    real_dir = Path(config.DATA_DIR) / "trade" / "bot_74F7C7A53CD18275"
     assert real_dir.is_dir(), "fixture bot missing from Agent/data"
     file_overview = FileBotDataSource(Path(config.DATA_DIR)).get_overview(
         "74F7C7A53CD18275", bot_dir=real_dir
@@ -794,8 +794,9 @@ def test_service_without_bot_source_behaves_exactly_as_before(tmp_path: Path):
         tmp_path, overview=overview, closed_trades=closed_trades, open_positions=[]
     )
     folder = bot_dir.name
-    asset = bot_dir.parent.parent.name
-    venue = bot_dir.parent.parent.parent.name.upper()
+    slot = json.loads((bot_dir / "crawl_slot.json").read_text(encoding="utf-8"))
+    asset = slot["asset"]
+    venue = slot["venue"]
 
     default_service = BotObservationService(tmp_path)
     explicit_service = BotObservationService(

@@ -29,23 +29,34 @@ function RequireRole({ role, children }) {
 function AppHeader() {
   const [searchParams, setSearchParams] = useSearchParams();
   const currentTab = searchParams.get("tab") || "overview";
+  const botCode = searchParams.get("code") || "";
   const { session, logout, adminOpenAccess } = useSession();
   const navigate = useNavigate();
 
+  // Viewing a bot report directly (endpoint + id bot + contract id):
+  const isDirectBotView = currentTab === "bot" || !!botCode;
+
+  // Role is USER, ID = hợp đồng (contract id)
+  const contractId =
+    searchParams.get("contract") ||
+    searchParams.get("contract_id") ||
+    searchParams.get("id") ||
+    searchParams.get("user_ref") ||
+    botCode;
+
   React.useEffect(() => {
-    if (currentTab === "overview") {
+    if (isDirectBotView) {
+      document.title = botCode ? `Nora - Risk Management · ${botCode}` : "Nora - Risk Management";
+    } else if (currentTab === "overview") {
       document.title = "Nora - Risk Management";
     } else if (currentTab === "bots") {
       document.title = "Nora - Bot List";
     } else if (currentTab === "analyze") {
       document.title = "Nora - Analyze Bot";
-    } else if (currentTab === "bot") {
-      const code = searchParams.get("code") || "";
-      document.title = code ? `Nora - Risk Management · ${code}` : "Nora - Risk Management";
     } else {
       document.title = "Nora - Risk Management";
     }
-  }, [currentTab, searchParams]);
+  }, [currentTab, botCode, isDirectBotView]);
 
   const roleLabel = session
     ? session.role === "admin"
@@ -68,7 +79,11 @@ function AppHeader() {
     <header className="top-header">
       <div className="header-left">
         {/* Brand & Monogram Logo */}
-        <div className="brand" onClick={() => handleTabClick("overview")} style={{ cursor: "pointer" }}>
+        <div
+          className="brand"
+          onClick={isDirectBotView ? undefined : () => handleTabClick("overview")}
+          style={{ cursor: isDirectBotView ? "default" : "pointer" }}
+        >
           <div className="brand-logo-box">
             {/* OKX-inspired geometric matrix glyph */}
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -87,74 +102,84 @@ function AppHeader() {
           </div>
         </div>
 
-        <div className="header-divider" />
+        {/* OKX-style Segmented Control Navigation Tabs - hidden in direct bot user view */}
+        {!isDirectBotView && (
+          <>
+            <div className="header-divider" />
+            <nav className="header-nav-tabs">
+              <button
+                type="button"
+                className={`header-tab ${currentTab === "overview" ? "on" : ""}`}
+                onClick={() => handleTabClick("overview")}
+              >
+                <svg className="tab-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7" rx="1" />
+                  <rect x="14" y="3" width="7" height="7" rx="1" />
+                  <rect x="14" y="14" width="7" height="7" rx="1" />
+                  <rect x="3" y="14" width="7" height="7" rx="1" />
+                </svg>
+                <span>Overview</span>
+              </button>
 
-        {/* OKX-style Segmented Control Navigation Tabs */}
-        <nav className="header-nav-tabs">
-          <button
-            type="button"
-            className={`header-tab ${currentTab === "overview" ? "on" : ""}`}
-            onClick={() => handleTabClick("overview")}
-          >
-            <svg className="tab-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="7" height="7" rx="1" />
-              <rect x="14" y="3" width="7" height="7" rx="1" />
-              <rect x="14" y="14" width="7" height="7" rx="1" />
-              <rect x="3" y="14" width="7" height="7" rx="1" />
-            </svg>
-            <span>Overview</span>
-          </button>
+              <button
+                type="button"
+                className={`header-tab ${currentTab === "bots" || currentTab === "bot" ? "on" : ""}`}
+                onClick={() => handleTabClick("bots")}
+              >
+                <svg className="tab-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="8" y1="6" x2="21" y2="6" />
+                  <line x1="8" y1="12" x2="21" y2="12" />
+                  <line x1="8" y1="18" x2="21" y2="18" />
+                  <line x1="3" y1="6" x2="3.01" y2="6" />
+                  <line x1="3" y1="12" x2="3.01" y2="12" />
+                  <line x1="3" y1="18" x2="3.01" y2="18" />
+                </svg>
+                <span>Bot List</span>
+              </button>
 
-          <button
-            type="button"
-            className={`header-tab ${currentTab === "bots" || currentTab === "bot" ? "on" : ""}`}
-            onClick={() => handleTabClick("bots")}
-          >
-            <svg className="tab-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="8" y1="6" x2="21" y2="6" />
-              <line x1="8" y1="12" x2="21" y2="12" />
-              <line x1="8" y1="18" x2="21" y2="18" />
-              <line x1="3" y1="6" x2="3.01" y2="6" />
-              <line x1="3" y1="12" x2="3.01" y2="12" />
-              <line x1="3" y1="18" x2="3.01" y2="18" />
-            </svg>
-            <span>Bot List</span>
-          </button>
-
-          <button
-            type="button"
-            className={`header-tab ${currentTab === "analyze" ? "on" : ""}`}
-            onClick={() => handleTabClick("analyze")}
-          >
-            <svg className="tab-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <span>Analyze Bot</span>
-          </button>
-        </nav>
+              <button
+                type="button"
+                className={`header-tab ${currentTab === "analyze" ? "on" : ""}`}
+                onClick={() => handleTabClick("analyze")}
+              >
+                <svg className="tab-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <span>Analyze Bot</span>
+              </button>
+            </nav>
+          </>
+        )}
       </div>
 
       {/* Header Right Actions */}
-      {/* Header Right Actions */}
       <div className="header-actions">
-
-        {roleLabel && (
-          <div className="user-badge-capsule">
+        {isDirectBotView ? (
+          <div className="user-badge-capsule user-badge-client">
             <span className="user-badge-pulse" />
             <span className="user-badge-label">
-              {session?.userRef
-                ? session.userRef
-                : adminOpenAccess && !session
-                  ? "ADMIN"
-                  : roleLabel.toUpperCase()}
+              USER · #{contractId}
             </span>
           </div>
+        ) : (
+          roleLabel && (
+            <div className="user-badge-capsule">
+              <span className="user-badge-pulse" />
+              <span className="user-badge-label">
+                {session?.userRef
+                  ? session.userRef
+                  : adminOpenAccess && !session
+                    ? "ADMIN"
+                    : roleLabel.toUpperCase()}
+              </span>
+            </div>
+          )
         )}
 
         <ThemeToggle />
 
-        {session && (
+        {session && !isDirectBotView && (
           <button
             type="button"
             className="btn-logout"

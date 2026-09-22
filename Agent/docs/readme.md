@@ -71,7 +71,7 @@ Thư mục `bmad/spec/` mô tả chi tiết, bóc tách về mặt toán học, 
 | **SPEC-04** | **Kỹ năng Mô phỏng Monte Carlo & Bootstrap Thống kê**<br>10.000 kịch bản Stationary Bootstrap (Politis & Romano 1994), Deflated Sharpe (DSR), PSR, MinTRL. | `mcp/analytics/simulation/` | [Xem Spec 04](bmad/spec/02_technical_skills/SPEC-04_MONTE_CARLO_AND_STATIONARY_BOOTSTRAP_SKILL.md) |
 | **SPEC-05** | **Kỹ năng Veto An toàn & Xếp loại Chất lượng**<br>Ma trận phân loại 4 góc phần tư (Drawdown vs Quality), 6 điều kiện Veto cứng, tính toán Risk Score 0–100. | `qc/scoring/verdict.py`<br>`qc/reporting/reasons.py` | [Xem Spec 05](bmad/spec/02_technical_skills/SPEC-05_SAFETY_VETO_AND_DECISION_ENGINE_SKILL.md) |
 | **SPEC-06** | **Kỹ năng Tổng hợp Nhận định Chuyên môn Định tính**<br>Cấu trúc lập luận 3 tầng (Kết luận → Nguyên nhân cốt lõi → Luận cứ chứng minh `◆`), 5 cổng kiểm duyệt khắt khe. | `qc/reporting/narrative.py`<br>`web/report_page.py` | [Xem Spec 06](bmad/spec/02_technical_skills/SPEC-06_QUALITATIVE_NARRATIVE_SYNTHESIS_SKILL.md) |
-| **SPEC-07** | **Kỹ năng Máy chủ MCP & Thanh toán Vi mô x402**<br>Chuẩn giao tiếp Model Context Protocol (JSON-RPC 2.0), 6 công cụ MCP, thanh toán USDC onchain x402. | `backend/agent_server.py`<br>`payments/x402.py` | [Xem Spec 07](bmad/spec/02_technical_skills/SPEC-07_MCP_SERVER_AND_MICRO_PAYMENTS_SKILL.md) |
+| **SPEC-07** | **Kỹ năng Máy chủ MCP & Thanh toán Vi mô x402**<br>Chuẩn giao tiếp Model Context Protocol (JSON-RPC 2.0), 6 công cụ MCP, thanh toán USDC onchain x402. | `backend/scripts/agent_server.py`<br>`payments/x402.py` | [Xem Spec 07](bmad/spec/02_technical_skills/SPEC-07_MCP_SERVER_AND_MICRO_PAYMENTS_SKILL.md) |
 | **SPEC-08** | **Kỹ năng Giao diện Quản trị & Báo cáo Bot Chuẩn Fintech**<br>Hệ thống Design Tokens (`tokens.css`), triết lý 70% OKX + 30% Neo-Brutalism, Deep Slate Obsidian, radar SYSTEM ONLINE. | `frontend/`<br>`web/tokens.css`<br>`web/report_page.py` | [Xem Spec 08](bmad/spec/02_technical_skills/SPEC-08_INSTITUTIONAL_UI_AND_VISUALIZATION_SKILL.md) |
 
 ---
@@ -80,7 +80,8 @@ Thư mục `bmad/spec/` mô tả chi tiết, bóc tách về mặt toán học, 
 
 Mọi kỹ năng trong bộ Spec và mọi chặng trong bộ Story đều được bảo đảm bằng bộ kiểm thử tự động toàn diện:
 - **Pytest Suite:** Đạt **99/99 bài test PASS** trong [test_report_page.py](file:///home/ubuntu/norabt/Agent/none/test/test_report_page.py) cùng toàn bộ các bài test đơn vị trong `Agent/none/test/`.
-- **Docker Compose Services:**
-  - `norabt-agent-web` (Cổng 8770): Phục vụ REST API, React SPA bundle và trang báo cáo HTML máy chủ.
-  - `norabt-agent-redis` (Cổng 6379): Bộ đệm snapshot kết quả thẩm định dưới 50ms.
+- **Docker Compose Services (Production Ready & Live):**
+  - `norabt-agent-web` (Cổng 8770): Phục vụ REST API, React SPA bundle và trang báo cáo HTML máy chủ. Đã cấu hình Nginx reverse proxy tại domain chính thức: `https://agent.expsolution.io`.
+  - `norabt-agent-redis` (Cổng 6379): Bộ đệm snapshot kết quả thẩm định dưới 50ms (in-memory allkeys-lru).
+- **OKX OnchainOS Integration (Live Mainnet):** Đã đăng ký dịch vụ thành công với **Agentic ID: `13753`**, **Service SID: `40700`**, endpoint `https://agent.expsolution.io/api/analyze`.
 - **Frontend SPA Build:** Vite bundle biên dịch tối ưu (199 KB JS gzip 65 KB, 18.7 KB CSS gzip 4.6 KB).

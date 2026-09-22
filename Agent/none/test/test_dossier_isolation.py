@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from Agent.backend.qc.reporting.dossier import build_analysis_dossier
+from Agent.backend.report.qc.reporting.dossier import build_analysis_dossier
 from Agent.backend.pipeline import RiskSupervisionPipeline
 from Agent.none.test.conftest import FIXED_AS_OF_MS
 
@@ -13,7 +13,7 @@ def test_dossier_build_does_not_touch_narrative_or_persistence(monkeypatch, tmp_
         raise AssertionError("narrative must not be part of deterministic dossier build")
 
     monkeypatch.setattr(
-        "Agent.backend.qc.reporting.narrative.generate_narrative_sync",
+        "Agent.backend.llm.narrative.generate_narrative_sync",
         fail_if_called,
     )
     pipeline = RiskSupervisionPipeline(persist_history=False)

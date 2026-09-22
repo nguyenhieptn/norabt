@@ -16,14 +16,14 @@ from starlette.testclient import TestClient
 
 from Agent.backend.infra.config import config
 from Agent.backend.market.service import MarketDataUnavailableError
-from Agent.backend.sources.bot_source import BotDataSource
-from Agent.backend.sources.market_source import MarketDataSource
-from Agent.backend.qc.reporting.view_policy import WITHHELD_MARKER
+from Agent.backend.external.sources.bot_source import BotDataSource
+from Agent.backend.external.sources.market_source import MarketDataSource
+from Agent.backend.report.qc.reporting.view_policy import WITHHELD_MARKER
 from Agent.backend.web.app import create_app
 from Agent.backend.web.data import WebDataService
 
 DATA_DIR = Path(config.DATA_DIR)
-_FIXTURE_BOT_DIR = DATA_DIR / "cex" / "MU" / "bot" / "bot_BB3398A957270A39"
+_FIXTURE_BOT_DIR = DATA_DIR / "trade" / "bot_BB3398A957270A39"
 
 # A bot this repository has a committed, already-scored assessment.json for.
 _REAL_SCORED_CODE = "811997770117827919"

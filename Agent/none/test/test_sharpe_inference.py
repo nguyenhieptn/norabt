@@ -9,7 +9,7 @@ import statistics
 import numpy as np
 import pytest
 
-from Agent.backend.mcp.analytics.simulation.inference import (
+from Agent.backend.bot.mcp.analytics.simulation.inference import (
     MIN_OBSERVATIONS,
     _normal_cdf,
     _normal_ppf,
@@ -240,13 +240,13 @@ def test_falling_back_to_the_null_variance_says_so_out_loud() -> None:
 
 def test_population_variance_is_read_from_the_scored_bots(tmp_path) -> None:
     """Nguồn V chéo là chính những bot đã chấm, đọc từ đĩa."""
-    from Agent.backend.mcp.analytics.simulation import sharpe_reference
+    from Agent.backend.bot.mcp.analytics.simulation import sharpe_reference
 
     sharpe_reference.reset_cache()
-    analysis = tmp_path / "analysis" / "cex" / "BTC" / "bot"
+    report_root = tmp_path / "report"
     values = [0.1, 0.2, -0.05, 0.4, 0.15, 0.0, 0.3, -0.2, 0.25, 0.05, 0.6, -0.1]
     for index, value in enumerate(values):
-        folder = analysis / f"bot_{index}"
+        folder = report_root / f"bot_{index}"
         folder.mkdir(parents=True)
         (folder / "monte_carlo.json").write_text(
             json.dumps({"sharpe_per_trade": value}), encoding="utf-8"
@@ -257,5 +257,5 @@ def test_population_variance_is_read_from_the_scored_bots(tmp_path) -> None:
     # Dưới ngưỡng mẫu tối thiểu thì thà không có còn hơn dựng ngưỡng bịa.
     sharpe_reference.reset_cache()
     thin = tmp_path / "thin"
-    (thin / "analysis").mkdir(parents=True)
+    (thin / "report").mkdir(parents=True)
     assert sharpe_reference.population_sharpe_variance(thin) is None

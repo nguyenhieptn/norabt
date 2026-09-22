@@ -125,9 +125,11 @@ class BotTarget:
     data_symbol: Optional[str] = None
 
     def bot_dir(self, data_dir: Path) -> Path:
-        return (
-            Path(data_dir) / self.venue.lower() / self.symbol / "bot" / self.bot_folder
-        )
+        # Unified layout: one folder per bot_id, no venue/symbol segregation
+        # -- `self.venue`/`self.symbol` (the SLOT) no longer determine this
+        # path at all, see this class's own docstring for why that used to
+        # be the bug (LỖI 5), not a feature, to begin with.
+        return Path(data_dir) / "trade" / self.bot_folder
 
     def overview_path(self, data_dir: Path) -> Path:
         return self.bot_dir(data_dir) / "overview.json"
@@ -143,56 +145,41 @@ class BotTarget:
         -- so its own parent directories are the ground truth for where the
         bot's data really lives, independent of the slot it was selected
         under.
+
+        Unified layout: `bot_dir` no longer has a `<venue>/<asset>` ancestry
+        to read (`data/trade/<bot_folder>/` is flat) -- the real
+        venue/asset is instead read from that bot's own `crawl_slot.json`,
+        written once by the data-layout migration (see
+        `Agent.backend.report.qc.reporting.assessment_store.bots_in_slot`'s
+        docstring for why this is not re-derived from bot_selection.json).
         """
         bot_dir = Path(bot_dir)
-        asset_dir = bot_dir.parent.parent  # .../<venue>/<asset>/bot -> <asset>
-        venue_dir = asset_dir.parent  # .../<venue>/<asset> -> <venue>
+        slot_path = bot_dir / "crawl_slot.json"
+        slot = json.loads(slot_path.read_text(encoding="utf-8")) if slot_path.exists() else {}
         return replace(
             self,
-            data_venue=venue_dir.name.upper(),
-            data_symbol=asset_dir.name.upper(),
+            data_venue=(slot.get("venue") or "").upper() or None,
+            data_symbol=(slot.get("asset") or "").upper() or None,
         )
 
 
 def find_bot_dir(data_dir: Path, unique_code: str) -> Optional[Path]:
     """Resolve a bot's real dataset directory by uniqueCode, never by its slot.
 
-    `BotTarget.bot_dir()` builds a path from the venue/symbol *slot*
-    bot_selection.json assigned a bot to -- but a bot can (and does) actually
-    trade a different instrument than the one it was selected under (e.g.
-    selected as the DEX/WBTC slot while every real crawled trade lives under
-    cex/BTC/bot/bot_<code>, because that's the instrument it actually trades).
-    Trusting the slot to build a write path made the live poller create a
-    brand-new, empty sibling directory next to the real one on every such
-    mismatch -- that is exactly how ~30 empty duplicate bot folders were
-    created. Searching by uniqueCode alone finds wherever crawl_bots.py
-    actually put the data, regardless of slot, and is the only path this
-    module is allowed to write into.
-
-    When more than one directory exists for the same uniqueCode (crawled
-    under more than one asset at different times), the one with
-    overview.json and the most closed_trades wins -- that is the one a real
-    crawl actually populated, not an accidental empty one.
+    Unified layout: `data/trade/bot_<code>/` is the one and only location a
+    bot's data can live at, so the historical multi-candidate/richness
+    tie-break below (needed when the old `<venue>/<asset>/bot/<folder>`
+    nesting let the same uniqueCode be crawled under more than one asset
+    directory at different times -- see git history for that bug, LỖI 5)
+    can no longer happen structurally. `BotTarget.bot_dir()` already points
+    here directly; this function stays as the "does it actually exist"
+    check every caller uses instead of assuming so.
 
     Returns None when no directory exists at all. Callers MUST treat that as
-    "not crawled yet" and refuse to create anything -- never fall back to
-    BotTarget.bot_dir() to invent a path, or the duplicate-folder bug comes
-    right back.
+    "not crawled yet" and refuse to create anything.
     """
-    candidates = sorted(Path(data_dir).glob(f"*/*/bot/bot_{unique_code}"))
-    if not candidates:
-        return None
-    if len(candidates) == 1:
-        return candidates[0]
-
-    def _richness(path: Path) -> tuple:
-        has_overview = (path / "overview.json").exists()
-        trade_list = read_json(path / "trade_list.json") or {}
-        closed = trade_list.get("closed_trades")
-        closed_count = len(closed) if isinstance(closed, list) else 0
-        return (has_overview, closed_count)
-
-    return max(candidates, key=_richness)
+    candidate = Path(data_dir) / "trade" / f"bot_{unique_code}"
+    return candidate if candidate.is_dir() else None
 
 
 def load_bot_targets(

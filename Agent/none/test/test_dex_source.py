@@ -22,15 +22,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
-import Agent.backend.sources.market_source as market_source
-from Agent.backend.sources.dex_registry import (
+import Agent.backend.external.sources.market_source as market_source
+from Agent.backend.external.sources.dex_registry import (
     DEX_ASSET_REGISTRY,
     WRAPPED_UNDERLYING,
     spot_benchmark_pair,
     swap_reference_inst_id,
     underlying_symbol,
 )
-from Agent.backend.sources.market_source import (
+from Agent.backend.external.sources.market_source import (
     CandleCache,
     FileMarketDataSource,
     LiveMarketDataSource,
@@ -157,12 +157,12 @@ def test_benchmark_pair_derivation_matches_the_5_real_ticks_fixtures(
     assert swap_reference_inst_id(asset) == expected_swap
 
     fixture = json.loads(
-        (DATA_DIR / "dex" / asset / "market" / "ticks_100ms_stream.json").read_text()
+        (DATA_DIR / "market" / "dex" / asset / "ticks_100ms_stream.json").read_text()
     )
     assert fixture["benchmark_pair"] == expected_spot
 
     ohlcv = json.loads(
-        (DATA_DIR / "dex" / asset / "market" / "ohlcv_1h_2023_present.json").read_text()
+        (DATA_DIR / "market" / "dex" / asset / "ohlcv_1h_2023_present.json").read_text()
     )
     assert ohlcv["price_benchmark"] == expected_swap
 
@@ -173,7 +173,7 @@ def test_dex_asset_registry_covers_exactly_the_5_dex_assets() -> None:
         assert info.chain in ("ETHEREUM", "SOLANA")
         assert info.token_address  # non-empty
         pool_file = json.loads(
-            (DATA_DIR / "dex" / asset / "market" / "pool_liquidity.json").read_text()
+            (DATA_DIR / "market" / "dex" / asset / "pool_liquidity.json").read_text()
         )
         # The registry's chain/address must agree with what the crawl itself
         # observed for this asset (this is the "hardcoded but verified against
@@ -334,7 +334,7 @@ def test_get_ticks_payload_has_every_key_the_on_disk_fixture_has() -> None:
     expected_keys = set(
         json.loads(
             (
-                DATA_DIR / "dex" / "PEPE" / "market" / "ticks_100ms_stream.json"
+                DATA_DIR / "market" / "dex" / "PEPE" / "ticks_100ms_stream.json"
             ).read_text()
         )
     )
@@ -410,7 +410,7 @@ def test_get_pool_liquidity_payload_has_every_key_the_on_disk_fixture_has(
 
     expected_keys = set(
         json.loads(
-            (DATA_DIR / "dex" / "UNI" / "market" / "pool_liquidity.json").read_text()
+            (DATA_DIR / "market" / "dex" / "UNI" / "pool_liquidity.json").read_text()
         )
     )
     payload, error = source.get_pool_liquidity("UNI", "DEX")
@@ -573,12 +573,12 @@ def test_get_token_security_payload_has_every_key_the_on_disk_fixture_has(
     source = _dex_source(BoomOkxClient(), dex_registry=DEX_ASSET_REGISTRY)
     expected_keys = set(
         json.loads(
-            (DATA_DIR / "dex" / "PEPE" / "market" / "token_security.json").read_text()
+            (DATA_DIR / "market" / "dex" / "PEPE" / "token_security.json").read_text()
         )
     )
     expected_security_keys = set(
         json.loads(
-            (DATA_DIR / "dex" / "PEPE" / "market" / "token_security.json").read_text()
+            (DATA_DIR / "market" / "dex" / "PEPE" / "token_security.json").read_text()
         )["security"]
     )
     payload, error = source.get_token_security("PEPE", "DEX")

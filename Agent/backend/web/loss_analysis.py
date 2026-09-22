@@ -30,7 +30,7 @@ nên không được coi là mâu thuẫn:
 
   * `performance.max_drawdown_pct` chia mỗi mức sụt cho VỐN TẠI ĐÚNG THỜI
     ĐIỂM lệnh đó đóng, đọc từ đường vốn tuần
-    (`Agent/backend/mcp/analytics/drawdown/underwater.py`), rồi chặn trần
+    (`Agent/backend/bot/mcp/analytics/drawdown/underwater.py`), rồi chặn trần
     100%.
   * `depth_pct` ở đây chia cho MỘT mốc vốn tham chiếu duy nhất
     (`reference_capital`) -- trả lời câu "so với quy mô vốn của bot này thì

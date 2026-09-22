@@ -13,11 +13,11 @@ import math
 import numpy as np
 import pytest
 
-from Agent.backend.mcp.analytics.performance.metrics import (
+from Agent.backend.bot.mcp.analytics.performance.metrics import (
     PerformanceMetricsCalculator,
 )
-from Agent.backend.mcp.capital.equity_curve import CapitalModel
-from Agent.backend.mcp.schemas.bot_result import (
+from Agent.backend.bot.mcp.capital.equity_curve import CapitalModel
+from Agent.backend.bot.mcp.schemas.bot_result import (
     DrawdownAnalysis,
     PositionSide,
     TradeLedgerItem,

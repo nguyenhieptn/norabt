@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from Agent.backend.qc.reporting.cohort import BotEvaluationRow
+from Agent.backend.report.qc.reporting.cohort import BotEvaluationRow
 
 import pytest
 
-from Agent.backend.qc.scoring.quality import assess as assess_quality
-from Agent.backend.qc.scoring.verdict import (
+from Agent.backend.report.qc.scoring.quality import assess as assess_quality
+from Agent.backend.report.qc.scoring.verdict import (
     DANGEROUS_RISK,
     PROMISING_QUALITY,
     VERDICT_HIDDEN_RISK,
@@ -323,7 +323,7 @@ def _row(**kwargs):
 
 
 def test_the_recommendation_names_the_gap_between_closed_and_open_books():
-    from Agent.backend.qc.reporting.reasons import recommendation_vi
+    from Agent.backend.report.qc.reporting.reasons import recommendation_vi
 
     text = " ".join(recommendation_vi(_row()))
 
@@ -335,7 +335,7 @@ def test_the_recommendation_names_the_gap_between_closed_and_open_books():
 
 
 def test_the_recommendation_describes_how_the_bot_trades():
-    from Agent.backend.qc.reporting.reasons import recommendation_vi
+    from Agent.backend.report.qc.reporting.reasons import recommendation_vi
 
     text = " ".join(recommendation_vi(_row()))
 
@@ -345,7 +345,7 @@ def test_the_recommendation_describes_how_the_bot_trades():
 
 
 def test_an_untested_downtrend_is_stated_plainly():
-    from Agent.backend.qc.reporting.reasons import recommendation_vi
+    from Agent.backend.report.qc.reporting.reasons import recommendation_vi
 
     text = " ".join(recommendation_vi(_row(tested_in_downtrend=False)))
 
@@ -354,7 +354,7 @@ def test_an_untested_downtrend_is_stated_plainly():
 
 def test_every_verdict_ends_with_a_condition_that_would_change_it():
     """A verdict with no exit condition reads as permanent."""
-    from Agent.backend.qc.reporting.reasons import recommendation_vi
+    from Agent.backend.report.qc.reporting.reasons import recommendation_vi
 
     deferred = " ".join(recommendation_vi(_row()))
     untested = " ".join(
@@ -383,7 +383,7 @@ def test_every_verdict_ends_with_a_condition_that_would_change_it():
 
 
 def test_a_dangerous_verdict_names_the_driver_not_the_threshold():
-    from Agent.backend.qc.scoring.verdict import decide
+    from Agent.backend.report.qc.scoring.verdict import decide
 
     with_driver = decide(
         _bot(), 88.0, 40.0, risk_drivers=["hành vi giao dịch hủy hoại"]

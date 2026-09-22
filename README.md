@@ -71,7 +71,7 @@ NoraBT xây dựng mô hình kinh tế đại lý AI (Agent Economy) qua giao th
 
 ### Chi tiết thiết kế Agent (Technical Blueprint)
 
-* **Agent Framework:** FastMCP Server (JSON-RPC 2.0) kết hợp Autonomous Supervisory Pipeline hướng sự kiện (`Agent/backend/pipeline.py`, `Agent/backend/agent_server.py`).
+* **Agent Framework:** FastMCP Server (JSON-RPC 2.0) kết hợp Autonomous Supervisory Pipeline hướng sự kiện (`Agent/backend/pipeline.py`, `Agent/backend/scripts/agent_server.py`).
 * **LLM Engine:** `agy` / `gemini-3.8-flash-medium` vận hành Động cơ Nhận định Chuyên môn Định tính (`Agent/backend/qc/reporting/narrative.py`).
 * **Reasoning Loop (Vòng suy luận):**
   1. *Perceive:* Tiếp nhận yêu cầu kiểm định bot từ mã định danh `uniqueCode` qua giao thức MCP Tool hoặc REST API `/api/analyze`.
@@ -94,7 +94,7 @@ NoraBT xây dựng mô hình kinh tế đại lý AI (Agent Economy) qua giao th
 | Thành phần OKX | Vai trò trong hệ thống | File triển khai trong Codebase |
 | :--- | :--- | :--- |
 | **OKX Market / Data API** | Thu thập nến OHLCV, sổ lệnh L2, lịch sử trade, funding rate, open interest và dữ liệu thanh lý | [bot_source.py](file:///home/ubuntu/norabt/Agent/backend/sources/bot_source.py), [service.py](file:///home/ubuntu/norabt/Agent/backend/market/service.py) |
-| **OKX Agent Trade Kit / MCP** | Máy chủ FastMCP đạt chuẩn JSON-RPC 2.0 phục vụ các AI Agent trên OKX AI Marketplace | [agent_server.py](file:///home/ubuntu/norabt/Agent/backend/agent_server.py) |
+| **OKX Agent Trade Kit / MCP** | Máy chủ FastMCP đạt chuẩn JSON-RPC 2.0 phục vụ các AI Agent trên OKX AI Marketplace | [agent_server.py](file:///home/ubuntu/norabt/Agent/backend/scripts/agent_server.py) |
 | **X Layer (Contract / Micro-pay)** | Kiểm thực thanh toán vi mô USDC chuẩn x402, chống replay attack trên mạng X Layer | [x402.py](file:///home/ubuntu/norabt/Agent/backend/payments/x402.py) |
 
 * **Chi tiết On-Chain & Ranh giới An toàn Ví (Safety Boundary):**

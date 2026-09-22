@@ -1,5 +1,5 @@
 """Dữ liệu trình bày cho trang báo cáo của một bot LIMITED (OKX trả 60004 --
-sổ lệnh không công khai, xem `Agent/backend/analysis/limited.py`'s module
+sổ lệnh không công khai, xem `Agent/backend/bot/analysis/limited.py`'s module
 docstring cho toàn bộ bối cảnh: 7/36 lead trader trong một mẫu thật vẫn giữ
 `public-lead-traders`/`public-weekly-pnl`/`public-stats` sống trong khi
 đúng một tầng -- sổ lệnh từng lệnh -- bị khoá).
@@ -66,7 +66,7 @@ def _finite_int(value: Any) -> Optional[int]:
 
 def _pct_from_fraction(value: Any) -> Optional[float]:
     """`value` (a fraction like public-stats' `winRatio=0.5872`) as a plain
-    percentage. Same convention `Agent/backend/analysis/limited.py` already
+    percentage. Same convention `Agent/backend/bot/analysis/limited.py` already
     uses for every `pnlRatio`-shaped field (weekly ratios, `pnl_ratio_pct`)
     -- kept identical here so a reader never sees the same underlying unit
     presented two different ways across the page.

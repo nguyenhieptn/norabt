@@ -23,7 +23,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from Agent.backend.analysis.limited import (
+from Agent.backend.bot.analysis.limited import (
     LIMITED_CONFIDENCE_CEILING,
     MONTE_CARLO_KEY,
     NOT_FOUND_CONFIDENCE,
@@ -34,11 +34,11 @@ from Agent.backend.analysis.limited import (
     assess_limited_bot,
 )
 from Agent.backend.infra.config import config
-from Agent.backend.mcp.analytics.simulation.monte_carlo import (
+from Agent.backend.bot.mcp.analytics.simulation.monte_carlo import (
     MonteCarloSimulationEngine,
 )
-from Agent.backend.qc.service import QCCoreService
-from Agent.backend.sources.bot_source import LedgerUnavailableError
+from Agent.backend.report.qc.service import QCCoreService
+from Agent.backend.external.sources.bot_source import LedgerUnavailableError
 
 DATA_DIR = Path(config.DATA_DIR)
 
@@ -410,7 +410,7 @@ def test_limited_bot_never_scores_better_than_an_equivalent_transparent_bot(bot_
     full = QCCoreService.assess_bot(None, bot_top)
 
     overview_path = (
-        DATA_DIR / "cex" / "MU" / "bot" / "bot_BB3398A957270A39" / "overview.json"
+        DATA_DIR / "trade" / "bot_BB3398A957270A39" / "overview.json"
     )
     overview = json.loads(overview_path.read_text(encoding="utf-8"))
     win_ratio = float(overview["winRatio"])

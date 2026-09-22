@@ -24,9 +24,9 @@ from typing import Any, Dict, List
 import pytest
 
 from Agent.backend.infra.config import config
-from Agent.backend.qc.reporting.reasons import ACTION_VI, action_vi
-from Agent.backend.qc.reporting.render import VERDICT_ORDER
-from Agent.backend.qc.scoring.verdict import (
+from Agent.backend.report.qc.reporting.reasons import ACTION_VI, action_vi
+from Agent.backend.report.qc.reporting.render import VERDICT_ORDER
+from Agent.backend.report.qc.scoring.verdict import (
     VERDICT_BASIS_VI,
     VERDICT_HIDDEN_RISK,
     VERDICT_HIGH_DD_GOOD_Q,
@@ -36,8 +36,8 @@ from Agent.backend.qc.scoring.verdict import (
     VERDICT_UNKNOWN,
     label_from_scores,
 )
-from Agent.backend.sources.bot_source import BotDataSource
-from Agent.backend.sources.market_source import (
+from Agent.backend.external.sources.bot_source import BotDataSource
+from Agent.backend.external.sources.market_source import (
     MarketDataSource,
     MarketDataUnavailableError,
 )
@@ -68,7 +68,7 @@ RETIRED_LABELS = {"NGUY HIỂM", "TIỀM ẨN", "TIỀM NĂNG", "AN TOÀN"}
 
 
 def _real_assessment_files() -> List[Path]:
-    return sorted((DATA_DIR / "assessment").glob("**/assessment.json"))
+    return sorted((DATA_DIR / "report").glob("*/latest.json"))
 
 
 def test_real_assessment_files_exist_for_this_sweep_to_mean_anything():
@@ -214,7 +214,7 @@ def test_tokens_css_has_no_retired_verdict_label_in_a_comment_value_pair():
 
 
 def test_verdict_order_color_and_valid_verdicts_use_only_the_new_labels():
-    from Agent.backend.agent_server import VALID_VERDICTS
+    from Agent.backend.scripts.agent_server import VALID_VERDICTS
 
     assert set(VERDICT_ORDER.keys()) <= ALL_SIX_LABELS
     assert set(VERDICT_COLOR.keys()) == ALL_SIX_LABELS
@@ -230,7 +230,7 @@ def test_verdict_order_color_and_valid_verdicts_use_only_the_new_labels():
 # rendered detail page.
 # --------------------------------------------------------------------------- #
 
-_FIXTURE_BOT_DIR = DATA_DIR / "cex" / "MU" / "bot" / "bot_BB3398A957270A39"
+_FIXTURE_BOT_DIR = DATA_DIR / "trade" / "bot_BB3398A957270A39"
 _VALID_CODE = "BB3398A957270A39"
 
 
@@ -561,22 +561,21 @@ def test_a_handful_of_real_bots_with_real_market_data_have_no_stray_vietnamese()
     fixture above) -- catches anything the single always-market-unavailable
     fixture could not exercise. Allows the same documented exception.
     """
-    from Agent.backend.sources.market_source import FileMarketDataSource
+    from Agent.backend.external.sources.market_source import FileMarketDataSource
 
     candidates = []
-    for venue in ("cex", "dex"):
-        base = DATA_DIR / venue
-        if not base.is_dir():
-            continue
-        for asset_dir in sorted(base.iterdir())[:3]:
-            bot_root = asset_dir / "bot"
-            if not bot_root.is_dir():
+    trade_root = DATA_DIR / "trade"
+    if trade_root.is_dir():
+        for bot_dir in sorted(trade_root.iterdir())[:6]:
+            slot_path = bot_dir / "crawl_slot.json"
+            if not (
+                slot_path.exists()
+                and (bot_dir / "overview.json").exists()
+                and (bot_dir / "trade_list.json").exists()
+            ):
                 continue
-            for bot_dir in sorted(bot_root.iterdir())[:2]:
-                if (bot_dir / "overview.json").exists() and (
-                    bot_dir / "trade_list.json"
-                ).exists():
-                    candidates.append((venue, asset_dir.name, bot_dir))
+            slot = json.loads(slot_path.read_text(encoding="utf-8"))
+            candidates.append((slot["venue"].lower(), slot["asset"], bot_dir))
     assert candidates, "expected at least one real crawled bot folder on disk"
 
     checked = 0

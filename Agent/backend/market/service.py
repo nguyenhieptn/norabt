@@ -16,6 +16,9 @@ from Agent.backend.infra.quality import (
 )
 from Agent.backend.market.features.derivatives import DerivativesFeatureExtractor
 from Agent.backend.market.features.liquidity import LiquidityFeatureExtractor
+from Agent.backend.market.features.onchain_activity import (
+    OnchainActivityFeatureExtractor,
+)
 from Agent.backend.market.features.orderflow import OrderflowFeatureExtractor
 from Agent.backend.market.features.price import PriceFeatureExtractor
 from Agent.backend.market.features.structure import StructureFeatureExtractor
@@ -26,7 +29,7 @@ from Agent.backend.market.schemas.market_result import (
     SentimentState,
     TokenSecurityState,
 )
-from Agent.backend.sources.market_source import (
+from Agent.backend.external.sources.market_source import (
     FileMarketDataSource,
     LiveMarketDataSource,
     MarketDataSource,
@@ -441,6 +444,11 @@ class MarketService:
             sentiment_state=self._sentiment_state(sentiment),
             macro_state=self._macro_state(macro),
             defi_state=DefiState() if is_dex else None,
+            # No asset in this project has a known X Layer contract address
+            # yet (Agent/backend/sources/dex_registry.py's 5 DEX assets are
+            # Ethereum/Solana), so this always resolves to DISABLED today --
+            # see Agent/backend/market/features/onchain_activity.py.
+            onchain_state=OnchainActivityFeatureExtractor.extract(),
         )
         if use_cache:
             _market_result_cache_set(cache_key, result)

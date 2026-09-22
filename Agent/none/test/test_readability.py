@@ -9,7 +9,7 @@ chính mà chính báo cáo dùng liên tục.
 
 from __future__ import annotations
 
-from Agent.backend.qc.reporting.readability import (
+from Agent.backend.report.qc.reporting.readability import (
     count_syllables,
     measure_readability,
 )

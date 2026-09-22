@@ -11,16 +11,16 @@ from __future__ import annotations
 import pytest
 
 from Agent.backend.pipeline import RiskSupervisionPipeline
-from Agent.backend.qc.reporting.adapters import build_report_document
-from Agent.backend.qc.reporting.contracts import ReportProduct
-from Agent.backend.qc.reporting.dossier import (
+from Agent.backend.report.qc.reporting.adapters import build_report_document
+from Agent.backend.report.qc.reporting.contracts import ReportProduct
+from Agent.backend.report.qc.reporting.dossier import (
     CODE_VERSION,
     EvidenceProvenance,
     build_analysis_dossier,
 )
-from Agent.backend.qc.reporting.evidence import WORDING_LEVELS
-from Agent.backend.qc.reporting.persisted import build_persisted_dossier_view
-from Agent.backend.qc.reporting.view_policy import (
+from Agent.backend.report.qc.reporting.evidence import WORDING_LEVELS
+from Agent.backend.report.qc.reporting.persisted import build_persisted_dossier_view
+from Agent.backend.report.qc.reporting.view_policy import (
     WITHHELD_MARKER,
     ViewRole,
     apply_view_policy,
@@ -221,7 +221,7 @@ def test_persisted_view_reports_absence_rather_than_raising():
 def test_dossier_carries_every_branch_of_the_section_5_contract():
     """The design document publishes an exact field tree. If a branch is
     missing, a consumer written against the document breaks."""
-    from Agent.backend.qc.reporting.dossier import AnalysisDossier
+    from Agent.backend.report.qc.reporting.dossier import AnalysisDossier
 
     # doc branch -> the field that implements it
     implemented = {
@@ -249,7 +249,7 @@ def test_dossier_carries_every_branch_of_the_section_5_contract():
 def test_there_is_exactly_one_scenario_path(dossier):
     """A second, thinner scenario list used to live beside the laboratory. Two
     paths meant two different answers to the same question."""
-    from Agent.backend.qc.reporting.dossier import AnalysisDossier
+    from Agent.backend.report.qc.reporting.dossier import AnalysisDossier
 
     assert "scenarios" not in AnalysisDossier.model_fields
     assert dossier.scenario_laboratory.scenarios
@@ -266,7 +266,7 @@ def test_every_deriving_module_records_its_methodology_version(dossier):
 
 
 def test_user_questions_are_about_evidence_never_about_acting(dossier):
-    from Agent.backend.qc.reporting.evidence import AVAILABLE_ANALYSES
+    from Agent.backend.report.qc.reporting.evidence import AVAILABLE_ANALYSES
 
     banned = ("should i", "buy", "sell", "copy", "invest", "allocate", "recommend")
     for question in dossier.user_questions:
@@ -342,7 +342,7 @@ def test_failure_mode_catalogue_covers_the_documented_modes():
     when a given bot triggers only a few of them."""
     import inspect
 
-    from Agent.backend.qc.reporting import insights
+    from Agent.backend.report.qc.reporting import insights
 
     source = inspect.getsource(insights.build_failure_modes)
     for code in (
@@ -465,7 +465,7 @@ def test_saved_record_carries_every_simulation_field_it_has():
     from pathlib import Path
 
     from Agent.backend.infra.config import config
-    from Agent.backend.mcp.schemas.bot_result import SimulationResults
+    from Agent.backend.bot.mcp.schemas.bot_result import SimulationResults
     from Agent.backend.web.data import (
         assessment_to_analyze_result,
         find_assessment_document,
@@ -487,7 +487,7 @@ def test_live_monte_carlo_payload_is_the_engine_output_verbatim():
     persisted one."""
     import inspect
 
-    from Agent.backend.mcp.schemas.bot_result import SimulationResults
+    from Agent.backend.bot.mcp.schemas.bot_result import SimulationResults
     from Agent.backend.web import data
 
     source = inspect.getsource(data._full_result)
@@ -503,8 +503,8 @@ def test_store_persists_every_simulation_field_the_engine_measured():
     so a page rebuilt from disk was permanently poorer than the live page for
     the same bot -- and no test noticed, because both paths were only ever
     checked against themselves."""
-    from Agent.backend.mcp.schemas.bot_result import SimulationResults
-    from Agent.backend.qc.reporting.assessment_store import build_assessment
+    from Agent.backend.bot.mcp.schemas.bot_result import SimulationResults
+    from Agent.backend.report.qc.reporting.assessment_store import build_assessment
 
     measured = {name: None for name in SimulationResults.model_fields}
 
@@ -531,7 +531,7 @@ def test_store_persists_every_simulation_field_the_engine_measured():
 def test_persisting_the_full_dump_keeps_the_legacy_key_names():
     """Older keys (`psr`, `worst_drawdown`, ...) are read by name from records
     already on disk. The carry-through must add fields, never rename them."""
-    from Agent.backend.qc.reporting.assessment_store import build_assessment
+    from Agent.backend.report.qc.reporting.assessment_store import build_assessment
 
     class _Row:
         unique_code = "TEST"

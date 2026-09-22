@@ -150,9 +150,12 @@ services:
       # chỉ vào log, nên từ phía người dùng trang vẫn trả 200 như thường --
       # không có dấu hiệu nào cho thấy kết quả không được lưu.
       #
-      # Phạm vi hẹp nhất có thể: chỉ `data/assessment`, phần còn lại của
+      # Kiến trúc dữ liệu hợp nhất (2026-09): `assessment_store.persist` giờ
+      # ghi vào `data/report/<bot_id>/latest.json` (không còn
+      # `data/assessment/<venue>/<asset>/bot/...`), nên nhánh ghi-được đổi
+      # theo. Phạm vi hẹp nhất có thể: chỉ `data/report`, phần còn lại của
       # `data/` vẫn chỉ-đọc.
-      - ../data/assessment:/app/Agent/data/assessment:rw
+      - ../data/report:/app/Agent/data/report:rw
       - ../data/users:/app/Agent/data/users:rw
 
       # Nhánh con ghi-được thứ ba, CÙNG KHUÔN với users/ ở trên: kho mã

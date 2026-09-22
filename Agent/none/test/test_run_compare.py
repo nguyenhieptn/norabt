@@ -1,5 +1,5 @@
-"""Tests for the --source/--out-dir wiring in Agent/backend/run_report.py and
-the two comparison modes in Agent/backend/run_compare.py.
+"""Tests for the --source/--out-dir wiring in Agent/backend/scripts/run_report.py and
+the two comparison modes in Agent/backend/scripts/run_compare.py.
 
 No test here makes a real network call. Live sources are exercised only
 through code paths already proven not to touch the network
@@ -16,21 +16,21 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-import Agent.backend.run_compare as run_compare
-import Agent.backend.run_report as run_report
+import Agent.backend.scripts.run_compare as run_compare
+import Agent.backend.scripts.run_report as run_report
 from Agent.backend.infra.config import config
 from Agent.backend.infra.quality import EvaluationMode
 from Agent.backend.market.service import MarketService
-from Agent.backend.mcp.service import BotDataUnavailableError, BotObservationService
-from Agent.backend.qc.reporting.cohort import (
+from Agent.backend.bot.mcp.service import BotDataUnavailableError, BotObservationService
+from Agent.backend.report.qc.reporting.cohort import (
     BotEvaluationRow,
     CohortAssessmentService,
     MarketSnapshotRow,
 )
-from Agent.backend.qc.reporting.data_report import DataReportService
-from Agent.backend.qc.reporting.market_report import MarketRegimeService
-from Agent.backend.qc.reporting.pair_report import PairedBotReportService
-from Agent.backend.run_compare import (
+from Agent.backend.report.qc.reporting.data_report import DataReportService
+from Agent.backend.report.qc.reporting.market_report import MarketRegimeService
+from Agent.backend.report.qc.reporting.pair_report import PairedBotReportService
+from Agent.backend.scripts.run_compare import (
     GROUP_ANOMALY,
     GROUP_DRIFT,
     GROUP_SAME,
@@ -41,8 +41,8 @@ from Agent.backend.run_compare import (
     render_live_vs_file,
     render_same_data,
 )
-from Agent.backend.sources.bot_source import FileBotDataSource
-from Agent.backend.sources.market_source import (
+from Agent.backend.external.sources.bot_source import FileBotDataSource
+from Agent.backend.external.sources.market_source import (
     FileMarketDataSource,
     LiveMarketDataSource,
     MarketDataUnavailableError,
@@ -113,7 +113,7 @@ def _ledger(
 
 
 # --------------------------------------------------------------------------- #
-# Kiểu A -- compare_same_data (Agent/backend/run_compare.py)
+# Kiểu A -- compare_same_data (Agent/backend/scripts/run_compare.py)
 # --------------------------------------------------------------------------- #
 
 
@@ -326,7 +326,7 @@ class TestDexUnsupportedInLiveMode:
     def test_market_regime_service_does_not_crash_on_a_dex_asset(
         self, tmp_path: Path
     ) -> None:
-        (tmp_path / "dex" / "PEPE" / "market").mkdir(parents=True)
+        (tmp_path / "market" / "dex" / "PEPE").mkdir(parents=True)
         service = MarketRegimeService(tmp_path, EvaluationMode.SNAPSHOT)
         # resolve_venue raises for DEX before any HTTP call is made (see
         # market_source.py's get_market_result: resolve_venue runs first), so
@@ -348,7 +348,7 @@ class TestDexUnsupportedInLiveMode:
 
 # --------------------------------------------------------------------------- #
 # apply_live_source / build_live_sources / default_selection_codes
-# (Agent/backend/run_report.py)
+# (Agent/backend/scripts/run_report.py)
 # --------------------------------------------------------------------------- #
 
 
@@ -432,7 +432,7 @@ class TestBuildLiveSources:
 
 # --------------------------------------------------------------------------- #
 # _MemoizedMarketService / _MemoizedBotObservationService
-# (Agent/backend/run_report.py) -- the in-process cache that sits in front of
+# (Agent/backend/scripts/run_report.py) -- the in-process cache that sits in front of
 # the one shared MarketService/BotObservationService main() now builds.
 #
 # Both wrapped services below are hand-rolled counting fakes, not the real
@@ -1056,9 +1056,12 @@ class TestRunCompareCli:
     def test_same_data_end_to_end_without_network(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        bot_dir = tmp_path / "cex" / "ETH" / "bot" / "bot_TESTCODE"
+        bot_dir = tmp_path / "trade" / "bot_TESTCODE"
         bot_dir.mkdir(parents=True)
         (bot_dir / "trade_list.json").write_text("{}", encoding="utf-8")
+        (bot_dir / "crawl_slot.json").write_text(
+            json.dumps({"venue": "CEX", "asset": "ETH"}), encoding="utf-8"
+        )
         monkeypatch.setattr(config, "DATA_DIR", str(tmp_path))
         monkeypatch.setattr(run_compare, "OkxClient", lambda: object())
         monkeypatch.setattr(run_compare, "LiveBotDataSource", _FakeLiveBotDataSource)

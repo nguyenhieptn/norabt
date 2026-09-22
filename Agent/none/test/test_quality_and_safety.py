@@ -26,12 +26,12 @@ from Agent.backend.market.schemas.market_result import (
     VolatilityState,
 )
 from Agent.backend.market.service import MarketDataUnavailableError, MarketService
-from Agent.backend.mcp.analytics.simulation.bootstrap import BootstrapSampler
-from Agent.backend.mcp.analytics.simulation.monte_carlo import (
+from Agent.backend.bot.mcp.analytics.simulation.bootstrap import BootstrapSampler
+from Agent.backend.bot.mcp.analytics.simulation.monte_carlo import (
     MonteCarloSimulationEngine,
 )
-from Agent.backend.mcp.capital.equity_curve import CapitalModel
-from Agent.backend.mcp.schemas.bot_result import (
+from Agent.backend.bot.mcp.capital.equity_curve import CapitalModel
+from Agent.backend.bot.mcp.schemas.bot_result import (
     BehavioralObservations,
     BotCurrentState,
     BotIdentity,
@@ -48,10 +48,10 @@ from Agent.backend.mcp.schemas.bot_result import (
     TradeLedgerItem,
     TradeStatistics,
 )
-from Agent.backend.mcp.service import BotDataUnavailableError, BotObservationService
-from Agent.backend.mcp.trades.ledger import TradeLedgerManager
-from Agent.backend.qc.schemas.risk_assessment import EvidenceStatus, RiskTier, RiskTrend
-from Agent.backend.qc.service import QCCoreService
+from Agent.backend.bot.mcp.service import BotDataUnavailableError, BotObservationService
+from Agent.backend.bot.mcp.trades.ledger import TradeLedgerManager
+from Agent.backend.report.qc.schemas.risk_assessment import EvidenceStatus, RiskTier, RiskTrend
+from Agent.backend.report.qc.service import QCCoreService
 from Agent.none.test.conftest import FIXED_AS_OF_MS
 
 
@@ -195,7 +195,7 @@ def test_reconciliation_separates_causes(bot_top, bot_oversized, bot_poor):
 
 def test_ledger_owned_by_another_bot_is_rejected(tmp_path):
     """Every OKX row carries its owner, so a mis-filed ledger must never be analysed."""
-    from Agent.backend.mcp.service import BotObservationService
+    from Agent.backend.bot.mcp.service import BotObservationService
     from Agent.none.test.conftest import write_bot_dataset
 
     write_bot_dataset(
@@ -406,8 +406,8 @@ def test_reduce_contract_requires_positive_percentage():
 
 
 def test_universe_never_marks_unknown_liquidity_eligible():
-    from Agent.backend.universe.eligibility import AssetEligibilityVerifier
-    from Agent.backend.universe.ranking import UniverseAsset
+    from Agent.backend.market.universe.eligibility import AssetEligibilityVerifier
+    from Agent.backend.market.universe.ranking import UniverseAsset
 
     candidate = UniverseAsset(
         asset_id="DEX_TEST",
@@ -484,7 +484,7 @@ def test_a_source_left_behind_the_anchor_is_flagged_stale(tmp_path):
 
 
 def test_bot_market_is_taken_from_the_ledger_not_the_folder(tmp_path):
-    from Agent.backend.mcp.service import BotObservationService
+    from Agent.backend.bot.mcp.service import BotObservationService
     from Agent.none.test.conftest import write_bot_dataset
 
     write_bot_dataset(
@@ -533,7 +533,17 @@ def test_market_falls_back_to_open_positions_when_there_is_no_ledger(bot_empty):
 
 
 def test_duplicate_snapshots_collapse_to_one_bot(tmp_path):
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+    """Unified layout note: `data/trade/<bot_id>/` is flat (one folder per
+    bot_id, see Agent.backend.report.qc.reporting.assessment_store's module
+    docstring) -- writing the same bot_id under 3 different `asset=` values
+    below no longer creates 3 physical snapshot directories the way the old
+    `<venue>/<asset>/bot/<folder>` nesting did; each call overwrites the same
+    one folder instead. The physical-duplicate scenario this test used to
+    exercise is now structurally impossible, so the assertions check the
+    (still correct) collapsed-to-one-bot outcome directly rather than a
+    duplicate count that can no longer occur.
+    """
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
     from Agent.none.test.conftest import write_bot_dataset
 
     trades = [
@@ -562,9 +572,9 @@ def test_duplicate_snapshots_collapse_to_one_bot(tmp_path):
     report = CohortAssessmentService(tmp_path, persist_history=False).scan(
         simulation_iterations=10, simulation_horizon=10
     )
-    assert report.snapshots_scanned == 3
+    assert report.snapshots_scanned == 1
     assert report.distinct_bots == 1
-    assert report.rows[0].duplicate_snapshots == 3
+    assert report.rows[0].duplicate_snapshots == 1
 
 
 def test_second_ledger_schema_is_parsed():
@@ -645,7 +655,7 @@ def test_equity_curve_uses_every_week_not_the_most_favourable(bot_oversized):
 
 
 def test_thin_evidence_never_downgrades_a_high_measured_risk(market_eth, bot_oversized):
-    from Agent.backend.qc.schemas.risk_assessment import RiskTier
+    from Agent.backend.report.qc.schemas.risk_assessment import RiskTier
 
     assessment = QCCoreService.assess_bot(market_eth, bot_oversized)
     assert assessment.risk_score >= 65.0
@@ -657,7 +667,7 @@ def test_thin_evidence_never_downgrades_a_high_measured_risk(market_eth, bot_ove
 
 
 def test_cohort_report_deduplicates_and_ranks_by_risk():
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
 
     report = CohortAssessmentService().scan(
         as_of_ms=FIXED_AS_OF_MS, simulation_iterations=300, simulation_horizon=200
@@ -700,7 +710,7 @@ def test_margin_consistency_uses_the_resolved_capital(bot_oversized):
     assert bot_oversized.capital.basis == "WEEKLY_EQUITY_CURVE"
     assert bot_oversized.current_state.capital_consistency == "CONSISTENT"
 
-    from Agent.backend.mcp.service import BotObservationService
+    from Agent.backend.bot.mcp.service import BotObservationService
     from Agent.none.test.conftest import write_bot_dataset
 
     tmp = Path(tempfile.mkdtemp())
@@ -763,8 +773,8 @@ def test_dex_orderflow_is_derived_from_tick_prints():
 
 
 def test_assessment_history_enables_trend(tmp_path, market_hype, bot_poor):
-    from Agent.backend.qc.history.store import AssessmentHistoryStore
-    from Agent.backend.qc.schemas.risk_assessment import RiskTrend
+    from Agent.backend.report.qc.history.store import AssessmentHistoryStore
+    from Agent.backend.report.qc.schemas.risk_assessment import RiskTrend
 
     store = AssessmentHistoryStore(tmp_path)
     assert store.latest(bot_poor.identity.bot_id) is None
@@ -790,11 +800,11 @@ def test_assessment_history_enables_trend(tmp_path, market_hype, bot_poor):
 
 
 def test_gap_report_names_what_to_collect_and_what_it_unlocks(tmp_path):
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
 
     report = CohortAssessmentService(
         history=__import__(
-            "Agent.backend.qc.history.store", fromlist=["AssessmentHistoryStore"]
+            "Agent.backend.report.qc.history.store", fromlist=["AssessmentHistoryStore"]
         ).AssessmentHistoryStore(tmp_path),
         persist_history=False,
     ).scan(as_of_ms=FIXED_AS_OF_MS, simulation_iterations=300, simulation_horizon=200)
@@ -814,7 +824,7 @@ def test_gap_report_names_what_to_collect_and_what_it_unlocks(tmp_path):
 
 def test_capital_resolver_has_no_one_way_ratchet():
     """A derived equity below AUM must still be used: no favourable-direction gate."""
-    from Agent.backend.mcp.capital.equity_curve import CapitalResolver
+    from Agent.backend.bot.mcp.capital.equity_curve import CapitalResolver
 
     weeks = [
         {"beginTs": "1788105600000", "pnl": "100", "pnlRatio": "0.10"},
@@ -831,7 +841,7 @@ def test_capital_resolver_has_no_one_way_ratchet():
 
 
 def test_capital_resolver_keeps_loss_weeks_in_the_curve():
-    from Agent.backend.mcp.capital.equity_curve import EquityCurveBuilder
+    from Agent.backend.bot.mcp.capital.equity_curve import EquityCurveBuilder
 
     weeks = [
         {"beginTs": "1788105600000", "pnl": "1000", "pnlRatio": "0.10"},
@@ -844,7 +854,7 @@ def test_capital_resolver_keeps_loss_weeks_in_the_curve():
 
 
 def test_imprecise_ratios_are_skipped_with_a_reason():
-    from Agent.backend.mcp.capital.equity_curve import EquityCurveBuilder
+    from Agent.backend.bot.mcp.capital.equity_curve import EquityCurveBuilder
 
     curve = EquityCurveBuilder.build(
         [{"beginTs": "1788105600000", "pnl": "-41.36", "pnlRatio": "-0.0025"}]
@@ -856,8 +866,15 @@ def test_imprecise_ratios_are_skipped_with_a_reason():
 
 
 def test_dedupe_prefers_the_snapshot_with_richer_provenance(tmp_path):
-    """Alphabetical order must not beat a snapshot that carries an equity curve."""
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+    """Alphabetical order must not beat a snapshot that carries an equity curve.
+
+    Unified layout note (see test_duplicate_snapshots_collapse_to_one_bot's
+    own docstring): the two `write_bot_dataset` calls below both target the
+    same flat `data/trade/bot_RICH/` folder now, so the second call's richer
+    overview.json simply overwrites the first's on disk -- there is only
+    ever one physical snapshot to select, not two to tie-break between.
+    """
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
     from Agent.none.test.conftest import write_bot_dataset
 
     trades = [
@@ -901,7 +918,7 @@ def test_dedupe_prefers_the_snapshot_with_richer_provenance(tmp_path):
         simulation_iterations=10, simulation_horizon=10
     )
     row = report.rows[0]
-    assert row.duplicate_snapshots == 2
+    assert row.duplicate_snapshots == 1
     assert row.selected_snapshot == "CEX/ZZZ/bot_RICH"
     assert row.capital_basis == "WEEKLY_EQUITY_CURVE"
 
@@ -920,7 +937,7 @@ def test_secondary_market_is_surfaced_without_changing_any_score(tmp_path_factor
     chạy sẽ cho điểm khác nhau; nếu đúng như yêu cầu (chỉ trình bày), mọi
     điểm số phải giống hệt bit-for-bit.
     """
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
     from Agent.none.test.conftest import (
         FIXED_AS_OF_MS,
         write_bot_dataset,
@@ -1195,7 +1212,7 @@ def test_n_market_coverage_surfaces_more_than_two_markets_without_changing_any_s
     `plan_market_coverage` chọn đúng AAA+BBB+CCC (52.6+21.1+15.8=89.5% >=
     80%), DDD không bao giờ được thử giải (đã đạt mục tiêu trước đó).
     """
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
     from Agent.none.test.conftest import (
         FIXED_AS_OF_MS,
         write_bot_dataset,
@@ -1281,7 +1298,7 @@ def test_n_market_coverage_surfaces_more_than_two_markets_without_changing_any_s
 
 def test_subposition_id_recovers_the_open_time():
     """OKX ids are snowflakes, so a blank openTime is still recoverable."""
-    from Agent.backend.mcp.inference.public_signals import SubPositionClock
+    from Agent.backend.bot.mcp.inference.public_signals import SubPositionClock
 
     # Calibrated against published pairs from the live ledger.
     samples = [
@@ -1302,7 +1319,7 @@ def test_open_time_is_recovered_for_every_position(bot_poor):
 
 
 def test_attribution_determines_narrows_or_excludes_but_never_guesses():
-    from Agent.backend.mcp.inference.public_signals import (
+    from Agent.backend.bot.mcp.inference.public_signals import (
         AttributionVerdict,
         InstrumentAttributor,
     )
@@ -1364,7 +1381,7 @@ def test_inferred_exposure_lowers_lens_confidence(market_hype, bot_poor):
 
 
 def test_cost_model_recovers_round_trip_fees():
-    from Agent.backend.mcp.inference.public_signals import ImpliedMove
+    from Agent.backend.bot.mcp.inference.public_signals import ImpliedMove
 
     trades = [
         {
@@ -1383,7 +1400,7 @@ def test_cost_model_recovers_round_trip_fees():
 
 
 def test_capital_floor_is_always_derivable_from_margin():
-    from Agent.backend.mcp.inference.public_signals import CapitalFloor
+    from Agent.backend.bot.mcp.inference.public_signals import CapitalFloor
 
     floor = CapitalFloor.from_margins([100.0, 250.0, None, 0.0])
     assert floor.floor == 350.0
@@ -1392,10 +1409,10 @@ def test_capital_floor_is_always_derivable_from_margin():
 
 
 def _deferred(realized_pnls, open_upls, capital=100_000.0):
-    from Agent.backend.mcp.analytics.performance.deferred_loss import (
+    from Agent.backend.bot.mcp.analytics.performance.deferred_loss import (
         DeferredLossAnalyzer,
     )
-    from Agent.backend.mcp.schemas.bot_result import OpenPosition, PositionSide
+    from Agent.backend.bot.mcp.schemas.bot_result import OpenPosition, PositionSide
 
     trades = [
         TradeLedgerItem(
@@ -1488,7 +1505,7 @@ def test_performance_lens_discounts_unrepresentative_metrics(bot_deferred):
 
 
 def test_material_unbooked_loss_floors_the_risk_score(bot_deferred):
-    from Agent.backend.qc.schemas.risk_assessment import RiskTier
+    from Agent.backend.report.qc.schemas.risk_assessment import RiskTier
 
     assessment = QCCoreService.assess_bot(None, bot_deferred)
     assert bot_deferred.deferred_loss.open_loss_to_capital_pct >= 15.0
@@ -1501,7 +1518,7 @@ def test_material_unbooked_loss_floors_the_risk_score(bot_deferred):
 
 
 def test_venue_label_follows_the_traded_market_not_the_folder():
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
 
     report = CohortAssessmentService(persist_history=False).scan(
         simulation_iterations=50, simulation_horizon=30
@@ -1515,7 +1532,7 @@ def test_venue_label_follows_the_traded_market_not_the_folder():
 
 
 def test_step1_market_report_labels_every_regime_in_vietnamese():
-    from Agent.backend.qc.reporting.market_report import MarketRegimeService
+    from Agent.backend.report.qc.reporting.market_report import MarketRegimeService
 
     report = MarketRegimeService().build(bots_per_symbol={"BTC": 5})
     assert report.markets_observed > 0
@@ -1529,15 +1546,15 @@ def test_step1_market_report_labels_every_regime_in_vietnamese():
 
 
 def test_step1_ranks_markets_that_bots_actually_trade_first():
-    from Agent.backend.qc.reporting.market_report import MarketRegimeService
+    from Agent.backend.report.qc.reporting.market_report import MarketRegimeService
 
     report = MarketRegimeService().build(bots_per_symbol={"MU": 3})
     assert report.rows[0].symbol == "MU"
 
 
 def test_step3_ranking_is_ordered_by_score_and_names_a_cause():
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
-    from Agent.backend.qc.reporting.reasons import computed_summary_vi, explain_vi
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
+    from Agent.backend.report.qc.reporting.reasons import computed_summary_vi, explain_vi
 
     report = CohortAssessmentService(persist_history=False).scan(
         simulation_iterations=50, simulation_horizon=30
@@ -1552,8 +1569,8 @@ def test_step3_ranking_is_ordered_by_score_and_names_a_cause():
 
 
 def test_cause_text_names_the_deferred_loss_shift(bot_deferred, market_eth):
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
-    from Agent.backend.qc.reporting.reasons import explain_vi
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
+    from Agent.backend.report.qc.reporting.reasons import explain_vi
 
     report = CohortAssessmentService(persist_history=False).scan(
         simulation_iterations=50, simulation_horizon=30
@@ -1570,10 +1587,10 @@ def test_each_step_reports_under_its_own_heading():
     Market analysis used to be labelled step 1, which hid the question step 1
     exists to answer: is the input complete, on both the market and the bot side.
     """
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
-    from Agent.backend.qc.reporting.data_report import DataReportService
-    from Agent.backend.qc.reporting.market_report import MarketRegimeService
-    from Agent.backend.qc.reporting.render import (
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
+    from Agent.backend.report.qc.reporting.data_report import DataReportService
+    from Agent.backend.report.qc.reporting.market_report import MarketRegimeService
+    from Agent.backend.report.qc.reporting.render import (
         render_bot_report,
         render_data_report,
         render_market_report,
@@ -1603,7 +1620,7 @@ def test_each_step_reports_under_its_own_heading():
 
 
 def test_table_cells_account_for_wide_glyphs():
-    from Agent.backend.qc.reporting.render import _cell
+    from Agent.backend.report.qc.reporting.render import _cell
 
     assert len(_cell("abc", 10)) == 10
     # CJK glyphs occupy two terminal cells, so padding must shrink accordingly.
@@ -1772,8 +1789,8 @@ def test_a_clean_bot_is_decided_by_the_weighted_average(market_mu, bot_top):
 
 
 def test_score_story_says_why_it_is_not_higher(market_eth, bot_deferred):
-    from Agent.backend.qc.reporting.cohort import CohortAssessmentService
-    from Agent.backend.qc.reporting.reasons import score_story_vi
+    from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
+    from Agent.backend.report.qc.reporting.reasons import score_story_vi
 
     report = CohortAssessmentService(persist_history=False).scan(
         simulation_iterations=50, simulation_horizon=30
@@ -1887,9 +1904,9 @@ def test_orderbook_sizes_are_stored_in_coins_not_contracts():
     import json as _json
     from pathlib import Path as _Path
 
-    root = _Path(__file__).resolve().parent.parent.parent / "data" / "cex"
+    root = _Path(__file__).resolve().parent.parent.parent / "data" / "market" / "cex"
     for asset in ("ADA", "DOGE", "BTC"):
-        path = root / asset / "market" / "orderbook_l2.json"
+        path = root / asset / "orderbook_l2.json"
         if not path.exists():
             continue
         book = _json.loads(path.read_text(encoding="utf-8"))
@@ -1901,7 +1918,7 @@ def _dup_snapshot(tmp_path, asset, mtime_ms, *, trades, reconcilable):
     """Two folders, one uniqueCode: the same bot seen at two different times."""
     import os
 
-    from Agent.backend.mcp.service import BotObservationService
+    from Agent.backend.bot.mcp.service import BotObservationService
     from Agent.none.test.conftest import write_bot_dataset
 
     overview = {"uniqueCode": "DUP", "nickName": "Dup Bot", "aum": 10_000.0}
@@ -1941,7 +1958,7 @@ def _dup_snapshot(tmp_path, asset, mtime_ms, *, trades, reconcilable):
 
 
 def test_the_fresher_snapshot_wins_when_hard_evidence_ties(tmp_path):
-    from Agent.backend.qc.reporting.cohort import _provenance_rank
+    from Agent.backend.report.qc.reporting.cohort import _provenance_rank
 
     older = _dup_snapshot(
         tmp_path / "a", "ADA", 1_789_100_000_000, trades=30, reconcilable=True
@@ -1956,7 +1973,7 @@ def test_the_fresher_snapshot_wins_when_hard_evidence_ties(tmp_path):
 
 
 def test_recency_never_rescues_a_snapshot_with_less_hard_evidence(tmp_path):
-    from Agent.backend.qc.reporting.cohort import _provenance_rank
+    from Agent.backend.report.qc.reporting.cohort import _provenance_rank
 
     rich_old = _dup_snapshot(
         tmp_path / "a", "ADA", 1_789_100_000_000, trades=350, reconcilable=True
@@ -1986,7 +2003,7 @@ def _signed_trade(index, subpos, side="short"):
 
 def test_a_short_reported_with_a_negative_size_is_not_dropped():
     """OKX signs the size on some accounts; size is a magnitude, posSide is direction."""
-    from Agent.backend.mcp.trades.ledger import TradeLedgerManager
+    from Agent.backend.bot.mcp.trades.ledger import TradeLedgerManager
 
     raw = {
         "uniqueCode": "X",
@@ -2007,7 +2024,7 @@ def test_a_short_reported_with_a_negative_size_is_not_dropped():
 
 def test_dropping_signed_shorts_would_change_the_verdict():
     """The rejected half carried the losses, so the bot looked profitable."""
-    from Agent.backend.mcp.trades.ledger import TradeLedgerManager
+    from Agent.backend.bot.mcp.trades.ledger import TradeLedgerManager
 
     winners = [_signed_trade(i, 100, side="long") for i in range(5)]
     losers = []
@@ -2027,11 +2044,11 @@ def test_dropping_signed_shorts_would_change_the_verdict():
 
 
 def test_a_drawdown_larger_than_the_equity_in_force_is_flagged_not_silently_capped():
-    from Agent.backend.mcp.analytics.drawdown.underwater import (
+    from Agent.backend.bot.mcp.analytics.drawdown.underwater import (
         DrawdownUnderwaterAnalyzer,
     )
-    from Agent.backend.mcp.capital.equity_curve import CapitalResolver
-    from Agent.backend.mcp.trades.ledger import TradeLedgerManager
+    from Agent.backend.bot.mcp.capital.equity_curve import CapitalResolver
+    from Agent.backend.bot.mcp.trades.ledger import TradeLedgerManager
 
     rows = []
     for i in range(4):

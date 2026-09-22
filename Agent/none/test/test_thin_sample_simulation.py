@@ -18,10 +18,10 @@ from __future__ import annotations
 
 from typing import List
 
-from Agent.backend.mcp.analytics.simulation.monte_carlo import (
+from Agent.backend.bot.mcp.analytics.simulation.monte_carlo import (
     MonteCarloSimulationEngine as Engine,
 )
-from Agent.backend.mcp.schemas.bot_result import PositionSide, TradeLedgerItem
+from Agent.backend.bot.mcp.schemas.bot_result import PositionSide, TradeLedgerItem
 
 # Lãi/lỗ cố định, xen kẽ thắng/thua: không dùng random để một lần chạy hỏng
 # không bao giờ phụ thuộc vào hạt giống ngẫu nhiên của máy chạy test.
@@ -142,7 +142,7 @@ def test_absolute_weekly_series_is_never_the_simulation_input() -> None:
     biến là: chuỗi tuyệt đối lệch quy mô phải bị ĐÁNH DẤU KHÔNG DÙNG ĐƯỢC
     và không bao giờ được chọn làm chuỗi chính.
     """
-    from Agent.backend.analysis.limited_matrix import build_matrix
+    from Agent.backend.bot.analysis.limited_matrix import build_matrix
 
     weekly = [
         {"beginTs": str(1_785_081_600_000 + i * 604_800_000), "pnl": pnl, "pnlRatio": r}
@@ -174,7 +174,7 @@ def test_absolute_weekly_series_is_never_the_simulation_input() -> None:
 def test_matrix_prefers_the_fixed_denominator_series_when_both_exist() -> None:
     """Có cả hai chuỗi hợp lệ thì chọn chuỗi NHIỀU QUAN SÁT hơn, không phải
     chuỗi được viết trước trong code."""
-    from Agent.backend.analysis.limited_matrix import build_matrix
+    from Agent.backend.bot.analysis.limited_matrix import build_matrix
 
     profile = {
         "pnl": "1000",
@@ -205,7 +205,7 @@ def test_matrix_prefers_the_fixed_denominator_series_when_both_exist() -> None:
 def test_capital_identity_is_verified_not_assumed() -> None:
     """`pnlRatio x investAmt = pnl` được KIỂM mỗi lần; lệch quá biên thì bỏ
     mốc vốn thay vì cứ thế quy ra tiền sai."""
-    from Agent.backend.analysis.limited_matrix import build_matrix
+    from Agent.backend.bot.analysis.limited_matrix import build_matrix
 
     ratios = [
         {
@@ -234,8 +234,8 @@ def test_capital_identity_is_verified_not_assumed() -> None:
 
 def test_a_stable_capital_base_still_simulates() -> None:
     """Chốt chặn chỉ được chặn ca thật sự lệch quy mô, không chặn tràn lan."""
-    from Agent.backend.analysis.limited import _run_monte_carlo_probe
-    from Agent.backend.mcp.capital.equity_curve import EquityCurveBuilder
+    from Agent.backend.bot.analysis.limited import _run_monte_carlo_probe
+    from Agent.backend.bot.mcp.capital.equity_curve import EquityCurveBuilder
 
     # Vốn ngầm quanh 10.000 suốt 12 tuần (pnl/ratio ~ 10.000).
     weekly = [

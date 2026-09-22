@@ -6,8 +6,8 @@ from typing import List
 
 import pytest
 
-from Agent.backend.mcp.analytics.behavior.detector import BehavioralPatternDetector
-from Agent.backend.mcp.schemas.bot_result import (
+from Agent.backend.bot.mcp.analytics.behavior.detector import BehavioralPatternDetector
+from Agent.backend.bot.mcp.schemas.bot_result import (
     BehavioralObservations,
     BotResult,
     OpenPosition,
@@ -15,9 +15,9 @@ from Agent.backend.mcp.schemas.bot_result import (
     StrategyObservations,
     TradeLedgerItem,
 )
-from Agent.backend.qc.evaluator.lenses.behavioral_risk import BehavioralRiskLens
-from Agent.backend.qc.evaluator.lenses.strategy_drift import StrategyDriftLens
-from Agent.backend.qc.schemas.risk_assessment import EvidenceStatus
+from Agent.backend.report.qc.evaluator.lenses.behavioral_risk import BehavioralRiskLens
+from Agent.backend.report.qc.evaluator.lenses.strategy_drift import StrategyDriftLens
+from Agent.backend.report.qc.schemas.risk_assessment import EvidenceStatus
 
 HOUR_MS = 3_600_000
 START_MS = 1_780_000_000_000

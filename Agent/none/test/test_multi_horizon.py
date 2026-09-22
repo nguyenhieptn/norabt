@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from Agent.backend.mcp.analytics.simulation.monte_carlo import (
+from Agent.backend.bot.mcp.analytics.simulation.monte_carlo import (
     MonteCarloSimulationEngine,
 )
-from Agent.backend.mcp.schemas.bot_result import PositionSide, TradeLedgerItem
+from Agent.backend.bot.mcp.schemas.bot_result import PositionSide, TradeLedgerItem
 
 
 def trade(index: int, pnl: float) -> TradeLedgerItem:

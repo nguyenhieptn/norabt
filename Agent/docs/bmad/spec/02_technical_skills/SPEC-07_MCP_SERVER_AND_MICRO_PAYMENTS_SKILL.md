@@ -6,7 +6,7 @@
 > **Type:** TECHNICAL CAPABILITY SPECIFICATION  
 > **Status:** APPROVED / PRODUCTION  
 > **Version:** 2.1.0  
-> **Target Service:** `Agent/backend/agent_server.py`, `Agent/backend/payments/x402.py`  
+> **Target Service:** `Agent/backend/scripts/agent_server.py`, `Agent/backend/payments/x402.py`  
 > **Updated:** 2026-09-18  
 
 ---
@@ -76,7 +76,7 @@ sequenceDiagram
 ## 5. Ma Trận Truy Vết Mã Nguồn (Traceability Matrix)
 
 - **Module thực thi:**
-  - [agent_server.py](file:///home/ubuntu/norabt/Agent/backend/agent_server.py): Máy chủ MCP Server và định tuyến JSON-RPC.
+  - [agent_server.py](file:///home/ubuntu/norabt/Agent/backend/scripts/agent_server.py): Máy chủ MCP Server và định tuyến JSON-RPC.
   - [x402.py](file:///home/ubuntu/norabt/Agent/backend/payments/x402.py): Logic thanh toán x402 và xác thực chữ ký.
 - **Tệp kiểm thử:**
   - `Agent/none/test/test_agent_server.py`: Kiểm thử gọi các công cụ MCP.

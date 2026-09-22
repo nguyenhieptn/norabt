@@ -16,7 +16,7 @@ other test asked for.
 The transport tests at the bottom (`test_http_transport_...`,
 `test_stdio_transport_...`) are a different kind of test from everything
 above: instead of calling `srv.mcp.call_tool()` in-process, they spawn
-`python3 -m Agent.backend.agent_server` as a real subprocess and drive it
+`python3 -m Agent.backend.scripts.agent_server` as a real subprocess and drive it
 with a real `mcp` client (`streamable_http_client`/`stdio_client` +
 `ClientSession`), because the thing being verified -- that the CLI's
 `--transport` wiring actually serves a remote client, not just that the
@@ -43,15 +43,15 @@ from typing import Any, Dict, Iterator, Optional, Tuple
 
 import pytest
 
-from Agent.backend import agent_server as srv
+from Agent.backend.scripts import agent_server as srv
 from Agent.backend.infra.config import config
-from Agent.backend.payments import x402
+from Agent.backend.external.payments import x402
 from mcp.server.mcpserver.exceptions import ToolError
 
 DATA_DIR = Path(config.DATA_DIR)
 
 # Repo root: tests must run the server the same way the docs tell an operator
-# to (`cd /home/ubuntu/norabt && python3 -m Agent.backend.agent_server`),
+# to (`cd /home/ubuntu/norabt && python3 -m Agent.backend.scripts.agent_server`),
 # since `Agent.backend...` imports only resolve with the repo root on
 # sys.path / as cwd.
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -326,7 +326,7 @@ _ALL_TOOL_NAMES = {
 
 # ---------------------------------------------------------------------------
 # Transport CLI: --transport http actually serves a remote MCP client, and
-# the plain `python3 -m Agent.backend.agent_server` (stdio) invocation the
+# the plain `python3 -m Agent.backend.scripts.agent_server` (stdio) invocation the
 # docs and existing .mcp.json configs rely on still works unchanged.
 # ---------------------------------------------------------------------------
 
@@ -380,7 +380,7 @@ def _running_http_server(
         [
             sys.executable,
             "-m",
-            "Agent.backend.agent_server",
+            "Agent.backend.scripts.agent_server",
             "--transport",
             "http",
             "--host",
@@ -448,7 +448,7 @@ def test_http_transport_host_0_0_0_0_prints_a_warning():
         [
             sys.executable,
             "-m",
-            "Agent.backend.agent_server",
+            "Agent.backend.scripts.agent_server",
             "--transport",
             "http",
             "--host",
@@ -484,7 +484,7 @@ def test_stdio_transport_still_serves_a_real_mcp_client():
 
         params = StdioServerParameters(
             command=sys.executable,
-            args=["-m", "Agent.backend.agent_server"],
+            args=["-m", "Agent.backend.scripts.agent_server"],
             cwd=str(REPO_ROOT),
         )
         async with stdio_client(params) as (read_stream, write_stream):
@@ -502,7 +502,7 @@ def test_stdio_transport_still_serves_a_real_mcp_client():
 
 
 # ---------------------------------------------------------------------------
-# x402 payment gating (Agent.backend.payments.x402, wired via
+# x402 payment gating (Agent.backend.external.payments.x402, wired via
 # agent_server._require_payment). Every test in this section explicitly
 # turns X402_ENABLED on: none of the 520+ tests above this line ever touch
 # that flag, which is exactly what proves the default (off) path is

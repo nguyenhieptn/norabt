@@ -143,7 +143,7 @@ USER_REF_LENGTH = 10
 # URL path segment is checked against before it is ever used to build a
 # filesystem path (see `_profile_dir` below) -- the same
 # validate-before-it-touches-a-path-join discipline
-# `Agent/backend/agent_server.py`'s `_require_token`/`_SAFE_TOKEN` and
+# `Agent/backend/scripts/agent_server.py`'s `_require_token`/`_SAFE_TOKEN` and
 # `Agent/backend/web/data.py`'s `validate_unique_code` already use elsewhere
 # in this project.
 USER_REF_RE = re.compile(rf"^[a-z2-7]{{{USER_REF_LENGTH}}}$")
@@ -244,7 +244,7 @@ def _profile_dir(user_ref_value: str, *, users_root: Path = DEFAULT_USERS_ROOT) 
     app.py's new report route) onto a filesystem path -- every other
     function below goes through this, so there is exactly one choke point
     to audit for path-traversal safety, matching the project's existing
-    precedent (`Agent/backend/agent_server.py`'s `_require_token`,
+    precedent (`Agent/backend/scripts/agent_server.py`'s `_require_token`,
     `Agent/backend/web/data.py`'s `validate_unique_code`).
 
     `USER_REF_RE`'s anchored `^[a-z2-7]{10}$` match means a value containing

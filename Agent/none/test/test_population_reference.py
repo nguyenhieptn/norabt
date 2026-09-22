@@ -14,7 +14,7 @@ from typing import List
 
 import pytest
 
-from Agent.backend.analysis.population_reference import (
+from Agent.backend.bot.analysis.population_reference import (
     MIN_POPULATION,
     clear_cache,
     PARAMETER_DIRECTION,
@@ -35,7 +35,7 @@ def _fresh_cache() -> None:
 def _write_population(root: Path, parameter: str, values: List[float]) -> None:
     """Dựng một kho giả có đúng hình dạng `data/analysis/**/monte_carlo.json`."""
     for index, value in enumerate(values):
-        folder = root / "analysis" / "cex" / "ETH" / "bot" / f"Bot{index}__CODE{index}"
+        folder = root / "report" / f"CODE{index}"
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "monte_carlo.json").write_text(
             json.dumps({"unique_code": f"CODE{index}", parameter: value}),
@@ -110,10 +110,10 @@ def test_every_declared_parameter_has_an_explicit_direction() -> None:
 
 def test_corrupt_and_non_numeric_entries_are_skipped(tmp_path: Path) -> None:
     _write_population(tmp_path, "mc_p_ruin", [1.0, 2.0, 3.0])
-    bad = tmp_path / "analysis" / "cex" / "ETH" / "bot" / "Broken__X"
+    bad = tmp_path / "report" / "X"
     bad.mkdir(parents=True, exist_ok=True)
     (bad / "monte_carlo.json").write_text("{khong phai json", encoding="utf-8")
-    text = tmp_path / "analysis" / "cex" / "ETH" / "bot" / "Texty__Y"
+    text = tmp_path / "report" / "Y"
     text.mkdir(parents=True, exist_ok=True)
     (text / "monte_carlo.json").write_text(
         json.dumps({"mc_p_ruin": "khong phai so"}), encoding="utf-8"
@@ -122,7 +122,7 @@ def test_corrupt_and_non_numeric_entries_are_skipped(tmp_path: Path) -> None:
 
 
 def test_booleans_are_not_counted_as_numbers(tmp_path: Path) -> None:
-    folder = tmp_path / "analysis" / "cex" / "ETH" / "bot" / "B__Z"
+    folder = tmp_path / "report" / "Z"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "monte_carlo.json").write_text(
         json.dumps({"mc_p_ruin": True}), encoding="utf-8"

@@ -132,6 +132,23 @@ class DefiState(BaseModel):
     lending_utilization_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
 
 
+class OnchainActivityState(BaseModel):
+    """On-chain whale/large-transfer activity (X Layer, via OKLink).
+
+    Scaffolding, not yet live: `data_state` is "DISABLED" whenever
+    `OKLINK_ENABLED` is unset/false (the default), and the numeric fields
+    below stay None until `Agent.backend.external.oklink.client.OkLinkClient`'s
+    `get_large_transfers()` has a confirmed real endpoint to call -- see that
+    module's docstring. Never populate these fields with an estimate or
+    placeholder value; None means "not collected", not "zero".
+    """
+
+    data_state: str = "UNKNOWN"  # UNKNOWN | DISABLED | OK
+    large_transfer_count_24h: Optional[int] = Field(default=None, ge=0)
+    large_transfer_volume_usd_24h: Optional[float] = Field(default=None, ge=0.0)
+    net_whale_flow_usd_24h: Optional[float] = None
+
+
 class MarketResult(BaseModel):
     """LOGIC 1 output: market observations only, never a bot verdict."""
 
@@ -157,6 +174,7 @@ class MarketResult(BaseModel):
     sentiment_state: Optional[SentimentState] = None
     macro_state: Optional[MacroState] = None
     defi_state: Optional[DefiState] = None
+    onchain_state: Optional[OnchainActivityState] = None
 
     @field_validator("symbol", "venue_type")
     @classmethod

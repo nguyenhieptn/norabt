@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from Agent.backend.mcp.analytics.simulation.monte_carlo import (
+from Agent.backend.bot.mcp.analytics.simulation.monte_carlo import (
     MonteCarloSimulationEngine,
 )
-from Agent.backend.mcp.schemas.bot_result import (
+from Agent.backend.bot.mcp.schemas.bot_result import (
     BehavioralObservations,
     BotCurrentState,
     BotIdentity,
@@ -34,7 +34,7 @@ from Agent.backend.mcp.schemas.bot_result import (
     StrategyObservations,
     TradeStatistics,
 )
-from Agent.backend.qc.scoring.verdict import (
+from Agent.backend.report.qc.scoring.verdict import (
     VERDICT_HIGH_DD_WEAK_Q,
     VERDICT_LOW_DD_GOOD_Q,
     decide,

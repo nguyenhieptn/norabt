@@ -211,7 +211,7 @@ thay vì tương quan Pearson trên giá trị thô.
 > `NGUY HIỂM` / `TIỀM ẨN` / `TIỀM NĂNG` / `AN TOÀN`. Thang đó **đã bị thay**
 > bằng nhãn hai trục (`DRAWDOWN: LOW/HIGH × QUALITY: GOOD/WEAK`, cộng cờ
 > `HIDDEN RISK` và `INSUFFICIENT EVIDENCE`) — xem `VALID_VERDICTS` trong
-> `Agent/backend/agent_server.py`. Cột này KHÔNG được cập nhật theo thang
+> `Agent/backend/scripts/agent_server.py`. Cột này KHÔNG được cập nhật theo thang
 > mới, và cố ý như vậy: sửa lại số liệu của một lượt đo đã chạy xong thì
 > bảng sẽ không còn là hồ sơ của chính lượt đo đó nữa. Mọi con số thống kê
 > trong báo cáo (Spearman, khoảng tin cậy, p-value) tính trên `risk_score`

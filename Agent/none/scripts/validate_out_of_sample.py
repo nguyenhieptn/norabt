@@ -40,7 +40,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from Agent.backend.market.service import MarketDataUnavailableError  # noqa: E402
-from Agent.backend.mcp.service import BotDataUnavailableError  # noqa: E402
+from Agent.backend.bot.mcp.service import BotDataUnavailableError  # noqa: E402
 from Agent.backend.research.dataset import (  # noqa: E402
     discover_bot_dirs,
     load_bot_ledger,

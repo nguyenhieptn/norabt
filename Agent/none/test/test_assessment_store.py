@@ -6,13 +6,13 @@ import json
 
 from pathlib import Path
 
-from Agent.backend.qc.reporting.assessment_store import (
+from Agent.backend.report.qc.reporting.assessment_store import (
     rebuild_index,
     build_assessment,
     load_bot,
     persist,
 )
-from Agent.backend.qc.reporting.cohort import BotEvaluationRow
+from Agent.backend.report.qc.reporting.cohort import BotEvaluationRow
 
 
 def _row(**overrides) -> BotEvaluationRow:
@@ -168,22 +168,14 @@ def test_persist_mirrors_the_step_2_layout_and_reads_back(tmp_path):
     )()
     written = persist(report, tmp_path)
 
-    expected = (
-        tmp_path
-        / "assessment"
-        / "cex"
-        / "ETH"
-        / "bot"
-        / "HaveARestin__53AEED5A8E4EBBB2"
-        / "assessment.json"
-    )
+    expected = tmp_path / "report" / "53AEED5A8E4EBBB2" / "latest.json"
     assert str(expected) in written
     assert expected.exists()
 
     loaded = load_bot(tmp_path, "CEX", "ETH", "53AEED5A8E4EBBB2")
     assert loaded["recommendation"]["verdict"] == "DRAWDOWN: HIGH · QUALITY: WEAK"
 
-    index = json.loads((tmp_path / "assessment" / "index.json").read_text("utf-8"))
+    index = json.loads((tmp_path / "report" / "index.json").read_text("utf-8"))
     assert index["bots_assessed"] == 1
     assert index["bots"][0]["unique_code"] == "53AEED5A8E4EBBB2"
 
@@ -193,12 +185,17 @@ def test_rows_without_a_verdict_are_not_written_as_assessments(tmp_path):
     report = type("Report", (), {"generated_at_ms": 1, "rows": [broken]})()
     written = persist(report, tmp_path)
 
-    assert written == [str(tmp_path / "assessment" / "index.json")]
+    assert written == [str(tmp_path / "report" / "index.json")]
     assert load_bot(tmp_path, "CEX", "ETH", "53AEED5A8E4EBBB2") is None
 
 
 def test_a_dex_slot_is_filed_under_the_slot_not_the_traded_instrument(tmp_path):
-    """Every DEX slot is filled by an OKX trader, so the two names differ."""
+    """The payload records the slot it was picked for (DEX/WETH), not the
+    instrument its ledger names (ETH) -- even though the unified layout
+    (one folder per bot_id, see assessment_store.py's module docstring) no
+    longer segregates the FILE itself by venue/asset, so `load_bot` finds the
+    same document regardless of which venue_type/symbol it is called with.
+    """
     selection = tmp_path / "universe" / "bot_selection.json"
     selection.parent.mkdir(parents=True)
     selection.write_text(
@@ -221,10 +218,7 @@ def test_a_dex_slot_is_filed_under_the_slot_not_the_traded_instrument(tmp_path):
 
     persist(report, tmp_path)
 
-    # Filed by slot, not by the ETH its ledger names, so the DEX side of the
-    # tree is not silently empty.
     assert load_bot(tmp_path, "DEX", "WETH", "53AEED5A8E4EBBB2") is not None
-    assert load_bot(tmp_path, "CEX", "ETH", "53AEED5A8E4EBBB2") is None
 
     document = load_bot(tmp_path, "DEX", "WETH", "53AEED5A8E4EBBB2")
     assert document["bot"]["slot"] == "DEX/WETH"
@@ -249,7 +243,7 @@ def test_a_bot_that_loses_more_per_loss_than_it_wins_says_so_in_plain_terms():
 # `narrative_text` instead).
 # --------------------------------------------------------------------------- #
 
-from Agent.backend.qc.reporting.assessment_store import build_assessments  # noqa: E402
+from Agent.backend.report.qc.reporting.assessment_store import build_assessments  # noqa: E402
 
 
 def test_build_assessment_without_extras_degrades_new_fields_to_none():
@@ -416,18 +410,10 @@ def test_persist_write_false_builds_payloads_without_touching_disk(tmp_path):
     }
     written = persist(report, tmp_path, extra_by_code=extra_by_code, write=False)
 
-    expected = (
-        tmp_path
-        / "assessment"
-        / "cex"
-        / "ETH"
-        / "bot"
-        / "HaveARestin__53AEED5A8E4EBBB2"
-        / "assessment.json"
-    )
+    expected = tmp_path / "report" / "53AEED5A8E4EBBB2" / "latest.json"
     assert str(expected) in written
     assert not expected.exists()
-    assert not (tmp_path / "assessment" / "index.json").exists()
+    assert not (tmp_path / "report" / "index.json").exists()
 
     # The narrative built for this exact run is still recoverable via
     # build_assessments, without any file having been written.
@@ -446,15 +432,7 @@ def test_persist_write_true_is_unaffected_by_the_new_optional_parameters(tmp_pat
     """
     report = type("Report", (), {"generated_at_ms": 1, "rows": [_row()]})()
     written = persist(report, tmp_path)
-    expected = (
-        tmp_path
-        / "assessment"
-        / "cex"
-        / "ETH"
-        / "bot"
-        / "HaveARestin__53AEED5A8E4EBBB2"
-        / "assessment.json"
-    )
+    expected = tmp_path / "report" / "53AEED5A8E4EBBB2" / "latest.json"
     assert expected.exists()
     assert str(expected) in written
 
@@ -491,7 +469,7 @@ def test_build_assessment_writes_symbol_exposure_and_secondary_market_from_row()
     own share (0-100, rounded), `secondary_market` the compact dict
     `report_page.py` renders directly.
     """
-    from Agent.backend.qc.reporting.cohort import MarketSnapshotRow
+    from Agent.backend.report.qc.reporting.cohort import MarketSnapshotRow
 
     row = _row(
         traded_symbol="ETH",
@@ -572,7 +550,7 @@ def test_build_assessment_writes_market_coverage_from_row():
     """`row.resolved_markets`/`unresolved_markets`/`coverage_achieved_pct`
     (cohort.py, tính từ `plan_market_coverage`/`resolve_planned_markets`)
     round-trip nguyên vẹn vào `bang_chung`."""
-    from Agent.backend.qc.reporting.cohort import (
+    from Agent.backend.report.qc.reporting.cohort import (
         CoveredMarketRow,
         MarketSnapshotRow,
         UncoveredMarketRow,
@@ -689,14 +667,14 @@ def test_persisting_one_bot_does_not_drop_the_other_bots_from_the_index(tmp_path
         "Report", (), {"generated_at_ms": 1, "rows": [_row(), _row_other()]}
     )()
     persist(first, tmp_path)
-    index = json.loads((tmp_path / "assessment" / "index.json").read_text("utf-8"))
+    index = json.loads((tmp_path / "report" / "index.json").read_text("utf-8"))
     assert index["bots_assessed"] == 2
 
     # Đúng hình dạng lượt chạy lại lẻ: report chỉ mang MỘT bot.
     again = type("Report", (), {"generated_at_ms": 2, "rows": [_row()]})()
     persist(again, tmp_path)
 
-    index = json.loads((tmp_path / "assessment" / "index.json").read_text("utf-8"))
+    index = json.loads((tmp_path / "report" / "index.json").read_text("utf-8"))
     assert index["bots_assessed"] == 2, "bot không nằm trong lượt chạy đã bị cắt"
     assert index["bots_this_run"] == 1
     assert {row["unique_code"] for row in index["bots"]} == {
@@ -711,7 +689,7 @@ def test_the_index_drops_a_row_whose_file_no_longer_exists(tmp_path):
         "Report", (), {"generated_at_ms": 1, "rows": [_row(), _row_other()]}
     )()
     persist(report, tmp_path)
-    gone = json.loads((tmp_path / "assessment" / "index.json").read_text("utf-8"))
+    gone = json.loads((tmp_path / "report" / "index.json").read_text("utf-8"))
     removed = next(
         row for row in gone["bots"] if row["unique_code"] == "0EAF7292CE2FAAC2"
     )
@@ -723,7 +701,7 @@ def test_the_index_drops_a_row_whose_file_no_longer_exists(tmp_path):
     removed_path.unlink()
 
     persist(type("Report", (), {"generated_at_ms": 2, "rows": [_row()]})(), tmp_path)
-    index = json.loads((tmp_path / "assessment" / "index.json").read_text("utf-8"))
+    index = json.loads((tmp_path / "report" / "index.json").read_text("utf-8"))
     assert [row["unique_code"] for row in index["bots"]] == ["53AEED5A8E4EBBB2"]
 
 
@@ -734,7 +712,7 @@ def test_rebuild_index_restores_every_bot_from_the_files_themselves(tmp_path):
     persist(report, tmp_path)
 
     # Cắt index bằng tay, đúng trạng thái lỗi đã tìm thấy trên máy thật.
-    index_path = tmp_path / "assessment" / "index.json"
+    index_path = tmp_path / "report" / "index.json"
     broken = json.loads(index_path.read_text("utf-8"))
     broken["bots"] = broken["bots"][:1]
     broken["bots_assessed"] = 1
@@ -759,8 +737,8 @@ def test_rank_tier_order_matches_the_cohort_module_it_copies() -> None:
     """`_RANK_TIER_ORDER` là bản sao có chủ ý (tránh vòng import). Lệch bảng
     này thì hạng đọc từ đĩa và hạng của một lượt chấm cả đàn sẽ nói hai điều
     khác nhau -- test này là thứ duy nhất chặn nó trôi."""
-    from Agent.backend.qc.reporting.assessment_store import _RANK_TIER_ORDER
-    from Agent.backend.qc.reporting.cohort import TIER_ORDER
+    from Agent.backend.report.qc.reporting.assessment_store import _RANK_TIER_ORDER
+    from Agent.backend.report.qc.reporting.cohort import TIER_ORDER
 
     assert {tier.value: order for tier, order in TIER_ORDER.items()} == _RANK_TIER_ORDER
 
@@ -787,7 +765,7 @@ def test_rescoring_one_bot_does_not_give_it_rank_one(tmp_path):
 
 
 def test_renumber_ranks_orders_by_tier_then_risk_score(tmp_path):
-    from Agent.backend.qc.reporting.assessment_store import renumber_ranks
+    from Agent.backend.report.qc.reporting.assessment_store import renumber_ranks
 
     safe = _row_other(risk_score=10.0, risk_tier="HEALTHY", rank=99)
     risky = _row(risk_score=90.0, risk_tier="CRITICAL", rank=99)
@@ -801,7 +779,7 @@ def test_renumber_ranks_orders_by_tier_then_risk_score(tmp_path):
 
 def _ranks_on_disk(tmp_path) -> dict:
     out = {}
-    for path in (tmp_path / "assessment").glob("*/*/bot/*/assessment.json"):
+    for path in (tmp_path / "report").glob("*/latest.json"):
         doc = json.loads(path.read_text("utf-8"))
         out[doc["bot"]["unique_code"]] = doc["bot"]["rank_in_cohort"]
     return out

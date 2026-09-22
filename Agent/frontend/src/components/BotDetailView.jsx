@@ -22,7 +22,7 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
     // "withheld from you" look identical to "never measured".
     const params = new URLSearchParams();
     if (isRefresh) params.set("refresh", "1");
-    if (isUserView) params.set("view", "user");
+    params.set("view", "user");
     params.set("_t", String(Date.now()));
     const url = `/bot/${code}?${params.toString()}`;
     fetch(url, { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
@@ -65,7 +65,7 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
         doc.querySelectorAll(".admin-banner, .snapshot-banner, .report-subnav-bar, .tab-nav-radio, input[name='main_tabs'], .report-header, .report-hero-card, #formula-modal, .formula-modal-backdrop").forEach((el) => el.remove());
         doc.querySelectorAll(".report-hero-identity .crumb").forEach((el) => el.remove());
         doc.querySelectorAll(".report-hero-top").forEach((el) => el.remove());
-        // Unwrap .tabs-control-wrapper: giữ lại các children (.tabs-header-container),
+        // Unwrap .tabs-control-wrapper: giữ lại các children (.tabs-header-container, .tab-panels),
         // chỉ bỏ div bọc ngoài — xoá toàn bộ sẽ mất luôn tab bar bên trong.
         doc.querySelectorAll(".tabs-control-wrapper").forEach((wrapper) => {
           while (wrapper.firstChild) {
@@ -75,31 +75,15 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
         });
         if (nameEl) nameEl.remove();
 
-        // 3. Chế độ xem theo vai trò:
-        // Máy chủ đã quyết định panel nào thuộc về vai trò này và gửi kèm
-        // `data-hidden-panels`. SPA chỉ trình bày, không tự xoá dữ liệu.
-        const wrapper = doc.querySelector(".tabs-control-wrapper");
-        const hiddenPanels = (wrapper?.getAttribute("data-hidden-panels") || "")
-          .split(" ")
-          .filter(Boolean);
-        if (hiddenPanels.length) {
-          hiddenPanels.forEach((panelId) => {
-            const label = doc.querySelector(`#label-tab-${panelId.replace("panel-", "")}`);
-            if (label) label.remove();
-          });
-          const reportPanel = doc.querySelector("#panel-report");
-          if (reportPanel) {
-            reportPanel.classList.add("active-tab-panel");
-            reportPanel.style.display = "block";
-          }
-          const tabsHeader = doc.querySelector(".tabs-header-container");
-          if (tabsHeader && hiddenPanels.length >= 2) tabsHeader.remove();
-        } else {
-          // Admin: Mặc định bật active-tab-panel trên panel-report
-          const reportPanel = doc.querySelector("#panel-report");
-          if (reportPanel) {
-            reportPanel.classList.add("active-tab-panel");
-          }
+        // 3. Tab mặc định: Kích hoạt panel-report đầu tiên
+        const reportPanel = doc.querySelector("#panel-report");
+        if (reportPanel) {
+          reportPanel.classList.add("active-tab-panel");
+          reportPanel.style.display = "block";
+        }
+        const defaultLabel = doc.querySelector(".label-report");
+        if (defaultLabel) {
+          defaultLabel.classList.add("active-tab-label");
         }
 
         // 4. Trích xuất CSS nội bộ và thân báo cáo
@@ -153,46 +137,44 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
 
     const root = containerRef.current;
 
-    // Chuyển tab cho Admin view
-    if (!isUserView) {
-      const tabLabels = root.querySelectorAll(".tabs-nav-bar .tab-label");
-      const panels = {
-        report: root.querySelector("#panel-report"),
-        market: root.querySelector("#panel-market"),
-        trades: root.querySelector("#panel-trades"),
-      };
+    // Chuyển tab giữa 3 thẻ: Kết quả phân tích (Analyst Result) và 2 thẻ khoá (Market, Trades)
+    const tabLabels = root.querySelectorAll(".tabs-nav-bar .tab-label");
+    const panels = {
+      report: root.querySelector("#panel-report"),
+      market: root.querySelector("#panel-market"),
+      trades: root.querySelector("#panel-trades"),
+    };
 
-      tabLabels.forEach((label) => {
-        label.onclick = (e) => {
-          e.preventDefault();
-          const forId = label.getAttribute("for");
-          if (!forId) return;
-          const targetTab = forId.replace("tab-nav-", "");
+    tabLabels.forEach((label) => {
+      label.onclick = (e) => {
+        e.preventDefault();
+        const forId = label.getAttribute("for");
+        if (!forId) return;
+        const targetTab = forId.replace("tab-nav-", "");
 
-          Object.entries(panels).forEach(([key, panel]) => {
-            if (panel) {
-              if (key === targetTab) {
-                panel.classList.add("active-tab-panel");
-                panel.style.display = "";
-              } else {
-                panel.classList.remove("active-tab-panel");
-                panel.style.display = "none";
-              }
+        Object.entries(panels).forEach(([key, panel]) => {
+          if (panel) {
+            if (key === targetTab) {
+              panel.classList.add("active-tab-panel");
+              panel.style.display = "block";
+            } else {
+              panel.classList.remove("active-tab-panel");
+              panel.style.display = "none";
             }
-          });
+          }
+        });
 
-          const radio = root.querySelector(`#${forId}`);
-          if (radio) radio.checked = true;
+        const radio = root.querySelector(`#${forId}`);
+        if (radio) radio.checked = true;
 
-          tabLabels.forEach((l) => l.classList.remove("active-tab-label"));
-          label.classList.add("active-tab-label");
-        };
-      });
+        tabLabels.forEach((l) => l.classList.remove("active-tab-label"));
+        label.classList.add("active-tab-label");
+      };
+    });
 
-      // Active nhãn tab đầu tiên mặc định
-      const defaultLabel = root.querySelector(".label-report");
-      if (defaultLabel) defaultLabel.classList.add("active-tab-label");
-    }
+    // Active nhãn tab đầu tiên mặc định
+    const defaultLabel = root.querySelector(".label-report");
+    if (defaultLabel) defaultLabel.classList.add("active-tab-label");
 
     // Intercept back button clicks
     const backButtons = root.querySelectorAll(".btn-subnav-back, .back-link");
@@ -655,67 +637,62 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
         <div className="head report-unified-head">
           <div className="crumb">MONITORING SYSTEM · DETAILED QUANTITATIVE PROFILE</div>
           <div className="head-row report-head-row">
-            <div className="head-actions report-head-actions-left">
-              <button
-                type="button"
-                className="btn pri"
-                onClick={onBack}
-              >
-                ← Back to list
-              </button>
-              {botMeta.hasRefresh && (
-                <div className="reanalyze-wrapper" style={{ position: "relative" }}>
-                  <button
-                    ref={reAnalyzeBtnRef}
-                    type="button"
-                    className="btn"
-                    onClick={() => setConfirmOpen((v) => !v)}
-                    title="Re-scan the latest data from OKX and recalculate from scratch"
-                  >
-                    ⚡ Re-analyze
-                  </button>
+            {botMeta.hasRefresh && (
+              <>
+                <div className="head-actions report-head-actions-left">
+                  <div className="reanalyze-wrapper" style={{ position: "relative" }}>
+                    <button
+                      ref={reAnalyzeBtnRef}
+                      type="button"
+                      className="btn"
+                      onClick={() => setConfirmOpen((v) => !v)}
+                      title="Re-scan the latest data from OKX and recalculate from scratch"
+                    >
+                      ⚡ Re-analyze
+                    </button>
 
-                  {confirmOpen && (
-                    <>
-                      {/* backdrop trong suốt để click ngoài đóng popup */}
-                      <div
-                        className="reanalyze-backdrop"
-                        onClick={() => setConfirmOpen(false)}
-                      />
-                      <div className="reanalyze-confirm-popover" role="dialog" aria-modal="true">
-                        <div className="reanalyze-confirm-icon">⚡</div>
-                        <div className="reanalyze-confirm-title">Re-analyze this bot?</div>
-                        <div className="reanalyze-confirm-body">
-                          This will fetch live data from OKX and re-run all 10,000 Monte Carlo
-                          simulations from scratch. The current snapshot will be overwritten.
-                          This may take 30–60 seconds.
+                    {confirmOpen && (
+                      <>
+                        {/* backdrop trong suốt để click ngoài đóng popup */}
+                        <div
+                          className="reanalyze-backdrop"
+                          onClick={() => setConfirmOpen(false)}
+                        />
+                        <div className="reanalyze-confirm-popover" role="dialog" aria-modal="true">
+                          <div className="reanalyze-confirm-icon">⚡</div>
+                          <div className="reanalyze-confirm-title">Re-analyze this bot?</div>
+                          <div className="reanalyze-confirm-body">
+                            This will fetch live data from OKX and re-run all 10,000 Monte Carlo
+                            simulations from scratch. The current snapshot will be overwritten.
+                            This may take 30–60 seconds.
+                          </div>
+                          <div className="reanalyze-confirm-actions">
+                            <button
+                              type="button"
+                              className="btn reanalyze-btn-confirm"
+                              onClick={() => {
+                                setConfirmOpen(false);
+                                loadReport(true);
+                              }}
+                            >
+                              ⚡ Confirm re-analyze
+                            </button>
+                            <button
+                              type="button"
+                              className="btn reanalyze-btn-cancel"
+                              onClick={() => setConfirmOpen(false)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
                         </div>
-                        <div className="reanalyze-confirm-actions">
-                          <button
-                            type="button"
-                            className="btn reanalyze-btn-confirm"
-                            onClick={() => {
-                              setConfirmOpen(false);
-                              loadReport(true);
-                            }}
-                          >
-                            ⚡ Confirm re-analyze
-                          </button>
-                          <button
-                            type="button"
-                            className="btn reanalyze-btn-cancel"
-                            onClick={() => setConfirmOpen(false)}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
+                      </>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-            <div className="report-head-divider" />
+                <div className="report-head-divider" />
+              </>
+            )}
             <div className="report-title-group">
               <h1>{botMeta.name || code}</h1>
               {botMeta.name && botMeta.name !== code && (

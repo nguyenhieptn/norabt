@@ -14,9 +14,9 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
-import Agent.backend.okx.probe as probe
+import Agent.backend.external.okx.probe as probe
 from Agent.backend.infra.config import config
-from Agent.backend.okx.probe import (
+from Agent.backend.external.okx.probe import (
     OKX_ERROR_MESSAGES_VI,
     LiveTradingRefused,
     check_private_access,

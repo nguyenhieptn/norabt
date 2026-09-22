@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
+from Agent.backend.control.policy.config import ControlPolicyConfig
 from Agent.backend.control.schemas.control_decision import (
     ControlAction,
     ControlDecision,
     ExecutionMode,
     ExecutionStatus,
 )
-from Agent.backend.qc.schemas.risk_assessment import BotRiskAssessment, RiskTier
+from Agent.backend.report.qc.schemas.risk_assessment import BotRiskAssessment, RiskTier
 
 
 class ControlDecisionEngine:
@@ -19,10 +20,21 @@ class ControlDecisionEngine:
     POLICY_VERSION = "control_policy.v1"
 
     def __init__(
-        self, mode: ExecutionMode = ExecutionMode.READ_ONLY, cooldown_seconds: int = 300
+        self,
+        mode: ExecutionMode = ExecutionMode.READ_ONLY,
+        cooldown_seconds: Optional[int] = None,
+        policy: Optional[ControlPolicyConfig] = None,
     ) -> None:
+        # `policy` supplies the two threshold knobs (below); an explicit
+        # `cooldown_seconds` argument still wins over both `policy` and the
+        # env default, so every existing caller/test passing it stays
+        # unaffected by this change (Strangler Fig extraction, not a
+        # behavior change -- see config.py's module docstring).
+        self.policy = policy or ControlPolicyConfig.from_env()
         self.mode = mode
-        self.cooldown_seconds = max(0, cooldown_seconds)
+        self.cooldown_seconds = max(
+            0, self.policy.cooldown_seconds if cooldown_seconds is None else cooldown_seconds
+        )
         self._last_actions: Dict[str, Tuple[ControlAction, int]] = {}
 
     def decide(
@@ -31,7 +43,10 @@ class ControlDecisionEngine:
         now = now_ms if now_ms is not None else int(time.time() * 1000)
         action_map = {action.value: action for action in ControlAction}
         target = action_map.get(assessment.recommended_action, ControlAction.WARN)
-        if assessment.risk_tier == RiskTier.UNKNOWN or assessment.confidence < 40:
+        if (
+            assessment.risk_tier == RiskTier.UNKNOWN
+            or assessment.confidence < self.policy.min_confidence_for_action
+        ):
             target = ControlAction.WARN
 
         status = ExecutionStatus.PENDING
@@ -47,7 +62,10 @@ class ControlDecisionEngine:
 
         triggered = []
         for name, dimension in assessment.dimensions:
-            if dimension.score >= 60 and dimension.status.value == "AVAILABLE":
+            if (
+                dimension.score >= self.policy.trigger_dimension_score
+                and dimension.status.value == "AVAILABLE"
+            ):
                 triggered.append(name)
         reason = f"QC tier {assessment.risk_tier.value}; recommendation {target.value}; confidence {assessment.confidence:.1f}%"
         key = f"{assessment.assessment_id}:{target.value}:{self.POLICY_VERSION}"

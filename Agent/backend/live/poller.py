@@ -44,8 +44,8 @@ from Agent.backend.live.store import (
     save_state,
     write_atomic,
 )
-from Agent.backend.mcp.inference.public_signals import SubPositionClock
-from Agent.backend.okx.client import OkxClient, OkxError
+from Agent.backend.bot.mcp.inference.public_signals import SubPositionClock
+from Agent.backend.external.okx.client import OkxClient, OkxError
 
 CURRENT_POSITIONS_PATH = "/api/v5/copytrading/public-current-subpositions"
 HISTORY_PATH = "/api/v5/copytrading/public-subpositions-history"
@@ -586,10 +586,10 @@ class LivePoller:
         """
         from pathlib import Path
 
-        from Agent.backend.qc.reporting.assessment_store import (
+        from Agent.backend.report.qc.reporting.assessment_store import (
             load_bot as load_assessment,
         )
-        from Agent.backend.run_report import rescore_one_bot_complete
+        from Agent.backend.scripts.run_report import rescore_one_bot_complete
 
         # data/assessment/ xếp theo SLOT (`assessment_store._slot_index()`
         # đọc bot_selection.json giống `load_bot_targets()`), nên tra bằng

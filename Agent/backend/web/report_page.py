@@ -5,7 +5,7 @@ assessment, as opposed to the raw JSON `/api/analyze` returns.
 Everything needed to render the page is already sitting in the dict
 `WebDataService.analyze()` returns (see `Agent/backend/web/data.py`'s module
 docstring for its top-level keys, including the optional `narrative` field
-from Agent/backend/qc/reporting/narrative.py): this module only turns that dict into
+from Agent/backend/llm/narrative.py): this module only turns that dict into
 HTML/CSS/inline-SVG, it computes nothing new and calls no scoring code of its
 own. `app.py` (owned by a parallel task at the time this module was written)
 is expected to call `render_bot_report_html(result)` from its `GET
@@ -46,12 +46,12 @@ dashboard of numbers with no explanation of what they mean or where they
 come from is exactly the failure mode the project owner's own brief called
 out ("thiếu vế thứ ba là hỏng"). The Vietnamese in those blocks and in this
 module's own prose is written in the same register as
-`Agent/backend/qc/reporting/reasons.py`: plain, evidence-first, no hedging
+`Agent/backend/report/qc/reporting/reasons.py`: plain, evidence-first, no hedging
 filler, no marketing.
 
 LIMITED and NOT_FOUND are first-class inputs, not error cases: a LIMITED
 bot's `evidence` dict has a different shape from a FULL bot's (a flat
-`components` list -- see `Agent/backend/analysis/limited.py` -- instead of
+`components` list -- see `Agent/backend/bot/analysis/limited.py` -- instead of
 the FULL pipeline's `dimensions` dict + `score_breakdown`), so the
 dimensions section below branches on which shape is actually present rather
 than assuming FULL's. NOT_FOUND renders a short standalone page and skips
@@ -75,7 +75,7 @@ from Agent.backend.web import limited_view
 from Agent.backend.web import score_basis
 from Agent.backend.web.loss_analysis import compute_loss_profile
 from Agent.backend.market.coverage import MARKET_COVERAGE_TARGET_PCT
-from Agent.backend.qc.reporting.reasons import LIQ_VI, TREND_VI, VOL_VI
+from Agent.backend.report.qc.reporting.reasons import LIQ_VI, TREND_VI, VOL_VI
 
 logger = logging.getLogger(__name__)
 
@@ -169,11 +169,11 @@ def _clamp(value: float, lo: float, hi: float) -> float:
 
 # --------------------------------------------------------------------------- #
 # Labels shared with the QC pipeline's own Vietnamese vocabulary. Duplicated
-# here (rather than imported from Agent/backend/qc/**) deliberately: that
+# here (rather than imported from Agent/backend/report/qc/**) deliberately: that
 # tree is off-limits to touch for this task and owned by other work in
 # flight, and a presentation-only module has no business depending on it for
-# a handful of label strings anyway -- see Agent/backend/qc/scoring/fusion.py
-# (DIMENSION_LABEL_VI) and Agent/backend/qc/reporting/reasons.py (TIER_VI) if
+# a handful of label strings anyway -- see Agent/backend/report/qc/scoring/fusion.py
+# (DIMENSION_LABEL_VI) and Agent/backend/report/qc/reporting/reasons.py (TIER_VI) if
 # these ever need to be reconciled by hand.
 # --------------------------------------------------------------------------- #
 
@@ -212,7 +212,7 @@ TIER_LABEL_VI: Dict[str, str] = {
     # "Khoẻ" (RiskTier.HEALTHY), not "AN TOÀN": that exact string is reserved
     # for the (removed) old 4-bucket bot-level verdict label, and this is a
     # per-dimension risk tier -- a different, more granular axis. See
-    # Agent/backend/qc/scoring/verdict.py's module docstring.
+    # Agent/backend/report/qc/scoring/verdict.py's module docstring.
     "HEALTHY": "HEALTHY",
     "UNKNOWN": "UNMEASURED",
 }
@@ -231,8 +231,8 @@ TIER_COLOR: Dict[str, str] = {
 
 # --------------------------------------------------------------------------- #
 # Việc 1/Việc 2 -- "Cách bot này chơi": vocabulary for translating the enum
-# values `Agent/backend/mcp/analytics/strategy/profile.py` /
-# `Agent/backend/mcp/analytics/behavior/detector.py` produce (surfaced in
+# values `Agent/backend/bot/mcp/analytics/strategy/profile.py` /
+# `Agent/backend/bot/mcp/analytics/behavior/detector.py` produce (surfaced in
 # `evidence["strategy"]`/`evidence["behavioral"]`, see data.py's
 # `_strategy_evidence`/`_behavioral_evidence`) into plain Vietnamese. Kept
 # local to this module rather than imported from those trees, same
@@ -2535,7 +2535,7 @@ def _render_conclusion(result: Dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 # Việc 2/3 -- "thị trường được chấm chỉ là một phần hoạt động của bot".
 # `bot.identity.symbol_exposure_share`/`observed_symbols`
-# (Agent/backend/mcp/service.py::_resolve_identity_market) đã được tính sẵn
+# (Agent/backend/bot/mcp/service.py::_resolve_identity_market) đã được tính sẵn
 # từ lâu nhưng chưa từng hiển thị ở đâu: một bot tập trung 95% vào đúng thị
 # trường được chấm và một bot chỉ giao dịch thị trường đó 30% thời gian giá
 # trị trông giống hệt nhau trên mọi biểu đồ khác của trang này. Đặt NGAY SAU
@@ -2802,7 +2802,7 @@ def _render_market_coverage(result: Dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 # Section ① -- "Cách bot này chơi": Việc 1/2's own explicit fix. The QC
 # engine already reconstructs how a bot trades from its closed ledger
-# (`Agent/backend/mcp/analytics/strategy/profile.py` /
+# (`Agent/backend/bot/mcp/analytics/strategy/profile.py` /
 # `.../behavior/detector.py`) and uses it to SCORE two dimensions
 # (strategy_drift, behavioral_risk) -- but that observation never reached the
 # report itself, leaving a reader to reassemble "what does this bot actually
@@ -3006,7 +3006,7 @@ def _render_strategy_section(result: Dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 # Section 2b -- narrative ("nhận định chuyên môn"): an OPTIONAL, LLM-authored
 # paragraph built from the numbers already shown above (see
-# Agent/backend/qc/reporting/narrative.py's own module docstring for the
+# Agent/backend/llm/narrative.py's own module docstring for the
 # full design -- feature flag, three validation gates, fail-closed fallback).
 # Placed right after the conclusion per the task this was written for.
 #
@@ -3369,10 +3369,10 @@ def _render_dimensions_section(result: Dict[str, Any]) -> str:
 def _percentile_findings_html(components: List[Dict[str, Any]]) -> str:
     """Trích đúng câu "Phân vị mô phỏng: ..." (đã có sẵn tham số/giá trị của
     bot/cỡ quần thể/trung vị quần thể trong chính câu văn, do
-    `Agent/backend/analysis/limited.py` viết ra khi chấm bằng phân vị) từ
+    `Agent/backend/bot/analysis/limited.py` viết ra khi chấm bằng phân vị) từ
     `findings` của từng thành phần, thay vì tính lại. `""` khi không thành
     phần nào chấm bằng phân vị (quần thể chưa đủ 10 bot, xem
-    `Agent/backend/analysis/population_reference.py`).
+    `Agent/backend/bot/analysis/population_reference.py`).
     """
     rows = []
     for c in components:
@@ -3385,7 +3385,7 @@ def _percentile_findings_html(components: List[Dict[str, Any]]) -> str:
     return (
         "<p>The dimensions below are scored using the <strong>percentile rank "
         "within the population of scored bots</strong> (not a fixed threshold -- see "
-        "<code>Agent/backend/analysis/population_reference.py</code>):</p>"
+        "<code>Agent/backend/bot/analysis/population_reference.py</code>):</p>"
         "<ul class='findings'>" + "".join(rows) + "</ul>"
     )
 
@@ -5088,7 +5088,7 @@ def _render_dominant_market_card(result: Dict[str, Any]) -> str:
     )
 
     # NOTE: "ỔN" matches the Vietnamese `POSTURE_STABLE` value
-    # ("ỔN ĐỊNH") that `Agent/backend/qc/reporting/market_posture.py`
+    # ("ỔN ĐỊNH") that `Agent/backend/report/qc/reporting/market_posture.py`
     # (out of scope for this translation pass) still produces; "STABLE"
     # covers this module's own English fallback default above.
     posture_color = "#16a34a" if "ỔN" in posture or posture == "STABLE" else "#d97706"
@@ -5402,7 +5402,7 @@ def _render_closed_trades_table(result: Dict[str, Any], limit: int = 200) -> str
 #
 # Yêu cầu gốc của người dùng: "bot private phải tận dụng những gì có thể
 # public để phân tích đánh giá ... đảm bảo report đều giống nhau". Trước khi
-# có khối này, một bot LIMITED (`Agent/backend/analysis/limited.py`, sổ lệnh
+# có khối này, một bot LIMITED (`Agent/backend/bot/analysis/limited.py`, sổ lệnh
 # bị OKX chặn ở lỗi 60004) chỉ tự nhiên khớp được BA trong số 14 mục FULL
 # có (ket-luan, diem-chieu, thi-truong-chinh -- ba hàm `_render_conclusion`/
 # `_render_dimensions_section`/`_render_dominant_market_card` phía trên đều
@@ -5930,7 +5930,7 @@ _INSIGHT_THEORY: Dict[str, Tuple[str, str]] = {
         "Compares earlier in-sample performance against subsequent out-of-sample windows. "
         "A Profit Factor Ratio (Later PF / Earlier PF) near or above 1.0 confirms consistency, while a ratio &lt;0.70 signals severe edge decay.",
         "Time-partitioned fold validation splitting the historical closed transaction ledger chronologically. "
-        "Computes trade count, profit factors, fold-by-fold stability grade, and overall consistency across out-of-sample windows. See Agent/backend/qc/reporting/validation.py.",
+        "Computes trade count, profit factors, fold-by-fold stability grade, and overall consistency across out-of-sample windows. See Agent/backend/report/qc/reporting/validation.py.",
     ),
     "market-compatibility": (
         "Market compatibility evaluates bot performance across historical market phases (Bull, Bear, Sideways, High/Low Volatility) "
@@ -5946,7 +5946,7 @@ _INSIGHT_THEORY: Dict[str, Tuple[str, str]] = {
         "Median (P50) reflects the expected outcome, the 5th–95th percentile span defines tail risk bounds, "
         "and Chance of Loss measures the probability of net capital impairment.",
         "Stationary bootstrap resampling (Politis &amp; Romano 1994) applied in blocks across the bot's own historical trades. "
-        "Conditions lacking sufficient empirical observations are left unsimulated to prevent unsubstantiated extrapolation. See Agent/backend/qc/reporting/scenarios.py.",
+        "Conditions lacking sufficient empirical observations are left unsimulated to prevent unsubstantiated extrapolation. See Agent/backend/report/qc/reporting/scenarios.py.",
     ),
 }
 
@@ -6447,15 +6447,65 @@ def _render_tab_trades(result: Dict[str, Any]) -> str:
 
 # Text shown in place of a panel a role does not receive. It is deliberately a
 # visible statement rather than an absent element: the design contract requires
-# withheld detail to be distinguishable from detail that was never measured.
-WITHHELD_BY_ROLE_HTML = (
-    '<section class="card" id="detail-withheld">'
-    "<h2>Detail withheld</h2>"
-    '<p class="withheld-note" data-withheld="DETAIL_WITHHELD_BY_ROLE">'
-    "This panel is not part of the user view. It was measured and is present in "
-    "the analysis; it is not shown here."
-    "</p></section>"
-)
+def _render_locked_panel(panel_type: str = "market") -> str:
+    if panel_type == "market":
+        title = "Premium Market Intelligence"
+        desc = (
+            "Phân tích chuyên sâu vi cấu trúc sổ lệnh OKX, áp lực dòng tiền cá mập Taker "
+            "và đo lường thanh khoản đa sàn thời gian thực."
+        )
+        features = [
+            ("📊 L2 Orderbook Microstructure", "Đo lường độ lệch cung cầu thực tế, spread và kiểm toán độ sâu thanh khoản."),
+            ("🐋 Whale Taker Volume Flow", "Phân tích dòng tiền mua/bán chủ động của cá mập và biến động khối lượng thực."),
+            ("💧 Liquidity & Slippage Matrix", "Mô phỏng độ trượt giá theo các kích thước vốn lớn và rủi ro cạn kiệt thanh khoản."),
+        ]
+        plan_badge = "PRO / INSTITUTIONAL"
+    else:
+        title = "Orders & Detailed Position Audit"
+        desc = (
+            "Kiểm toán toàn bộ 200+ lệnh đã khớp, mô phỏng stress test vị thế mở "
+            "và phân rã xác suất cháy tài khoản đa chiều."
+        )
+        features = [
+            ("📑 Complete Trade Execution Ledger", "Nhật ký khớp lệnh chi tiết, thời gian nắm giữ, phí giao dịch và PnL lũy kế."),
+            ("⚠️ Mark-to-Market Position Stress", "Kiểm toán vị thế mở thực tế theo giá thị trường và cảnh báo găm lỗ ảo."),
+            ("📐 Return Distribution Geometry", "Đo lường độ lệch âm, độ nhọn phân phối đuôi dày và rủi ro thiên nga đen."),
+        ]
+        plan_badge = "PRO / ENTERPRISE"
+
+    feature_items = "".join(
+        f'<div class="locked-feature-item">'
+        f'<div class="locked-feature-title">{_esc(f_title)}</div>'
+        f'<div class="locked-feature-desc">{_esc(f_desc)}</div>'
+        f'</div>'
+        for f_title, f_desc in features
+    )
+
+    return (
+        f'<section class="card card-locked" id="detail-withheld">'
+        f'<div class="locked-card-container">'
+        f'<div class="locked-badge-row">'
+        f'<span class="locked-status-badge">🔒 LOCKED FEATURE</span>'
+        f'<span class="locked-plan-badge">{plan_badge}</span>'
+        f'</div>'
+        f'<h2 class="locked-title">{_esc(title)}</h2>'
+        f'<p class="locked-subtitle">{_esc(desc)}</p>'
+        f'<div class="locked-features-grid">{feature_items}</div>'
+        f'<div class="locked-action-box">'
+        f'<p class="withheld-note locked-note" data-withheld="DETAIL_WITHHELD_BY_ROLE">'
+        f'Tài khoản hiện tại ở gói Basic chỉ bao gồm thẻ Kết quả phân tích (Analyst Result). '
+        f'Các tab dữ liệu chuyên sâu có ổ khoá sẽ tự động mở khóa khi nâng cấp gói dịch vụ.'
+        f'</p>'
+        f'<button type="button" class="btn-upgrade-plan" onclick="alert(\'Tính năng nâng cấp gói tài khoản đang kết nối cổng thanh toán Web3. Vui lòng liên hệ quản trị viên để mở khóa trước.\')">'
+        f'⚡ Nâng cấp gói để mở khóa'
+        f'</button>'
+        f'</div>'
+        f'</div>'
+        f'</section>'
+    )
+
+
+WITHHELD_BY_ROLE_HTML = _render_locked_panel("market")
 
 
 def _render_tabs_wrapper(
@@ -6476,12 +6526,18 @@ def _render_tabs_wrapper(
     """
     hidden = set(hidden_panels)
     if "panel-market" in hidden:
-        tab2_content = WITHHELD_BY_ROLE_HTML
+        tab2_content = _render_locked_panel("market")
     if "panel-trades" in hidden:
-        tab3_content = WITHHELD_BY_ROLE_HTML
+        tab3_content = _render_locked_panel("trades")
     tab_label_attr = ""
     if hidden:
         tab_label_attr = f' data-hidden-panels="{" ".join(sorted(hidden))}"'
+
+    market_icon = "🔒" if "panel-market" in hidden else "🌐"
+    market_class = "tab-label label-market" + (" tab-label-locked" if "panel-market" in hidden else "")
+    trades_icon = "🔒" if "panel-trades" in hidden else "📑"
+    trades_class = "tab-label label-trades" + (" tab-label-locked" if "panel-trades" in hidden else "")
+
     return (
         f'<div class="tabs-control-wrapper"{tab_label_attr}>'
         '<input type="radio" name="main_tabs" id="tab-nav-report" class="tab-nav-radio" checked style="display:none!important;position:absolute!important;opacity:0!important;pointer-events:none!important;">'
@@ -6492,11 +6548,11 @@ def _render_tabs_wrapper(
         '<label class="tab-label label-report" for="tab-nav-report" id="label-tab-report" tabindex="0">'
         '<span class="tab-icon">📊</span> <span class="tab-title">Analyst Result</span>'
         "</label>"
-        '<label class="tab-label label-market" for="tab-nav-market" id="label-tab-market" tabindex="0">'
-        '<span class="tab-icon">🌐</span> <span class="tab-title">Premium Market</span>'
+        f'<label class="{market_class}" for="tab-nav-market" id="label-tab-market" tabindex="0">'
+        f'<span class="tab-icon">{market_icon}</span> <span class="tab-title">Premium Market</span>'
         "</label>"
-        '<label class="tab-label label-trades" for="tab-nav-trades" id="label-tab-trades" tabindex="0">'
-        '<span class="tab-icon">📑</span> <span class="tab-title">Other &amp; Position</span>'
+        f'<label class="{trades_class}" for="tab-nav-trades" id="label-tab-trades" tabindex="0">'
+        f'<span class="tab-icon">{trades_icon}</span> <span class="tab-title">Other &amp; Position</span>'
         "</label>"
         "</div>"
         "</div>"
@@ -11052,6 +11108,144 @@ footer.report-footer {
 #suy-luan table td:last-child {
   width: 32% !important;
   text-align: right !important;
+}
+
+/* Locked Feature Card for User Role */
+.card-locked {
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.95), rgba(15, 23, 42, 0.92)) !important;
+  border: 1px solid rgba(56, 189, 248, 0.25) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  border-radius: var(--radius-md, 8px) !important;
+  padding: 36px 32px !important;
+  margin: 20px 0 !important;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.card-locked::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #38BDF8, #818CF8, transparent);
+}
+.locked-card-container {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.locked-badge-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.locked-status-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #F59E0B;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+.locked-plan-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38BDF8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+.locked-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text, #F9FAFB);
+  margin: 0 0 10px 0;
+  letter-spacing: -0.01em;
+}
+.locked-subtitle {
+  font-size: 14px;
+  color: var(--muted, #9CA3AF);
+  margin: 0 0 24px 0;
+  line-height: 1.6;
+}
+.locked-features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  width: 100%;
+  margin-bottom: 28px;
+  text-align: left;
+}
+.locked-feature-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 16px;
+  transition: border-color 0.2s ease;
+}
+.locked-feature-item:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+}
+.locked-feature-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #E2E8F0;
+  margin-bottom: 6px;
+}
+.locked-feature-desc {
+  font-size: 12px;
+  color: #94A3B8;
+  line-height: 1.5;
+}
+.locked-action-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+.locked-note {
+  font-size: 13px;
+  color: var(--muted, #9CA3AF);
+  max-width: 560px;
+  line-height: 1.6;
+  margin: 0 !important;
+}
+.btn-upgrade-plan {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #0284C7, #2563EB);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 6px;
+  padding: 11px 26px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+}
+.btn-upgrade-plan:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+}
+.tab-label-locked {
+  opacity: 0.9;
+}
+.tab-label-locked .tab-icon {
+  filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.8));
 }
 
 /* Traded assets 5-row view limit with vertical scroll */

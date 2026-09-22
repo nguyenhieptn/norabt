@@ -9,12 +9,12 @@ trang (điểm rủi ro, điểm chất lượng, độ tin cậy) trước đâ
 Module này CHỈ GOM/TÍNH dữ liệu để giải thích -- không dựng HTML (đó là việc
 của `Agent/backend/web/report_page.py`, xem hàm `_render_score_basis`), và
 KHÔNG tính lại bất kỳ điểm rủi ro/chất lượng/độ tin cậy nào của
-`Agent/backend/qc/scoring/fusion.py` hay `Agent/backend/analysis/limited.py`
+`Agent/backend/report/qc/scoring/fusion.py` hay `Agent/backend/bot/analysis/limited.py`
 -- cùng kỷ luật `loss_analysis.py`/`limited_view.py` đã theo: đọc lại đúng
 những con số hai module đó đã tính và đã ghi vào `evidence`, không suy diễn
 số mới. Ngoại lệ DUY NHẤT là ba phép TỔNG HỢP thuần cộng/nhân bên dưới
 (`_noisy_or_combine`, tính phủ sóng, tính trần theo số luồng) cho nhánh
-LIMITED: `Agent/backend/analysis/limited.py` không tự ghi các số hạng trung
+LIMITED: `Agent/backend/bot/analysis/limited.py` không tự ghi các số hạng trung
 gian này ra `evidence` (chỉ ghi con số `confidence` cuối cùng đã làm tròn),
 nên đây là nơi DUY NHẤT có thể tái dựng chúng cho người đọc mà không phải
 sửa `limited.py`. Ba hằng số dùng để tái dựng (`_SOURCE_DEPENDENCE_DISCOUNT`,
@@ -22,7 +22,7 @@ sửa `limited.py`. Ba hằng số dùng để tái dựng (`_SOURCE_DEPENDENCE_
 `_CONFIDENCE_CEILING_ABSOLUTE`) là bản SAO CÓ CHỦ Ý của đúng hằng số cùng
 tên trong `limited.py` -- cùng lý do và cùng quy ước
 `Agent/backend/web/report_page.py` đã nêu cho `DIMENSION_LABEL_VI`/
-`TIER_LABEL_VI` của nó (cây `Agent/backend/analysis/*` không phải chỗ module
+`TIER_LABEL_VI` của nó (cây `Agent/backend/bot/analysis/*` không phải chỗ module
 trình bày này được sửa, nên sao chép rồi ghi rõ nguồn thay vì import riêng
 tư). `Agent/none/test/test_score_basis.py` khoá chặt bằng cách so số tái dựng ở
 đây với `result["confidence"]` thật của `assess_limited_bot` -- lệch hằng số
@@ -92,7 +92,7 @@ VALIDATION_LIMITED_VI = (
 )
 
 # Mô tả 5 thành phần điểm chất lượng nhánh FULL bằng lời -- KHÔNG kèm trọng
-# số cụ thể (những con số đó sống trong `Agent/backend/qc/scoring/quality.py`,
+# số cụ thể (những con số đó sống trong `Agent/backend/report/qc/scoring/quality.py`,
 # một cây off-limits cho việc này; nêu lại bằng số ở đây có nguy cơ trôi khỏi
 # module thật mà không ai biết). Đây là mô tả PHƯƠNG PHÁP, đúng với mọi bot,
 # không phải số liệu riêng của bot đang xem.
@@ -121,7 +121,7 @@ def _finite_float(value: Any) -> Optional[float]:
 
     Accepts a numeric STRING too (`"0.62"`, `"400"`) -- `evidence.profile`/
     `evidence.stats` are the raw OKX dicts passed straight through by
-    `Agent/backend/analysis/limited.py` (see that module's `_float`, which
+    `Agent/backend/bot/analysis/limited.py` (see that module's `_float`, which
     does the exact same string parsing before this module ever sees the
     values), so refusing strings here would silently read every real
     `leadDays`/`winRatio`/... field as missing.
@@ -248,7 +248,7 @@ def full_fusion_summary(evidence: Any) -> Dict[str, Any]:
 def full_confidence_basis(evidence: Any) -> Dict[str, Any]:
     """Những mảnh có sẵn để giải thích độ tin cậy của MỘT bot FULL.
 
-    Công thức thật (`Agent/backend/qc/scoring/fusion.py::fuse`) là
+    Công thức thật (`Agent/backend/report/qc/scoring/fusion.py::fuse`) là
     `min(100, nguồn_tin_cậy x độ_tin_cậy_theo_chiều x 100)`, trong đó
     `nguồn_tin_cậy` trộn chất lượng dữ liệu của bot (và của thị trường, nếu
     có) còn `độ_tin_cậy_theo_chiều` là trung bình có trọng số của
@@ -272,7 +272,7 @@ def full_confidence_basis(evidence: Any) -> Dict[str, Any]:
 
 # --------------------------------------------------------------------------- #
 # Nhánh LIMITED -- đọc `evidence.components` (danh sách phẳng do
-# `Agent/backend/analysis/limited.py::assess_limited_bot` ghi ra, mỗi phần
+# `Agent/backend/bot/analysis/limited.py::assess_limited_bot` ghi ra, mỗi phần
 # tử đã là `_Component.to_dict()`: name/label/score/weight/status/
 # confidence/findings -- KHÔNG có hình dạng rút gọn nào khác, luôn đủ cả 6
 # trường vì đây luôn là đường chấm sống, không có "đọc từ đĩa" riêng).
@@ -331,7 +331,7 @@ def limited_fusion_summary(components: Sequence[Dict[str, Any]]) -> Dict[str, An
 
 
 # Bản sao có chủ đích của các hằng số cùng tên trong
-# `Agent/backend/analysis/limited.py` -- xem module docstring ở trên cho lý
+# `Agent/backend/bot/analysis/limited.py` -- xem module docstring ở trên cho lý
 # do và cho tấm khoá chống trôi (`Agent/none/test/test_score_basis.py`).
 _SOURCE_DEPENDENCE_DISCOUNT = 0.8
 _CONFIDENCE_CEILING_BASE = 15.0
@@ -348,7 +348,7 @@ _STREAM_LABELS_VI = (
 
 def _noisy_or_combine(confidences: Sequence[float]) -> float:
     """`1 - Π(1 - c_i x discount^i)` trên các `c_i` đã sắp giảm dần -- đúng
-    quy tắc `Agent/backend/analysis/limited.py::_combine_measured_confidence`
+    quy tắc `Agent/backend/bot/analysis/limited.py::_combine_measured_confidence`
     dùng để gộp độ tin cậy của các chiều ĐO ĐƯỢC (xem module đó cho lý do
     "noisy-OR" thay vì trung bình cộng).
     """
@@ -390,7 +390,7 @@ def limited_confidence_breakdown(evidence: Any) -> Optional[Dict[str, Any]]:
     stream_present = {
         "drawdown": (by_name.get("drawdown") or {}).get("status") == "AVAILABLE",
         "return_path": (by_name.get("return_path") or {}).get("status") == "AVAILABLE",
-        # Cùng vị từ `Agent/backend/analysis/limited.py::_independent_stream_count`
+        # Cùng vị từ `Agent/backend/bot/analysis/limited.py::_independent_stream_count`
         # dùng, đọc thẳng trên field OKX gốc thay vì gọi lại hàm private đó.
         "stats": bool(
             stats
@@ -430,7 +430,7 @@ def limited_confidence_breakdown(evidence: Any) -> Optional[Dict[str, Any]]:
 
 def quality_basis_limited(evidence: Any) -> Optional[Dict[str, Any]]:
     """Các con số ĐẦU VÀO thật của công thức điểm chất lượng LIMITED
-    (`Agent/backend/analysis/limited.py::_quality_score`): điểm khởi đầu 50,
+    (`Agent/backend/bot/analysis/limited.py::_quality_score`): điểm khởi đầu 50,
     cộng tới 15 theo số ngày lead trader, cộng 10/trừ 20 theo dấu PnL, cộng
     `(tỉ lệ ngày lãi - 50%) x 40`, trừ 30 nếu đường vốn từng về 0, rồi chặn
     trần 75/100. Trả các ĐẦU VÀO (đọc thẳng từ `evidence.profile/stats`),

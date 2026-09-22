@@ -12,7 +12,7 @@ Trọng tâm nghiệm thu:
    trả `is_valid=True` mà không đi qua một câu trả lời facilitator giả lập
    nói `isValid: true`. Mọi nhánh lỗi/từ chối khác đều được test riêng.
 
-`FakeFacilitator` dưới đây đứng thay cho `Agent.backend.okx.client.OkxClient`
+`FakeFacilitator` dưới đây đứng thay cho `Agent.backend.external.okx.client.OkxClient`
 qua tham số `facilitator_client=` của `verify_payment()` -- test không bao
 giờ chạm mạng thật, và không cần mock `urllib`/`OkxClient` nội bộ.
 """
@@ -25,12 +25,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
-from Agent.backend.okx.client import (
+from Agent.backend.external.okx.client import (
     OkxApiError,
     OkxCredentialsMissing,
     OkxTransportError,
 )
-from Agent.backend.payments import x402
+from Agent.backend.external.payments import x402
 
 
 @pytest.fixture(autouse=True)

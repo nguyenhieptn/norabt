@@ -30,11 +30,11 @@ from Agent.backend.market.features.orderflow import (
     OrderflowFeatureExtractor,
     TickAggregator,
 )
-from Agent.backend.sources.market_source import CandleCache, LiveMarketDataSource
+from Agent.backend.external.sources.market_source import CandleCache, LiveMarketDataSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PEPE_TICKS_FIXTURE = (
-    REPO_ROOT / "Agent" / "data" / "dex" / "PEPE" / "market" / "ticks_100ms_stream.json"
+    REPO_ROOT / "Agent" / "data" / "market" / "dex" / "PEPE" / "ticks_100ms_stream.json"
 )
 
 
@@ -264,7 +264,7 @@ def test_pagination_max_wall_seconds_caps_a_runaway_walk(
         fake_now[0] += 100.0
         return fake_now[0]
 
-    import Agent.backend.sources.market_source as market_source_module
+    import Agent.backend.external.sources.market_source as market_source_module
 
     monkeypatch.setattr(market_source_module.time, "monotonic", fake_monotonic)
 

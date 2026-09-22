@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from Agent.backend.pipeline import RiskSupervisionPipeline
-from Agent.backend.qc.reporting.adapters import build_report_document
-from Agent.backend.qc.reporting.contracts import ReportProduct
-from Agent.backend.qc.reporting.dossier import build_analysis_dossier
+from Agent.backend.report.qc.reporting.adapters import build_report_document
+from Agent.backend.report.qc.reporting.contracts import ReportProduct
+from Agent.backend.report.qc.reporting.dossier import build_analysis_dossier
 from Agent.none.test.conftest import FIXED_AS_OF_MS
 
 

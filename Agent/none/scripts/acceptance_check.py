@@ -26,7 +26,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Tuple
 
 REPO = Path(__file__).resolve().parents[3]
-ASSESSMENT_DIR = REPO / "Agent" / "data" / "assessment"
+# 2026-09: assessment_store.persist ghi vào data/report/<bot_id>/latest.json
+# (không còn data/assessment/<venue>/<asset>/bot/.../assessment.json)
+REPORT_DIR = REPO / "Agent" / "data" / "report"
 BASE_URL = "http://127.0.0.1:8770"
 
 # Dấu phụ CHỈ có trong tiếng Việt. Cố ý KHÔNG gồm "ó"/"é" trần: chúng xuất
@@ -76,11 +78,15 @@ class Report:
 
 
 def check_stored_assessments(report: Report) -> None:
-    """Kho dữ liệu: schema, khoá, và VĂN THẬT chứ không phải câu dự phòng."""
-    from Agent.backend.qc.reporting.narrative import FALLBACK_NARRATIVE_VI
-    from Agent.backend.qc.reporting.readability import measure_readability
+    """Kho dữ liệu: schema, khoá, và VĂN THẬT chứ không phải câu dự phòng.
 
-    files = sorted(ASSESSMENT_DIR.glob("**/assessment.json"))
+    2026-09: persist ghi vào data/report/<bot_id>/latest.json thay vì
+    data/assessment/<venue>/<asset>/bot/.../assessment.json.
+    """
+    from Agent.backend.external.llm.narrative import FALLBACK_NARRATIVE_VI
+    from Agent.backend.report.qc.reporting.readability import measure_readability
+
+    files = sorted(REPORT_DIR.glob("*/latest.json"))
     report.check(bool(files), "kho có dữ liệu", f"{len(files)} file")
     if not files:
         return
@@ -135,30 +141,26 @@ def check_stored_assessments(report: Report) -> None:
 
 
 
-def check_index_matches_disk(report: Report) -> None:
-    """`index.json` phải kể đúng số bot đang có file trên đĩa.
+def check_report_folders_consistent(report: Report) -> None:
+    """Mỗi bot trong data/report/ phải có đủ 3 file: latest.json,
+    monte_carlo.json, performance.json.
 
-    Ngày 19/09 nó kể 1 trong khi đĩa có 31: `persist_assessment` dựng lại
-    index từ đúng tập bot của LƯỢT CHẠY hiện tại, nên mỗi lần người dùng
-    bấm "Re-analyze" (một bot) là index bị cắt. Web không lộ ra vì trang
-    danh sách duyệt thẳng thư mục -- nhưng MCP (`list_assessed_bots`,
-    `get_assessment`), tức đúng bề mặt khách gọi qua marketplace, đọc
-    index, nên 30/31 bot bị báo là "chưa được chấm".
+    2026-09: schema mới không còn index.json -- bộ ba file trên đủ để
+    MCP (`list_assessed_bots`, `get_assessment`) đọc trực tiếp từ đĩa.
+    Kiểm này thay thế check_index_matches_disk cũ.
     """
-    index_path = ASSESSMENT_DIR / "index.json"
-    files = sorted(ASSESSMENT_DIR.glob("**/assessment.json"))
-    if not index_path.exists():
-        report.check(False, "index.json khớp số file", "không có index.json")
-        return
-    try:
-        rows = json.loads(index_path.read_text(encoding="utf-8")).get("bots") or []
-    except (OSError, ValueError) as exc:
-        report.check(False, "index.json khớp số file", f"không đọc được: {exc}")
-        return
+    REQUIRED = {"latest.json", "monte_carlo.json", "performance.json"}
+    bot_dirs = sorted(d for d in REPORT_DIR.iterdir() if d.is_dir())
+    missing: List[str] = []
+    for d in bot_dirs:
+        have = {f.name for f in d.iterdir() if f.is_file()}
+        if not REQUIRED.issubset(have):
+            missing.append(f"{d.name}: thiếu {REQUIRED - have}")
     report.check(
-        len(rows) == len(files),
-        "index.json khớp số file",
-        f"index {len(rows)} / đĩa {len(files)}",
+        not missing,
+        "mỗi thư mục report có đủ 3 file",
+        f"{len(bot_dirs)} bot, {len(missing)} thiếu file"
+        + (f" — ví dụ {missing[0]}" if missing else ""),
     )
 
 
@@ -193,7 +195,7 @@ _EVIDENCE_CONTRACT = ("data_quality", "market_available")
 
 def check_persisted_contract(report: Report) -> None:
     """Các khoá trang báo cáo ĐỌC ĐỂ VẼ phải thật sự có trên đĩa."""
-    files = sorted(ASSESSMENT_DIR.glob("**/assessment.json"))
+    files = sorted(REPORT_DIR.glob("*/latest.json"))
     if not files:
         return
     missing_sim: List[str] = []
@@ -302,7 +304,7 @@ def main() -> int:
     print("KIỂM NGHIỆM THU ĐẦU-CUỐI — chỉ kiểm hiện vật thật\n")
     report = Report()
     check_stored_assessments(report)
-    check_index_matches_disk(report)
+    check_report_folders_consistent(report)
     check_persisted_contract(report)
     check_live_service(report)
     print()

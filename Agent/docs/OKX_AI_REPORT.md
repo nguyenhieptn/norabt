@@ -16,7 +16,7 @@ NoraBT đã hoàn thành 100% các tiêu chí kỹ thuật, ranh giới an toàn
 | :--- | :--- | :---: | :--- |
 | **1. Tính Tự Chủ (Autonomous Nature)** | Agent có khả năng tự nhận thức, lập kế hoạch và hành động độc lập | **100%** | ReAct Planner loop tại [pipeline.py](file:///home/ubuntu/norabt/Agent/backend/pipeline.py), tự động cào nến, tái tạo sổ lệnh FIFO và tính toán 10 lăng kính rủi ro. |
 | **2. Tích Hợp OKX Thực Chất** | Kết nối trực tiếp dữ liệu OKX CEX & DEX, không giả lập | **100%** | Nạp dữ liệu thực qua API công khai OKX tại [bot_source.py](file:///home/ubuntu/norabt/Agent/backend/sources/bot_source.py), [service.py](file:///home/ubuntu/norabt/Agent/backend/market/service.py). |
-| **3. Chuẩn Giao Thức MCP** | Cung cấp FastMCP Server chuẩn JSON-RPC 2.0 để các Agent khác gọi | **100%** | Máy chủ FastMCP tại [agent_server.py](file:///home/ubuntu/norabt/Agent/backend/agent_server.py) công bố 6 tools chuẩn hóa trên cổng 8000. |
+| **3. Chuẩn Giao Thức MCP** | Cung cấp FastMCP Server chuẩn JSON-RPC 2.0 để các Agent khác gọi | **100%** | Máy chủ FastMCP tại [agent_server.py](file:///home/ubuntu/norabt/Agent/backend/scripts/agent_server.py) công bố 6 tools chuẩn hóa trên cổng 8000. |
 | **4. Kinh Tế Học Token (x402)** | Cơ chế tính phí vi mô onchain theo lượt gọi API | **100%** | Giao thức x402 tại [x402.py](file:///home/ubuntu/norabt/Agent/backend/payments/x402.py) hỗ trợ thanh toán vi mô USDC trên mạng X Layer. |
 | **5. Ranh Giới An Toàn (Guardrails)** | Bảo vệ vốn người dùng, ngăn chặn tuyệt đối can thiệp nộp rút | **100%** | 6 tiêu chuẩn Veto cứng tại [verdict.py](file:///home/ubuntu/norabt/Agent/backend/qc/scoring/verdict.py), chính sách cô lập Read-Only cách ly hoàn toàn quyền thực thi lệnh. |
 | **6. Chất Lượng Ngôn Ngữ LLM** | Nhận định chuyên gia khách quan, không chứa rác máy móc | **100%** | Vận hành `agy/gemini-3.8-flash-medium` với **5 Cổng kiểm duyệt** (độ dài 80-150 từ, Flesch-Kincaid 10-14, cấm từ AI, khóa số liệu). |
@@ -31,7 +31,7 @@ NoraBT đã hoàn thành 100% các tiêu chí kỹ thuật, ranh giới an toàn
 - **DEX Onchain Intelligence:** Giám sát thanh khoản pool, độ sâu trượt giá (slippage) và rủi ro hợp đồng thông minh trên mạng X Layer và EVM.
 
 ### 2.2. Máy Chủ Giao Thức Model Context Protocol (MCP)
-Máy chủ FastMCP tại `Agent/backend/agent_server.py` cho phép bất kỳ AI Agent nào trong hệ sinh thái OKX truy vấn định lượng với 6 công cụ:
+Máy chủ FastMCP tại `Agent/backend/scripts/agent_server.py` cho phép bất kỳ AI Agent nào trong hệ sinh thái OKX truy vấn định lượng với 6 công cụ:
 1. `list_assets`: Tra cứu danh mục tài sản và sàn giao dịch có dữ liệu.
 2. `list_bots`: Liệt kê các bot đã cào theo tài sản.
 3. `list_assessed_bots`: Lấy danh sách bot đã xếp hạng theo 6 nhóm phân loại hai trục.

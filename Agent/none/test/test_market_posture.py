@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from Agent.backend.qc.reporting.market_posture import (
+from Agent.backend.report.qc.reporting.market_posture import (
     POSTURE_GROWTH,
     POSTURE_RISK,
     POSTURE_STABLE,

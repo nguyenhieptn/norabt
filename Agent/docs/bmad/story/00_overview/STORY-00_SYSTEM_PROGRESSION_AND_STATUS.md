@@ -53,7 +53,7 @@ timeline
 - **Bối cảnh:** Cần mở rộng năng lực thẩm định của Nora thành một Agent Service có thể tích hợp vào hệ sinh thái AI của OKX (OKX AI Marketplace) và cho phép các AI Agent khác truy vấn dữ liệu.
 - **Hành động đã hoàn thành:**
   - Triển khai máy chủ **MCP Server (Model Context Protocol)** trên nền JSON-RPC 2.0.
-  - Công bố 6 công cụ: `list_assets`, `list_bots`, `list_assessed_bots`, `get_assessment`, `assess_bot`, `get_market` (đối chiếu `@mcp.tool()` trong `Agent/backend/agent_server.py`).
+  - Công bố 6 công cụ: `list_assets`, `list_bots`, `list_assessed_bots`, `get_assessment`, `assess_bot`, `get_market` (đối chiếu `@mcp.tool()` trong `Agent/backend/scripts/agent_server.py`).
   - Thiết kế cơ chế thanh toán vi mô **chuẩn x402** qua USDC trên mạng X Layer của OKX, bảo đảm tính minh bạch và kinh tế học token (Agent Economy).
   - Tích hợp lớp đệm **Redis Cache** (`norabt-agent-redis`) để tối ưu thời gian phản hồi từ 5s xuống dưới 50ms cho các truy vấn đọc lại.
 
@@ -181,7 +181,7 @@ timeline
   - **Tạo lập Bản đồ Đặc tả Kỹ thuật Trung tâm:** Xây dựng [SPEC-00_SPECIFICATION_INDEX.md](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/00_overview/SPEC-00_SPECIFICATION_INDEX.md) kết nối 10 PRD và 8 Bản đặc tả kỹ thuật chi tiết (`SPEC-01` đến `SPEC-08`) với từng module mã nguồn thực thi.
   - **Đồng bộ Đặc tả Nghiệp vụ Mới Nhất:**
     - Cập nhật [SPEC-06](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/02_technical_skills/SPEC-06_QUALITATIVE_NARRATIVE_SYNTHESIS_SKILL.md) với chuẩn 5 cổng kiểm duyệt nhận định tiếng Anh (Độ dài, Flesch-Kincaid 10-14, cấm từ AI, khóa số liệu, văn phong kiểm toán rủi ro).
-    - Cập nhật [SPEC-07](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/02_technical_skills/SPEC-07_MCP_SERVER_AND_MICRO_PAYMENTS_SKILL.md) chuẩn hóa 6 công cụ MCP tương thích 100% với `Agent/backend/agent_server.py` (`list_assets`, `list_bots`, `list_assessed_bots`, `get_assessment`, `assess_bot`, `get_market`).
+    - Cập nhật [SPEC-07](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/02_technical_skills/SPEC-07_MCP_SERVER_AND_MICRO_PAYMENTS_SKILL.md) chuẩn hóa 6 công cụ MCP tương thích 100% với `Agent/backend/scripts/agent_server.py` (`list_assets`, `list_bots`, `list_assessed_bots`, `get_assessment`, `assess_bot`, `get_market`).
   - **Bảo toàn Cấu trúc 2 Cột Trụ Duy Nhất:** Thư mục `Agent/docs/bmad` duy trì chính xác 2 thư mục gốc `spec` và `story`, mọi tài liệu con đều nằm trật tự trong các phân mục con rõ ràng kèm `README.md` hướng dẫn.
 - **Kiểm chứng:** Tái chạy kiểm thử nghiệm thu đầu-cuối `acceptance_check.py` đạt **17/17 ĐẠT**, toàn bộ hệ thống tài liệu và mã nguồn đồng bộ tuyệt đối.
 

@@ -43,8 +43,8 @@ from xml.etree import ElementTree
 import pytest
 
 from Agent.backend.infra.config import config
-from Agent.backend.sources.bot_source import BotDataSource
-from Agent.backend.sources.market_source import (
+from Agent.backend.external.sources.bot_source import BotDataSource
+from Agent.backend.external.sources.market_source import (
     MarketDataSource,
     MarketDataUnavailableError,
 )
@@ -53,7 +53,7 @@ from Agent.backend.web.report_page import render_bot_report_html
 from Agent.backend.web import report_page as report_page_module
 
 DATA_DIR = Path(config.DATA_DIR)
-_FIXTURE_BOT_DIR = DATA_DIR / "cex" / "MU" / "bot" / "bot_BB3398A957270A39"
+_FIXTURE_BOT_DIR = DATA_DIR / "trade" / "bot_BB3398A957270A39"
 VALID_CODE = "BB3398A957270A39"
 
 

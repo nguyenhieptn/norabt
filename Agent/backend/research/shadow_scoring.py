@@ -6,7 +6,7 @@ Why a "shadow" data directory
 RiskSupervisionPipeline (Agent/backend/pipeline.py) does not accept a trade
 ledger as an argument: it reads overview.json/trade_list.json straight off
 disk for a given (asset, bot_folder, venue_type), through
-BotObservationService -> FileBotDataSource (Agent/backend/sources/
+BotObservationService -> FileBotDataSource (Agent/backend/external/sources/
 bot_source.py). To score "what the product would have said using only the
 first N trades" without touching the real Agent/data tree or reimplementing
 any scoring logic, this module builds a throwaway directory that looks
@@ -33,7 +33,7 @@ What gets truncated, and why
    this data has is the one taken at crawl time -- which is AFTER the
    cutoff, i.e. it would leak future state into an in-sample score.
 2. overview.json: weekly_pnl_history is cut at the same boundary. That
-   series feeds CapitalResolver's equity curve (Agent/backend/mcp/capital/
+   series feeds CapitalResolver's equity curve (Agent/backend/bot/mcp/capital/
    equity_curve.py), which is what DrawdownRiskLens's max_dd_pct is measured
    against. Left un-truncated, a bot's post-cutoff weeks would leak its
    future drawdown straight into the in-sample score -- exactly the leak
@@ -62,10 +62,10 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict
 
-from Agent.backend.mcp.capital.equity_curve import EquityCurveBuilder
-from Agent.backend.mcp.trades.ledger import TradeLedgerManager
+from Agent.backend.bot.mcp.capital.equity_curve import EquityCurveBuilder
+from Agent.backend.bot.mcp.trades.ledger import TradeLedgerManager
 from Agent.backend.pipeline import RiskSupervisionPipeline, RiskSupervisionResult
-from Agent.backend.qc.history.store import AssessmentHistoryStore
+from Agent.backend.report.qc.history.store import AssessmentHistoryStore
 
 _LEDGER_ROW_KEYS = ("closed_trades", "history_trades", "trades")
 

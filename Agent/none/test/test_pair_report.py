@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from Agent.backend.qc.reporting.pair_report import (
+from Agent.backend.report.qc.reporting.pair_report import (
     ROLE_LAGGARD,
     ROLE_LEAD,
     PairedBotReportService,
 )
-from Agent.backend.qc.reporting.render import render_pair_report
+from Agent.backend.report.qc.reporting.render import render_pair_report
 from Agent.none.test.conftest import FIXED_AS_OF_MS, write_bot_dataset, write_market_dataset
 
 LAST_CANDLE_MS = 1_789_000_000_000

@@ -18,12 +18,12 @@ from Agent.backend.infra.quality import EvaluationMode
 from Agent.backend.market.coverage import plan_market_coverage, resolve_planned_markets
 from Agent.backend.market.schemas.market_result import MarketResult
 from Agent.backend.market.service import MarketDataUnavailableError, MarketService
-from Agent.backend.mcp.schemas.bot_result import BotResult
-from Agent.backend.mcp.service import BotObservationService
-from Agent.backend.qc.schemas.risk_assessment import BotRiskAssessment
-from Agent.backend.qc.history.store import AssessmentHistoryStore
-from Agent.backend.qc.service import QCCoreService
-from Agent.backend.universe.registry import UniverseRegistry
+from Agent.backend.bot.mcp.schemas.bot_result import BotResult
+from Agent.backend.bot.mcp.service import BotObservationService
+from Agent.backend.report.qc.schemas.risk_assessment import BotRiskAssessment
+from Agent.backend.report.qc.history.store import AssessmentHistoryStore
+from Agent.backend.report.qc.service import QCCoreService
+from Agent.backend.market.universe.registry import UniverseRegistry
 
 logger = logging.getLogger(__name__)
 

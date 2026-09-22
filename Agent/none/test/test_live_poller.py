@@ -29,7 +29,7 @@ from Agent.backend.live.store import (
     save_state,
     write_atomic,
 )
-from Agent.backend.okx.client import OkxApiError, OkxTransportError
+from Agent.backend.external.okx.client import OkxApiError, OkxTransportError
 
 CURRENT_POSITIONS_PATH = "/api/v5/copytrading/public-current-subpositions"
 HISTORY_PATH = "/api/v5/copytrading/public-subpositions-history"
@@ -253,6 +253,9 @@ def _seed_dataset(
 ) -> Path:
     bot_dir = target.bot_dir(data_dir)
     bot_dir.mkdir(parents=True, exist_ok=True)
+    (bot_dir / "crawl_slot.json").write_text(
+        json.dumps({"venue": target.venue.upper(), "asset": target.symbol.upper()})
+    )
     (bot_dir / "overview.json").write_text(
         json.dumps({"uniqueCode": target.unique_code, "nickName": target.name})
     )
@@ -287,8 +290,11 @@ def _seed_dataset_at(
     carry one venue/symbol (its selection slot) while its actual crawled data
     lives under a completely different venue/asset pair.
     """
-    bot_dir = Path(data_dir) / venue.lower() / asset / "bot" / f"bot_{code}"
+    bot_dir = Path(data_dir) / "trade" / f"bot_{code}"
     bot_dir.mkdir(parents=True, exist_ok=True)
+    (bot_dir / "crawl_slot.json").write_text(
+        json.dumps({"venue": venue.upper(), "asset": asset.upper()})
+    )
     (bot_dir / "overview.json").write_text(
         json.dumps({"uniqueCode": code, "nickName": name})
     )
@@ -431,8 +437,8 @@ def test_short_position_negative_subpos_preserved_and_parsed_by_abs_value(tmp_pa
     verbatim (direction lives in posSide) and the existing downstream ledger
     parser must still recover a positive size + SHORT side from it -- the
     exact bug crawl_bots.py had to fix once already."""
-    from Agent.backend.mcp.schemas.bot_result import PositionSide
-    from Agent.backend.mcp.trades.ledger import TradeLedgerManager
+    from Agent.backend.bot.mcp.schemas.bot_result import PositionSide
+    from Agent.backend.bot.mcp.trades.ledger import TradeLedgerManager
 
     target = _target("CODE3")
     _seed_dataset(tmp_path, target, open_positions=[_position("1")], closed_trades=[])
@@ -768,30 +774,6 @@ def test_find_bot_dir_returns_none_when_nothing_exists(tmp_path):
     assert find_bot_dir(tmp_path, "NOPE") is None
 
 
-def test_find_bot_dir_prefers_richer_candidate_when_duplicated(tmp_path):
-    # Two directories for the same uniqueCode: one fully crawled (overview.json
-    # + real closed_trades), one bare (no overview.json, no closed_trades) --
-    # the kind of accidental empty duplicate LỖI 5 itself created. The richer
-    # one must always win.
-    poor_dir = Path(tmp_path) / "dex" / "WBTC" / "bot" / "bot_DUP1"
-    poor_dir.mkdir(parents=True)
-    (poor_dir / "trade_list.json").write_text(
-        json.dumps({"open_positions": [], "closed_trades": []})
-    )
-    rich_dir = _seed_dataset_at(
-        tmp_path,
-        "CEX",
-        "BTC",
-        "DUP1",
-        "Dup Trader",
-        [],
-        [_closed_trade("A"), _closed_trade("B")],
-    )
-
-    found = find_bot_dir(tmp_path, "DUP1")
-
-    assert found == rich_dir
-
 
 def test_poll_bot_writes_to_real_dir_when_slot_mismatches_and_creates_nothing(
     tmp_path,
@@ -818,10 +800,12 @@ def test_poll_bot_writes_to_real_dir_when_slot_mismatches_and_creates_nothing(
     assert change.not_crawled is False
 
     dirs_after = _all_bot_dirs(tmp_path)
+    # Unified layout: the slot-derived path and the real data path are now
+    # structurally the SAME path (data/trade/bot_<code>/, no venue/asset
+    # segregation) -- there is no longer a distinct "wrong" location this
+    # could have written into instead, so the only invariant left to check
+    # is that no NEW directory appeared.
     assert dirs_after == dirs_before, "no new bot directory may be created"
-
-    wrong_dir = tmp_path / "dex" / "WBTC" / "bot" / "bot_MISMATCH1"
-    assert not wrong_dir.exists(), "must never write into the slot-derived path"
 
     written = read_json(real_dir / "trade_list.json")
     assert {p["subPosId"] for p in written["open_positions"]} == {"1", "2"}
@@ -845,7 +829,7 @@ def test_poll_bot_reports_chua_crawl_when_no_directory_exists_anywhere(tmp_path)
 
     dirs_after = _all_bot_dirs(tmp_path)
     assert dirs_after == dirs_before, "no directory may be created"
-    assert not (tmp_path / "cex" / "ETH" / "bot" / "bot_GHOST1").exists()
+    assert not (tmp_path / "trade" / "bot_GHOST1").exists()
 
 
 def _format_change_vi_or_error(change) -> str:
@@ -940,7 +924,11 @@ def test_with_data_location_reads_real_venue_and_symbol_from_bot_dir(tmp_path):
     # Slot says DEX/PEPE; the bot's real files are filed under cex/SNDK/,
     # mirroring one of the 11/30 real mismatches this bug was found from.
     target = _target("ANY1", venue="DEX", symbol="PEPE")
-    bot_dir = tmp_path / "cex" / "SNDK" / "bot" / "bot_ANY1"
+    bot_dir = tmp_path / "trade" / "bot_ANY1"
+    bot_dir.mkdir(parents=True)
+    (bot_dir / "crawl_slot.json").write_text(
+        json.dumps({"venue": "CEX", "asset": "SNDK"}), encoding="utf-8"
+    )
 
     resolved = target.with_data_location(bot_dir)
 
@@ -990,7 +978,7 @@ def _capture_rescore(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        "Agent.backend.run_report.rescore_one_bot_complete", fake
+        "Agent.backend.scripts.run_report.rescore_one_bot_complete", fake
     )
     return calls
 
@@ -1059,7 +1047,7 @@ def test_empty_scan_gives_a_specific_diagnosable_rescore_error(tmp_path, monkeyp
     # Lõi chấm điểm không tìm thấy bot -> `_rescore_bot` phải nêu rõ mã
     # và venue đã tìm, không trả một `None` trần.
     monkeypatch.setattr(
-        "Agent.backend.run_report.rescore_one_bot_complete",
+        "Agent.backend.scripts.run_report.rescore_one_bot_complete",
         lambda data_dir, unique_code, *, data_venue=None: None,
     )
 

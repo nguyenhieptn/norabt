@@ -31,11 +31,11 @@ from starlette.requests import Request
 from starlette.testclient import TestClient
 
 from Agent.backend.infra.config import config
-from Agent.backend.mcp.service import BotObservationService, EvaluationMode
-from Agent.backend.okx.client import OkxApiError
-from Agent.backend.qc.reporting import narrative
-from Agent.backend.qc.scoring.verdict import VERDICT_BASIS_VI
-from Agent.backend.sources.bot_source import (
+from Agent.backend.bot.mcp.service import BotObservationService, EvaluationMode
+from Agent.backend.external.okx.client import OkxApiError
+from Agent.backend.llm import narrative
+from Agent.backend.report.qc.scoring.verdict import VERDICT_BASIS_VI
+from Agent.backend.external.sources.bot_source import (
     HISTORY_PATH,
     LEAD_TRADERS_PATH,
     POSITIONS_PATH,
@@ -47,7 +47,7 @@ from Agent.backend.sources.bot_source import (
     BotSourceError,
     LedgerUnavailableError,
 )
-from Agent.backend.sources.market_source import (
+from Agent.backend.external.sources.market_source import (
     FileMarketDataSource,
     MarketDataSource,
     MarketDataUnavailableError,
@@ -88,7 +88,7 @@ DATA_DIR = Path(config.DATA_DIR)
 # REAL_BOT_*): complete, reconciled ledger, so feeding its overview/ledger
 # JSON through a fake live source exercises the exact same parsing/QC/Monte
 # Carlo pipeline a real OKX-backed FULL result would, with no network at all.
-_FIXTURE_BOT_DIR = DATA_DIR / "cex" / "MU" / "bot" / "bot_BB3398A957270A39"
+_FIXTURE_BOT_DIR = DATA_DIR / "trade" / "bot_BB3398A957270A39"
 VALID_CODE = "BB3398A957270A39"
 
 
@@ -929,12 +929,12 @@ def test_api_bots_serves_normalized_rows_never_the_raw_assessment_document() -> 
 # (nick_name "King_GG", but the assessment document's own `bot.venue_type`/
 # `bot.traded_symbol` say CEX/BTC), and the exact raw crawl that assessment
 # was generated FROM is separately committed at
-# data/cex/BTC/bot/bot_<code>/{overview,trade_list}.json -- same
+# data/trade/bot_<code>/{overview,trade_list}.json -- same
 # unique_code, same nick_name. Re-running that same raw ledger through the
 # live pipeline is therefore expected to reach the same verdict the stored
 # assessment.json already recomputes to.
 _REAL_SCORED_CODE = "811997770117827919"
-_REAL_SCORED_BOT_DIR = DATA_DIR / "cex" / "BTC" / "bot" / f"bot_{_REAL_SCORED_CODE}"
+_REAL_SCORED_BOT_DIR = DATA_DIR / "trade" / f"bot_{_REAL_SCORED_CODE}"
 
 
 def test_api_bots_verdict_matches_a_fresh_bot_report_verdict_for_the_same_real_bot() -> (
@@ -5114,19 +5114,18 @@ def _write_assessment_fixture(
     horizon_scenarios: Optional[List[Dict[str, Any]]] = None,
     assets: Optional[List[Dict[str, Any]]] = None,
 ) -> Path:
-    """Write one `assessment.json` (Việc 3's own on-disk shape, see
+    """Write one `latest.json` (Việc 3's own on-disk shape, see
     `Agent/backend/qc/reporting/assessment_store.py`'s `build_assessment`)
-    under `data_dir/assessment/cex/MU/bot/<nick_name>__<code>/`, hand-built
-    rather than run through the real cohort-scan pipeline (same "hand-built
-    dict matching the documented contract" style `test_report_page.py`'s own
-    module docstring already uses for its LIMITED/NOT_FOUND fixtures) --
-    every field below is exactly the shape `data.py`'s
-    `assessment_to_analyze_result` reads.
+    under `data_dir/report/<code>/`, hand-built rather than run through the
+    real cohort-scan pipeline (same "hand-built dict matching the documented
+    contract" style `test_report_page.py`'s own module docstring already
+    uses for its LIMITED/NOT_FOUND fixtures) -- every field below is exactly
+    the shape `data.py`'s `assessment_to_analyze_result` reads.
 
     `with_analysis_enrichment=True` (the default, matching a real
     `run_report.py` pass which always writes both step 2 and step 3 for the
-    same bot) also writes the sibling `data/analysis/cex/MU/bot/<nick_name>__
-    <code>/{performance,monte_carlo}.json` `sibling_analysis_documents`
+    same bot) also writes the sibling `data/report/<code>/
+    {performance,monte_carlo}.json` `sibling_analysis_documents`
     reads -- pass `False` to test the assessment-only degraded path.
 
     `closed_trade_series`/`horizon_scenarios`/`assets` (all default `None`,
@@ -5139,9 +5138,9 @@ def _write_assessment_fixture(
     `bot_assessment.v2` and the given list(s), for the tests below that need
     the file-sourced page to match a live page's full 7/12 count.
 
-    Returns the bot's own directory (parent of `assessment.json`).
+    Returns the bot's own directory (parent of `latest.json`).
     """
-    bot_dir = data_dir / "assessment" / "cex" / "MU" / "bot" / f"{nick_name}__{code}"
+    bot_dir = data_dir / "report" / code
     bot_dir.mkdir(parents=True, exist_ok=True)
     schema_version = (
         "bot_assessment.v3"
@@ -5302,14 +5301,12 @@ def _write_assessment_fixture(
         payload["simulation"]["horizon_scenarios"] = horizon_scenarios
     if assets is not None:
         payload["evidence"]["assets"] = assets
-    (bot_dir / "assessment.json").write_text(
+    (bot_dir / "latest.json").write_text(
         json.dumps(payload, ensure_ascii=False), encoding="utf-8"
     )
 
     if with_analysis_enrichment:
-        analysis_dir = (
-            data_dir / "analysis" / "cex" / "MU" / "bot" / f"{nick_name}__{code}"
-        )
+        analysis_dir = bot_dir
         analysis_dir.mkdir(parents=True, exist_ok=True)
         (analysis_dir / "performance.json").write_text(
             json.dumps(

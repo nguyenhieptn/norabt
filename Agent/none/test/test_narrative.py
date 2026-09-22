@@ -26,8 +26,8 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from Agent.backend.mcp.schemas.bot_result import PhasePerformance, StrategyObservations
-from Agent.backend.qc.reporting import narrative
+from Agent.backend.bot.mcp.schemas.bot_result import PhasePerformance, StrategyObservations
+from Agent.backend.llm import narrative
 from Agent.backend.web import data as web_data
 
 
@@ -177,7 +177,7 @@ def test_number_lock_rejects_a_number_not_in_the_input(
     text = _CLEAN_TEXT + " Ngoài ra chỉ số Sharpe đâu đó khoảng 4.77 cũng đáng chú ý."
     backend = _FakeBackend(text)
     with caplog.at_level(
-        logging.WARNING, logger="Agent.backend.qc.reporting.narrative"
+        logging.WARNING, logger="Agent.backend.llm.narrative"
     ):
         result = narrative.generate_narrative_sync(
             _CLEAN_NUMBERS, _context(), backend=backend
@@ -200,7 +200,7 @@ def test_number_lock_has_no_exemption_list_even_for_100(
     text = _CLEAN_TEXT + " Tỉ lệ thắng gần như 100% trong giai đoạn quan sát."
     backend = _FakeBackend(text)
     with caplog.at_level(
-        logging.WARNING, logger="Agent.backend.qc.reporting.narrative"
+        logging.WARNING, logger="Agent.backend.llm.narrative"
     ):
         result = narrative.generate_narrative_sync(
             _CLEAN_NUMBERS, _context(), backend=backend
@@ -716,7 +716,7 @@ def test_length_gate_accepts_the_boundary_shape() -> None:
 def test_backend_is_error_flag_falls_back(caplog: pytest.LogCaptureFixture) -> None:
     backend = _FakeBackend("", is_error=True, error="boom")
     with caplog.at_level(
-        logging.WARNING, logger="Agent.backend.qc.reporting.narrative"
+        logging.WARNING, logger="Agent.backend.llm.narrative"
     ):
         result = narrative.generate_narrative_sync(
             _CLEAN_NUMBERS, _context(), backend=backend
@@ -763,7 +763,7 @@ def test_retry_once_when_first_attempt_violates_a_gate_second_attempt_clean(
         ]
     )
     with caplog.at_level(
-        logging.WARNING, logger="Agent.backend.qc.reporting.narrative"
+        logging.WARNING, logger="Agent.backend.llm.narrative"
     ):
         result = narrative.generate_narrative_sync(
             _CLEAN_NUMBERS, _context(), backend=backend
@@ -792,7 +792,7 @@ def test_retry_still_fails_falls_back(caplog: pytest.LogCaptureFixture) -> None:
         ]
     )
     with caplog.at_level(
-        logging.WARNING, logger="Agent.backend.qc.reporting.narrative"
+        logging.WARNING, logger="Agent.backend.llm.narrative"
     ):
         result = narrative.generate_narrative_sync(
             _CLEAN_NUMBERS, _context(), backend=backend

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from Agent.backend.qc.reporting.analysis_store import (
+from Agent.backend.report.qc.reporting.analysis_store import (
     folder_name,
     load_bot,
     persist,
@@ -61,17 +61,16 @@ def _report(bots):
 
 def test_an_asset_gets_a_market_folder_and_one_folder_per_bot(tmp_path):
     persist(_report([_bot("AAA", "HaveARestin"), _bot("BBB", "Milies L")]), tmp_path)
-    asset = tmp_path / "analysis" / "cex" / "XRP"
 
-    assert (asset / "market" / "market.json").exists()
-    bot_dirs = sorted(p.name for p in (asset / "bot").iterdir())
-    assert bot_dirs == ["HaveARestin__AAA", "Milies-L__BBB"]
+    assert (tmp_path / "market" / "cex" / "XRP" / "market.json").exists()
+    assert (tmp_path / "report" / "AAA" / "performance.json").exists()
+    assert (tmp_path / "report" / "BBB" / "performance.json").exists()
 
 
 def test_each_bot_folder_holds_performance_and_monte_carlo_separately(tmp_path):
     """Two questions, two files: what it did, and what could happen next."""
     persist(_report([_bot("AAA", "HaveARestin")]), tmp_path)
-    bot_dir = tmp_path / "analysis" / "cex" / "XRP" / "bot" / "HaveARestin__AAA"
+    bot_dir = tmp_path / "report" / "AAA"
 
     performance = json.loads((bot_dir / "performance.json").read_text())
     simulation = json.loads((bot_dir / "monte_carlo.json").read_text())
@@ -100,7 +99,7 @@ def test_a_bot_is_found_by_code_even_though_the_folder_carries_its_name(tmp_path
 def test_a_bot_that_failed_analysis_is_not_written_as_if_it_had_data(tmp_path):
     persist(_report([_bot("AAA", "Broken", error="chưa crawl")]), tmp_path)
 
-    assert not (tmp_path / "analysis" / "cex" / "XRP" / "bot").exists()
+    assert not (tmp_path / "report" / "AAA").exists()
     assert load_bot(tmp_path, "CEX", "XRP", "AAA") is None
 
 
@@ -114,7 +113,7 @@ def test_folder_names_stay_path_safe_for_cjk_and_spaces():
 def test_the_index_says_what_the_files_are_for(tmp_path):
     persist(_report([_bot("AAA", "HaveARestin")]), tmp_path)
 
-    index = json.loads((tmp_path / "analysis" / "index.json").read_text())
+    index = json.loads((tmp_path / "analysis_run_index.json").read_text())
 
     assert index["step"] == "2_ANALYSIS_AND_SIMULATION"
     assert "bước 3" in index["note"]

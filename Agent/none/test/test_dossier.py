@@ -5,7 +5,7 @@ import copy
 import pytest
 
 from Agent.backend.pipeline import RiskSupervisionPipeline
-from Agent.backend.qc.reporting.dossier import (
+from Agent.backend.report.qc.reporting.dossier import (
     DossierStatus,
     EvidenceProvenance,
     build_analysis_dossier,

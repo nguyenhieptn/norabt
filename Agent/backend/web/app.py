@@ -351,7 +351,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from Agent.backend.infra.config import config
-from Agent.backend.qc.reporting import narrative
+from Agent.backend.llm import narrative
 from Agent.backend.web import access, identity, snapshot, usage_ref
 from Agent.backend.web import progress as analyze_progress
 from Agent.backend.web.data import (
@@ -368,9 +368,10 @@ from Agent.backend.web.data import (
     validate_unique_code,
 )
 from Agent.backend.web.report_page import render_bot_report_html
-from Agent.backend.qc.reporting.contracts import ReportProduct
-from Agent.backend.qc.reporting.persisted import build_persisted_dossier_view
-from Agent.backend.qc.reporting.view_policy import (
+from Agent.backend.report.qc.reporting import chat
+from Agent.backend.report.qc.reporting.contracts import ReportProduct
+from Agent.backend.report.qc.reporting.persisted import build_persisted_dossier_view
+from Agent.backend.report.qc.reporting.view_policy import (
     USER_HIDDEN_PANELS,
     ViewRole,
     apply_view_policy,
@@ -566,6 +567,21 @@ def resolve_client_ip(request: Request) -> str:
 # trên `active_limiter.allow()` trong api_analyze).
 ANALYZE_RATE_LIMIT_MAX_REQUESTS = 5
 ANALYZE_RATE_LIMIT_WINDOW_SECONDS = 60.0
+
+# Ngân sách RIÊNG cho `POST /api/chat`. Rộng hơn `/api/analyze` vì một lượt
+# hỏi-đáp KHÔNG chạm OKX và KHÔNG chạy Monte Carlo -- nó chỉ đọc một bản ghi
+# đã lưu rồi gọi LLM một lượt. Nhưng vẫn phải có trần riêng chứ không dùng
+# chung `limiter`: lượt gọi LLM tiêu quota THẬT của chủ dự án, và trần đồng
+# thời của lớp LLM (`narrative._SEMAPHORE`) là tài nguyên dùng chung với
+# tính năng sinh nhận định -- một người hỏi dồn dập sẽ làm mọi lượt chấm
+# điểm đang chạy phải xếp hàng sau mình.
+CHAT_RATE_LIMIT_MAX_REQUESTS = 12
+CHAT_RATE_LIMIT_WINDOW_SECONDS = 60.0
+
+# Thân request hỏi-đáp chỉ cần mang một mã bot, một câu hỏi và vài lượt lịch
+# sử -- `chat.MAX_QUESTION_CHARS`/`MAX_HISTORY_*` đằng nào cũng cắt chúng
+# xuống, nên thân lớn hơn mức này chắc chắn không phải một lượt hỏi thật.
+CHAT_MAX_BODY_BYTES = 16 * 1024
 
 # Separate, wider budget for a caller authenticated as admin (see
 # access.verify_admin_token) -- NOT an exemption. Deliberately NOT unlimited:
@@ -830,7 +846,7 @@ def _start_background_rescore(code: str, data_dir: Any) -> None:
             # định, nên người dùng bấm "Phân tích lại" sẽ nhận về một báo
             # cáo NGHÈO HƠN trước khi bấm -- số mới nhưng mất phần văn cho
             # tới lượt chấm hàng loạt kế tiếp.
-            from Agent.backend.run_report import rescore_one_bot_complete
+            from Agent.backend.scripts.run_report import rescore_one_bot_complete
 
             written = rescore_one_bot_complete(Path(data_dir), code)
             if written:
@@ -857,7 +873,7 @@ def _narrative_healthz_status() -> str:
     `narrative.claude_binary_status`), `"binary_missing"`, or
     `"no_credentials"`.
 
-    This exists because the narrative feature (Agent/backend/qc/reporting/
+    This exists because the narrative feature (Agent/backend/report/qc/reporting/
     narrative.py) fails CLOSED and SILENTLY by design: any transport
     failure degrades to a static fallback sentence rather than ever
     breaking `/api/analyze`/`GET /bot/<code>` (see that module's own
@@ -1399,7 +1415,24 @@ _BODY_TOO_LARGE_MESSAGE = (
 )
 
 
-async def _enforce_max_body_size(request: Request) -> Optional[Response]:
+def _body_too_large_message(max_bytes: int) -> str:
+    """Câu 413 nêu ĐÚNG trần đã áp cho tuyến đang gọi.
+
+    Giữ nguyên câu cũ cho trần mặc định để không đổi lời một response mà
+    test hiện có đang khẳng định; các trần khác nhận câu nêu đúng con số của
+    mình, vì nói "capped at 64 KiB" khi vừa chặn ở 16 KiB là sai lệch.
+    """
+    if max_bytes == ANALYZE_MAX_BODY_BYTES:
+        return _BODY_TOO_LARGE_MESSAGE
+    return (
+        "Request body too large -- this endpoint only needs a small JSON "
+        f"object, capped at {max_bytes // 1024} KiB."
+    )
+
+
+async def _enforce_max_body_size(
+    request: Request, max_bytes: int = ANALYZE_MAX_BODY_BYTES
+) -> Optional[Response]:
     """Reject an oversized POST body with 413 -- BEFORE it is read/parsed.
 
     This must run first, ahead of `_resolve_code_param` (which is what
@@ -1415,6 +1448,10 @@ async def _enforce_max_body_size(request: Request) -> Optional[Response]:
     by hand, bailing out with 413 the instant the running total crosses the
     limit -- so a chunked request can never ride around this guard the way
     it would around a Content-Length-only check.
+
+    `max_bytes` mặc định giữ nguyên trần của `/api/analyze` nên mọi nơi gọi
+    cũ không đổi hành vi; `POST /api/chat` truyền trần riêng, nhỏ hơn nhiều
+    (xem `CHAT_MAX_BODY_BYTES`).
     """
     if request.method != "POST":
         return None
@@ -1426,19 +1463,19 @@ async def _enforce_max_body_size(request: Request) -> Optional[Response]:
         except ValueError:
             declared_size = None
         if declared_size is not None:
-            if declared_size > ANALYZE_MAX_BODY_BYTES:
-                return _error_json(_BODY_TOO_LARGE_MESSAGE, 413)
+            if declared_size > max_bytes:
+                return _error_json(_body_too_large_message(max_bytes), 413)
             return None
 
     # No trustworthy Content-Length -- read the body ourselves, bounded, so
     # a chunked (or otherwise header-less) request can't buffer more than
-    # ANALYZE_MAX_BODY_BYTES worth of data into memory before this fires.
+    # `max_bytes` worth of data into memory before this fires.
     total = 0
     chunks: List[bytes] = []
     async for chunk in request.stream():
         total += len(chunk)
-        if total > ANALYZE_MAX_BODY_BYTES:
-            return _error_json(_BODY_TOO_LARGE_MESSAGE, 413)
+        if total > max_bytes:
+            return _error_json(_body_too_large_message(max_bytes), 413)
         chunks.append(chunk)
     # Cache the body exactly like Starlette's own Request.body() would (it
     # checks `hasattr(self, "_body")` before ever touching the stream again)
@@ -1585,7 +1622,7 @@ ANALYZE_SUMMARY_SCHEMA = "bot_assessment_summary.v1"
 # never drop the field to fit it.
 #
 # Raised from 6500 to 8000 when the optional `narrative` field
-# (Agent/backend/qc/reporting/narrative.py) was added: that field is
+# (Agent/backend/llm/narrative.py) was added: that field is
 # capped at MAX_NARRATIVE_CHARS (2000) characters by its own length gate,
 # so the worst case is this old budget plus that cap plus a little JSON
 # quoting/escaping overhead -- 8000 leaves comfortable headroom above that
@@ -1678,8 +1715,8 @@ def _score_governance_from_evidence(
     most important fact this summary must surface: whether the risk number
     is an ordinary weighted average of the 10 scored dimensions, or a
     veto/emergency floor overrode that average (see
-    `Agent/backend/qc/schemas/risk_assessment.py`'s `ScoreBreakdown.decided_by`
-    and `Agent/backend/qc/scoring/fusion.py`). Measured across this
+    `Agent/backend/report/qc/schemas/risk_assessment.py`'s `ScoreBreakdown.decided_by`
+    and `Agent/backend/report/qc/scoring/fusion.py`). Measured across this
     project's own scored cohort: roughly half of veto-decided bots would
     otherwise read as an unremarkable average to someone who only sees the
     final number -- so this is promoted out of the (now-dropped)
@@ -1879,7 +1916,7 @@ def _analyze_summary_for_wire(result: Dict[str, Any]) -> Dict[str, Any]:
     `verdict_basis`, `risk`, `quality`, `confidence`, `limited_reason`,
     `unavailable`, `narrative`, `report_markdown`, and `report_url` when
     present) is copied through UNCHANGED -- `narrative`
-    (Agent/backend/qc/reporting/narrative.py) is `None` unless the operator
+    (Agent/backend/llm/narrative.py) is `None` unless the operator
     opted into the feature, a short static Vietnamese fallback sentence if
     it was attempted but degraded, or the gate-validated LLM paragraph
     otherwise; see `ANALYZE_SUMMARY_SIZE_BUDGET_CHARS`'s own comment for
@@ -1890,7 +1927,7 @@ def _analyze_summary_for_wire(result: Dict[str, Any]) -> Dict[str, Any]:
     sentences move into `warnings` instead of also staying duplicated here).
     `verdict_basis` (the sentence answering "sở cứ ở đâu" for the verdict
     label -- rho 0.64, 95% CI [0.39, 0.80], see
-    `Agent/backend/qc/scoring/verdict.py`'s `VERDICT_BASIS_VI`) is kept for
+    `Agent/backend/report/qc/scoring/verdict.py`'s `VERDICT_BASIS_VI`) is kept for
     EVERY status, not just FULL: `_empty_result` (data.py) already sets it
     to `None` for LIMITED/NOT_FOUND, so the key is always present and never
     fabricated for a status that has no basis to report. It used to be
@@ -1954,6 +1991,7 @@ def create_app(
     data_service: Optional[WebDataService] = None,
     rate_limiter: Optional[PerIpRateLimiter] = None,
     admin_rate_limiter: Optional[PerIpRateLimiter] = None,
+    chat_rate_limiter: Optional[PerIpRateLimiter] = None,
     users_root: Optional[Path] = None,
     usage_refs_root: Optional[Path] = None,
     now_fn: Callable[[], float] = time.time,
@@ -2029,6 +2067,14 @@ def create_app(
     admin_limiter = admin_rate_limiter or PerIpRateLimiter(
         max_requests=ADMIN_RATE_LIMIT_MAX_REQUESTS,
         window_seconds=ADMIN_RATE_LIMIT_WINDOW_SECONDS,
+    )
+    # Trần thứ ba, độc lập với hai cái trên: một lượt hỏi-đáp không chạm OKX
+    # và không chạy Monte Carlo, nhưng lại tiêu quota LLM thật và giành khe
+    # `narrative._SEMAPHORE` với tính năng sinh nhận định -- xem
+    # CHAT_RATE_LIMIT_MAX_REQUESTS's own comment.
+    chat_limiter = chat_rate_limiter or PerIpRateLimiter(
+        max_requests=CHAT_RATE_LIMIT_MAX_REQUESTS,
+        window_seconds=CHAT_RATE_LIMIT_WINDOW_SECONDS,
     )
     dash_path = (
         Path(dashboard_path) if dashboard_path is not None else DEFAULT_DASHBOARD_PATH
@@ -3323,7 +3369,7 @@ def create_app(
             # this route renders exactly as it always has.
             hidden_panels=(
                 USER_HIDDEN_PANELS
-                if request.query_params.get("view") == "user" and not is_admin
+                if request.query_params.get("view") == "user" or not is_admin
                 else ()
             ),
         )
@@ -3377,6 +3423,106 @@ def create_app(
             payload["report_product"] = selected.value
             payload["available_products"] = [p.value for p in ReportProduct]
         return JSONResponse(payload)
+
+    async def api_chat(request: Request) -> Response:
+        """POST /api/chat -- hỏi-đáp chỉ-đọc trên MỘT bản ghi đã chấm xong.
+
+        Thân: `{"code": "...", "question": "...", "history": [...]}`.
+
+        CHỈ ĐỌC, theo đúng nghĩa đen: giống `api_dossier` ở trên, tuyến này
+        đọc một `assessment.json` đã nằm trên đĩa và KHÔNG BAO GIỜ khởi động
+        pipeline. Đó là điều ngăn nó trở thành đường vòng để kích hoạt một
+        lượt phân tích ~70s bằng một POST không cần đăng nhập -- và cũng là
+        ranh giới "Mode C, không phải Mode B" của `Agent/ideallm.md`: lớp
+        LLM ở đây không có cách nào bắt đầu một phép tính.
+
+        Chưa có bản ghi thì trả 404 chứ KHÔNG âm thầm chấm mới: người hỏi
+        cần biết là chưa có gì để hỏi, không phải đợi 70 giây.
+
+        Bot chưa chấm và bot không tồn tại nhận CÙNG một câu 404 -- cùng lý
+        do với `_generic_report_404` bên dưới: một câu 404 phân biệt được
+        hai trường hợp là một tín hiệu cho người đang dò mã.
+        """
+        oversized = await _enforce_max_body_size(request, CHAT_MAX_BODY_BYTES)
+        if oversized is not None:
+            return oversized
+
+        client_host = resolve_client_ip(request)
+        if not chat_limiter.allow(client_host):
+            return _error_json(
+                "You are asking questions too fast. Each answer costs a real "
+                "model call, so the system limits calls per IP -- please wait "
+                "a moment and try again.",
+                429,
+            )
+
+        try:
+            body: Any = await request.json()
+        except Exception:
+            body = None
+        if not isinstance(body, dict):
+            return _invalid_param_response(
+                "the request body must be a JSON object holding code and question"
+            )
+
+        try:
+            code = validate_unique_code(body.get("code"))
+        except InvalidCodeError as exc:
+            return _invalid_param_response(str(exc))
+
+        question = chat.normalize_question(body.get("question"))
+        if question is None:
+            return _invalid_param_response("question must be a non-empty string")
+
+        # Kiểm cờ tính năng TRƯỚC khi chạm đĩa: tắt thì không có lý do gì để
+        # đọc file, và câu trả lời phải giống hệt nhau cho mọi mã (kể cả mã
+        # không tồn tại) -- xem chú thích 404 ở docstring.
+        if not chat.chat_enabled():
+            return _error_json(
+                "The question-and-answer feature is not enabled on this "
+                "deployment.",
+                503,
+            )
+
+        try:
+            document = await run_in_threadpool(
+                find_assessment_document, service.data_dir, code
+            )
+        except Exception as exc:  # noqa: BLE001 - disk I/O; never bubble a traceback
+            incident_code = _log_incident("POST /api/chat", exc)
+            return _error_json(_generic_error_message(incident_code), 500)
+        if document is None:
+            return _error_json("No analysis is on record for this code", 404)
+
+        try:
+            answer = await chat.answer_question(
+                document, question, history=body.get("history")
+            )
+        except Exception as exc:  # noqa: BLE001 - last line of defence
+            # `answer_question` tự cam kết không raise ra ngoài (mọi hỏng hóc
+            # đã degrade thành câu dự phòng bên trong nó). Nhánh này tồn tại
+            # cho trường hợp cam kết đó bị vi phạm bởi một thay đổi tương
+            # lai: một câu hỏi hỏng không bao giờ được thành 500 kèm traceback.
+            incident_code = _log_incident("POST /api/chat", exc)
+            return _error_json(_generic_error_message(incident_code), 500)
+
+        if answer is None:
+            return _error_json(
+                "The question-and-answer feature is not enabled on this "
+                "deployment.",
+                503,
+            )
+
+        return JSONResponse(
+            {
+                "status": "OK",
+                "code": code,
+                "answer": answer,
+                # Gợi ý dựng TỪ chính bản ghi, không phải danh sách cứng --
+                # xem `chat.suggested_questions`.
+                "suggested_questions": chat.suggested_questions(document),
+            }
+        )
 
     def _generic_report_404() -> HTMLResponse:
         """The one, deliberately unhelpful 404 body shared by `user_report`
@@ -3473,6 +3619,16 @@ def create_app(
             is_admin=is_admin,
             refresh=refresh,
             self_path=f"/{raw_user_ref}_{code}",
+            # Same rule as GET /bot/<code>: absent an explicit `?view=user`,
+            # this route renders exactly as it always has -- see that
+            # route's own comment for why `and`, not `or`, is what keeps a
+            # default (no query param) request from being silently
+            # downgraded to the restricted view.
+            hidden_panels=(
+                USER_HIDDEN_PANELS
+                if request.query_params.get("view") == "user" and not is_admin
+                else ()
+            ),
         )
 
     async def admin_page(request: Request) -> Response:
@@ -3772,6 +3928,7 @@ def create_app(
         # cạnh `/api/analyze` cho dễ đọc bảng route.
         Route("/api/analyze/status", api_analyze_status, methods=["GET"]),
         Route("/api/v2/dossier", api_dossier, methods=["GET"]),
+        Route("/api/chat", api_chat, methods=["POST"]),
         Route("/bot/{code}", bot_report, methods=["GET"]),
         # Việc 2: the SPA's own JS/CSS bundle (Agent/frontend/build.sh's
         # output, see `assets_dir` above). `check_dir=False` -- a fresh
@@ -3823,7 +3980,7 @@ app = create_app()
 
 if __name__ == "__main__":  # pragma: no cover - convenience only, see run_web.py
     print(
-        "Run `python3 -m Agent.backend.run_web` instead of this file "
+        "Run `python3 -m Agent.backend.scripts.run_web` instead of this file "
         "directly to get the full set of CLI parameters (--host, --port, "
         "--dashboard).",
         file=sys.stderr,

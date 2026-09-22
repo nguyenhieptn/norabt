@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from Agent.backend.mcp.inference.public_signals import (
+from Agent.backend.bot.mcp.inference.public_signals import (
     AttributionVerdict,
     ImpliedMove,
     InstrumentAttributor,

@@ -59,8 +59,8 @@ def test_pools_on_another_chain_are_not_considered():
 def test_derivatives_feeds_are_stored_at_instrument_level():
     """A ccy-wide feed sums every contract and read up to 32 % above the pair."""
     for asset in CEX_ASSETS:
-        oi = DATA_DIR / "cex" / asset / "market" / f"delta_oi_{asset}-USDT-SWAP.json"
-        taker = DATA_DIR / "cex" / asset / "market" / f"taker_volume_{asset}.json"
+        oi = DATA_DIR / "market" / "cex" / asset / f"delta_oi_{asset}-USDT-SWAP.json"
+        taker = DATA_DIR / "market" / "cex" / asset / f"taker_volume_{asset}.json"
         if not oi.exists() or not taker.exists():
             continue
         assert json.loads(oi.read_text())["basis"] == "INSTRUMENT_LEVEL", asset
@@ -69,7 +69,7 @@ def test_derivatives_feeds_are_stored_at_instrument_level():
 
 def test_every_dex_pool_on_disk_agrees_with_its_exchange_reference():
     for asset in DEX_ASSETS:
-        path = DATA_DIR / "dex" / asset / "market" / "pool_liquidity.json"
+        path = DATA_DIR / "market" / "dex" / asset / "pool_liquidity.json"
         if not path.exists():
             continue
         pool = json.loads(path.read_text())

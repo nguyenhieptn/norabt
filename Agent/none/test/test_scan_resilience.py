@@ -19,9 +19,9 @@ import json
 from pathlib import Path
 from typing import Callable, Set
 
-from Agent.backend.qc.reporting.cohort import CohortAssessmentService
-from Agent.backend.qc.reporting.pair_report import PairedBotReportService
-from Agent.backend.sources.bot_source import BotSourceError, FileBotDataSource
+from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
+from Agent.backend.report.qc.reporting.pair_report import PairedBotReportService
+from Agent.backend.external.sources.bot_source import BotSourceError, FileBotDataSource
 from Agent.none.test.conftest import write_bot_dataset
 
 BOT_COUNT = 30
@@ -145,7 +145,7 @@ def test_missing_bot_file_still_produces_one_failed_row_not_a_crash(tmp_path):
     fix -- one FAILED row with the same conclusion text, scan continues."""
     codes = _write_cohort(tmp_path)
     broken = codes[0]
-    (tmp_path / "cex" / "TEST" / "bot" / f"bot_{broken}" / "trade_list.json").unlink()
+    (tmp_path / "trade" / f"bot_{broken}" / "trade_list.json").unlink()
 
     report = CohortAssessmentService(tmp_path, persist_history=False).scan(
         simulation_iterations=10, simulation_horizon=10

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from Agent.backend.market.service import MarketService
-from Agent.backend.qc.reporting.market_adapter import normalize_market_payload
+from Agent.backend.report.qc.reporting.market_adapter import normalize_market_payload
 from Agent.none.test.conftest import FIXED_AS_OF_MS
 
 

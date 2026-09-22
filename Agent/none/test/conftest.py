@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 from Agent.backend.market.service import MarketService, clear_market_result_cache
-from Agent.backend.mcp.service import BotObservationService
+from Agent.backend.bot.mcp.service import BotObservationService
 
 FIXED_AS_OF_MS = 1789230000000
 SIM_ITERATIONS = 1_000
@@ -167,8 +167,16 @@ def write_bot_dataset(
     extra_ledger: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Build a minimal on-disk bot snapshot so defect cases stay synthetic."""
-    directory = root / venue / asset / "bot" / folder
+    directory = root / "trade" / folder
     directory.mkdir(parents=True, exist_ok=True)
+    # Unified layout: preserve which (venue, asset) this bot was "crawled"
+    # under explicitly, the same way the real data-layout migration does --
+    # see Agent.backend.report.qc.reporting.assessment_store.bots_in_slot's
+    # docstring for why this cannot be re-derived from directory nesting
+    # anymore.
+    (directory / "crawl_slot.json").write_text(
+        json.dumps({"venue": venue.upper(), "asset": asset}), encoding="utf-8"
+    )
     (directory / "overview.json").write_text(
         json.dumps(overview or {"uniqueCode": "TESTCODE", "nickName": "Test Bot"}),
         encoding="utf-8",
@@ -195,7 +203,7 @@ def write_market_dataset(
     extra_files: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Build a minimal on-disk market snapshot so freshness cases stay synthetic."""
-    directory = root / venue / asset / "market"
+    directory = root / "market" / venue / asset
     directory.mkdir(parents=True, exist_ok=True)
     candles = [
         {

@@ -1,21 +1,21 @@
 # NOTE on where Docker actually reads this file from:
 #
-# Agent/deploy/Dockerfile needs to COPY Agent/backend/ and
+# Agent/docker/Dockerfile needs to COPY Agent/backend/ and
 # Agent/requirements.txt, and Docker refuses any COPY source that resolves
 # outside the build context via "..". That forces docker-compose.yml's build
-# context to be Agent/ (one level up from this deploy/ directory), not
-# Agent/deploy/ itself. Docker's *automatic* .dockerignore discovery only
+# context to be Agent/ (one level up from this docker/ directory), not
+# Agent/docker/ itself. Docker's *automatic* .dockerignore discovery only
 # ever looks at "<context>/.dockerignore" -- i.e. Agent/.dockerignore -- so
 # this file, kept at the path this deployment package documents everything
 # else at, is NOT automatically picked up by a plain `docker compose build`.
 #
-# That is not a security gap: Agent/deploy/Dockerfile's own COPY list is an
+# That is not a security gap: Agent/docker/Dockerfile's own COPY list is an
 # explicit ALLOW-list (only requirements.txt and backend/), never a wildcard
 # "COPY . .", so nothing below can leak into the image regardless of whether
 # this particular file is "wired up" by Docker itself. This file is a second,
 # human-reviewable line of defence -- and doubles as the exact list an
-# operator can `ln -sf Agent/deploy/.dockerignore Agent/.dockerignore` (see
-# Agent/deploy/README.md) to also get the minor, purely cosmetic benefit of
+# operator can `ln -sf docker/.dockerignore Agent/.dockerignore` (see
+# Agent/docker/README.md) to also get the minor, purely cosmetic benefit of
 # Docker skipping these paths when it uploads the build context.
 
 # Bot ledgers/candle cache/analysis output -- 260MB+ of runtime data that is
@@ -54,6 +54,7 @@ log/
 # not needed at runtime.
 scripts/
 
-# This deploy/ directory is the tooling that builds/runs the image; it is
+# This docker/ directory is the tooling that builds/runs the image; it is
 # never needed *inside* the image itself.
+docker/
 deploy/
