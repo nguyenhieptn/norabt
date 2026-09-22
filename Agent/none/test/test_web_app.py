@@ -302,7 +302,7 @@ def _write_lead_traders_snapshot(data_dir: Path, rows: List[Dict[str, Any]]) -> 
     """Write a fake `<data_dir>/universe/lead_traders.json` -- the on-disk
     ranking snapshot WebDataService._profile_snapshot reads for
     /api/lookup's free (non-OKX) profile lookup."""
-    universe_dir = data_dir / "universe"
+    universe_dir = data_dir / "market" / "universe"
     universe_dir.mkdir(parents=True, exist_ok=True)
     (universe_dir / "lead_traders.json").write_text(json.dumps(rows), encoding="utf-8")
 
@@ -406,7 +406,7 @@ def _isolated_usage_refs_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     real `Agent/data/usage_refs/`, without having to retrofit a new keyword
     onto every single `_client_for(...)` call site in this file.
     """
-    monkeypatch.setattr(usage_ref, "DEFAULT_USAGE_REFS_ROOT", tmp_path / "usage_refs")
+    monkeypatch.setattr(usage_ref, "DEFAULT_USAGE_REFS_ROOT", tmp_path / "report" / "usage_refs")
 
 
 # A well-formed EVM address used across every session/user-report test in

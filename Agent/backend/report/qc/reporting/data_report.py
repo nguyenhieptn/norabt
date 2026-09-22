@@ -222,7 +222,7 @@ class DataReportService:
         selection_path: Optional[Path] = None,
         only_codes: Optional[set] = None,
     ) -> DataReport:
-        path = selection_path or (self.data_dir / "universe" / "bot_selection.json")
+        path = selection_path or (self.data_dir / "market" / "universe" / "bot_selection.json")
         selection = json.loads(path.read_text(encoding="utf-8"))
         now = as_of_ms or int(time.time() * 1000)
 

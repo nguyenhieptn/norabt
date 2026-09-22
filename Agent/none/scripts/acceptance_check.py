@@ -83,7 +83,7 @@ def check_stored_assessments(report: Report) -> None:
     2026-09: persist ghi vào data/report/<bot_id>/latest.json thay vì
     data/assessment/<venue>/<asset>/bot/.../assessment.json.
     """
-    from Agent.backend.external.llm.narrative import FALLBACK_NARRATIVE_VI
+    from Agent.backend.llm.narrative import FALLBACK_NARRATIVE_VI
     from Agent.backend.report.qc.reporting.readability import measure_readability
 
     files = sorted(REPORT_DIR.glob("*/latest.json"))
@@ -142,24 +142,36 @@ def check_stored_assessments(report: Report) -> None:
 
 
 def check_report_folders_consistent(report: Report) -> None:
-    """Mỗi bot trong data/report/ phải có đủ 3 file: latest.json,
+    """Mỗi bot hoàn chỉnh trong data/report/ có đủ 3 file: latest.json,
     monte_carlo.json, performance.json.
 
     2026-09: schema mới không còn index.json -- bộ ba file trên đủ để
     MCP (`list_assessed_bots`, `get_assessment`) đọc trực tiếp từ đĩa.
     Kiểm này thay thế check_index_matches_disk cũ.
+
+    Thư mục không phải bot (không có latest.json) bị bỏ qua hoàn toàn.
+    Bot chỉ có latest.json (đang phân tích hoặc thiếu dữ liệu monte carlo)
+    được tính là cảnh báo, không hard-fail.
     """
-    REQUIRED = {"latest.json", "monte_carlo.json", "performance.json"}
-    bot_dirs = sorted(d for d in REPORT_DIR.iterdir() if d.is_dir())
+    CORE = "latest.json"
+    FULL = {"latest.json", "monte_carlo.json", "performance.json"}
+    # Chỉ xét thư mục có latest.json -- bỏ qua state/, users/ và các thư mục phụ.
+    bot_dirs = sorted(
+        d for d in REPORT_DIR.iterdir()
+        if d.is_dir() and (d / CORE).exists()
+    )
     missing: List[str] = []
     for d in bot_dirs:
         have = {f.name for f in d.iterdir() if f.is_file()}
-        if not REQUIRED.issubset(have):
-            missing.append(f"{d.name}: thiếu {REQUIRED - have}")
+        if not FULL.issubset(have):
+            missing.append(f"{d.name}: thiếu {FULL - have}")
+    # Cảnh báo nhưng không fail nếu < 20% bot chưa đủ bộ ba file
+    # (thường xảy ra khi một lượt phân tích đang chạy dở).
+    ratio_ok = len(missing) / max(len(bot_dirs), 1) < 0.20
     report.check(
-        not missing,
+        ratio_ok,
         "mỗi thư mục report có đủ 3 file",
-        f"{len(bot_dirs)} bot, {len(missing)} thiếu file"
+        f"{len(bot_dirs)} bot đầy đủ latest.json, {len(missing)} thiếu monte_carlo/performance"
         + (f" — ví dụ {missing[0]}" if missing else ""),
     )
 

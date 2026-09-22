@@ -196,7 +196,7 @@ def test_a_dex_slot_is_filed_under_the_slot_not_the_traded_instrument(tmp_path):
     longer segregates the FILE itself by venue/asset, so `load_bot` finds the
     same document regardless of which venue_type/symbol it is called with.
     """
-    selection = tmp_path / "universe" / "bot_selection.json"
+    selection = tmp_path / "market" / "universe" / "bot_selection.json"
     selection.parent.mkdir(parents=True)
     selection.write_text(
         json.dumps(

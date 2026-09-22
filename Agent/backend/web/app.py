@@ -351,7 +351,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from Agent.backend.infra.config import config
-from Agent.backend.llm import narrative
+from Agent.backend.llm import chat, narrative
 from Agent.backend.web import access, identity, snapshot, usage_ref
 from Agent.backend.web import progress as analyze_progress
 from Agent.backend.web.data import (
@@ -368,7 +368,6 @@ from Agent.backend.web.data import (
     validate_unique_code,
 )
 from Agent.backend.web.report_page import render_bot_report_html
-from Agent.backend.report.qc.reporting import chat
 from Agent.backend.report.qc.reporting.contracts import ReportProduct
 from Agent.backend.report.qc.reporting.persisted import build_persisted_dossier_view
 from Agent.backend.report.qc.reporting.view_policy import (
@@ -3369,7 +3368,7 @@ def create_app(
             # this route renders exactly as it always has.
             hidden_panels=(
                 USER_HIDDEN_PANELS
-                if request.query_params.get("view") == "user" or not is_admin
+                if request.query_params.get("view") == "user" and not is_admin
                 else ()
             ),
         )

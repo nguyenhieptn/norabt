@@ -378,7 +378,7 @@ class BotObservationService:
             for venue in ("cex", "dex")
             for name in ("ohlcv_1h_2023_present.json", "ohlcv_1h_2026.json")
         ]
-        paths.append(self._reference_data_dir / "phases" / f"{symbol}.json")
+        paths.append(self._reference_data_dir / "market" / "phases" / f"{symbol}.json")
         for path in paths:
             if not path.exists():
                 continue

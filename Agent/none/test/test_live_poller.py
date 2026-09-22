@@ -136,8 +136,8 @@ def test_load_bot_targets_reads_top_and_mid_per_asset(tmp_path):
             },
         ]
     }
-    (tmp_path / "universe").mkdir()
-    (tmp_path / "universe" / "bot_selection.json").write_text(json.dumps(selection))
+    (tmp_path / "market" / "universe").mkdir(parents=True)
+    (tmp_path / "market" / "universe" / "bot_selection.json").write_text(json.dumps(selection))
 
     targets = load_bot_targets(tmp_path)
 

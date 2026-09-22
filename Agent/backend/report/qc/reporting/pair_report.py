@@ -40,7 +40,7 @@ from Agent.backend.report.qc.reporting.market_posture import (
 )
 from Agent.backend.report.qc.reporting.reasons import phase_vi
 
-SELECTION = Path(config.DATA_DIR) / "universe" / "bot_selection.json"
+SELECTION = Path(config.DATA_DIR) / "market" / "universe" / "bot_selection.json"
 ROLE_LEAD = "LEAD"
 ROLE_LAGGARD = "LAGGARD"
 
@@ -418,7 +418,7 @@ class PairedBotReportService:
         selection_path: Optional[Path] = None,
         only_codes: Optional[set] = None,
     ) -> PairedBotReport:
-        path = selection_path or (self.data_dir / "universe" / "bot_selection.json")
+        path = selection_path or (self.data_dir / "market" / "universe" / "bot_selection.json")
         selection = json.loads(path.read_text(encoding="utf-8"))
         now = as_of_ms or int(time.time() * 1000)
 

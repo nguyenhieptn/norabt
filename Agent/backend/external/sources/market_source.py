@@ -990,7 +990,7 @@ class CandleCache:
         self.cache_dir = (
             Path(cache_dir)
             if cache_dir
-            else Path(config.DATA_DIR) / "cache" / "candles"
+            else Path(config.DATA_DIR) / "market" / "cache" / "candles"
         )
 
     def _path(self, inst_id: str, bar: str) -> Path:

@@ -41,8 +41,8 @@ def _no_real_delays(monkeypatch: pytest.MonkeyPatch) -> None:
 def sample_universe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     """A minimal bot_selection.json with one lead trader, isolated from the
     real (and constantly changing) crawled universe file."""
-    universe_dir = tmp_path / "universe"
-    universe_dir.mkdir()
+    universe_dir = tmp_path / "market" / "universe"
+    universe_dir.mkdir(parents=True)
     payload = {
         "assets": [
             {

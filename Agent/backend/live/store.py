@@ -192,7 +192,7 @@ def load_bot_targets(
     to score, or missing one it was.
     """
     data_dir = Path(data_dir) if data_dir is not None else default_data_dir()
-    path = selection_path or (data_dir / "universe" / "bot_selection.json")
+    path = selection_path or (data_dir / "market" / "universe" / "bot_selection.json")
     payload = read_json(path)
     if payload is None:
         raise FileNotFoundError(
@@ -299,7 +299,7 @@ class LiveState:
 
 
 def state_path(data_dir: Path, unique_code: str) -> Path:
-    return Path(data_dir) / LIVE_STATE_DIRNAME / "state" / f"{unique_code}.json"
+    return Path(data_dir) / "trade" / LIVE_STATE_DIRNAME / "state" / f"{unique_code}.json"
 
 
 def load_state(data_dir: Path, unique_code: str) -> LiveState:

@@ -204,7 +204,7 @@ def _write_pair_dataset(tmp_path: Path, n_assets: int = 3):
             }
         )
     selection = {"assets": assets, "unique_codes": codes}
-    path = tmp_path / "universe" / "bot_selection.json"
+    path = tmp_path / "market" / "universe" / "bot_selection.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(selection), encoding="utf-8")
     return path, codes

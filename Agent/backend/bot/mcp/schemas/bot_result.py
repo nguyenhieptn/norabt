@@ -353,6 +353,35 @@ class HorizonOutcome(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class TerminalOutcomeHistogram(BaseModel):
+    """Chart type A: binned terminal-outcome distribution (a real histogram,
+    not an approximation from percentile points). `len(counts) ==
+    len(bin_edges_pct) - 1`, standard `numpy.histogram` convention -- bin i
+    spans `[bin_edges_pct[i], bin_edges_pct[i+1])`.
+    """
+
+    bin_edges_pct: List[float]
+    counts: List[int] = Field(default_factory=list)
+
+
+class HorizonCheckpoint(BaseModel):
+    """Chart types B/C: equity percentiles at one trade count along the
+    horizon -- `SimulationResults.horizon_checkpoints` is several of these,
+    ascending by `trade_count`, sampled from the SAME simulated paths
+    `horizon_scenarios`'s single MEDIUM-horizon entry summarizes only the
+    endpoint of. A UI can render this list as a fan/area chart (p05-p95 band
+    plus the p50 line) or as a plain line chart (p50 only) -- same data,
+    different view, per the product owner's own chart-type-switcher request.
+    """
+
+    trade_count: int = Field(..., ge=1)
+    p05: float
+    p25: float
+    p50: float
+    p75: float
+    p95: float
+
+
 class SimulationResults(BaseModel):
     simulation_method: str
     iterations: int = Field(..., ge=0)
@@ -454,6 +483,13 @@ class SimulationResults(BaseModel):
     # readers of this model have to change. `horizon_scenarios` is where the
     # SHORT/MEDIUM/LONG comparison actually lives.
     horizon_scenarios: List[HorizonOutcome] = Field(default_factory=list)
+    # Chart-ready data for the 3-view chart-type switcher (histogram / fan
+    # chart / line chart of the same Monte Carlo run) -- see
+    # `TerminalOutcomeHistogram`/`HorizonCheckpoint`'s own docstrings.
+    # Optional/default-empty so an assessment.json written before this field
+    # existed still validates (degrades to "no chart data", never a fake one).
+    terminal_outcome_histogram: Optional[TerminalOutcomeHistogram] = None
+    horizon_checkpoints: List[HorizonCheckpoint] = Field(default_factory=list)
     # How much the outcome swings between the shortest and longest horizon
     # simulated, normalized to [0, 1] (0 = same probability of profit at
     # every horizon, 1 = flips from certain profit to certain loss). This is

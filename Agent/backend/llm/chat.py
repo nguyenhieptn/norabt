@@ -47,6 +47,19 @@ còn chặn được gì. Vì vậy `build_chat_context` RENDER bản ghi thành
 thu `NumberSpec` trong CÙNG một lượt đi -- đúng kỷ luật `make_number` của
 `narrative.py`: con số vào prompt và con số vào danh sách trắng không bao
 giờ trôi khỏi nhau, và chuỗi per-trade bị bỏ ra ngoài có chủ đích.
+
+PHÂN QUYỀN THEO VAI (`role: ViewRole`, tái dùng ĐÚNG enum
+`view_policy.ViewRole` mà `api_dossier`/report page đang dùng, không tự định
+nghĩa một khái niệm vai trò thứ hai): report page khoá `panel-market` (phân
+tích thị trường sâu) và `panel-trades` (mô phỏng Monte Carlo, DSR/PSR,
+loss-streak, sổ lệnh chi tiết -- xem `report_page._render_tab_trades`) sau
+gói Premium cho vai USER. `build_chat_context(record, role=...)` phải khoá
+ĐÚNG hai nhóm dữ liệu đó cho USER, và khoá bằng cách KHÔNG THU THẬP -- không
+phải bằng cách dặn prompt "đừng nói". Đây là điểm quan trọng: nếu chỉ dặn
+prompt, một model bị dẫn dắt khéo (hoặc một lỗi diễn đạt) vẫn có thể đoán ra
+một con số premium hợp lý; nếu trường đó chưa từng vào `NumberSpec`, con số
+đó KHÔNG NẰM trong danh sách trắng, nên cổng khoá số (Cổng 3, không phải
+prompt) tự động chặn nó -- một lớp bảo vệ kỹ thuật, không phải lời hứa.
 """
 
 from __future__ import annotations
@@ -57,7 +70,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
-from Agent.backend.report.qc.reporting import chat_knowledge
+from Agent.backend.llm import chat_knowledge
 from Agent.backend.llm.narrative import (
     NarrativeBackend,
     NumberSpec,
@@ -66,6 +79,7 @@ from Agent.backend.llm.narrative import (
     make_number,
     select_backend_from_env,
 )
+from Agent.backend.report.qc.reporting.view_policy import ViewRole
 
 # Hai tên riêng tư, mượn có chủ đích -- xem module docstring:
 #   * `_call_backend_once` giữ khe `_SEMAPHORE` DÙNG CHUNG với narrative.
@@ -93,6 +107,27 @@ ENV_CHAT = "NORABT_CHAT"
 # hỏng. Trần 1500 giữ câu trả lời ở mức đọc được trong khung chat.
 MIN_ANSWER_CHARS = 40
 MAX_ANSWER_CHARS = 1500
+
+# Mốc THAM CHIẾU cố định mà `chat_knowledge`'s glossary tự trích khi giải
+# thích một khái niệm -- KHÔNG phải sự thật riêng của bot đang xem, nên
+# không đi qua `_Collector`. Luôn nằm trong danh sách trắng vì lý do khác hẳn
+# một `NumberSpec`: đây là một tập ĐÓNG, cố định, đã soát trong chính
+# `chat_knowledge.py`, không phải thứ caller cung cấp theo từng bản ghi.
+#
+# ĐO ĐƯỢC LÝ DO PHẢI CÓ (lượt chạy thật, 22/09): hỏi "so sánh Sharpe với
+# kurtosis" -- model trích đúng "raw kurtosis so với mốc chuẩn 3.0" (đúng
+# định nghĩa engine, xem glossary "PnL kurtosis"), cổng khoá số chặn ngay vì
+# 3.0 không có trong bản ghi -- một câu trả lời ĐÚNG bị đánh rớt, y hệt lỗi
+# "risk-free" đã đo ở `narrative.py`. Sửa ở gốc (thêm vào danh sách trắng)
+# thay vì để retry gánh, vì retry vẫn đúng NHƯNG tốn gấp đôi thời gian chờ
+# của người dùng cho một việc lẽ ra không cần thử lại.
+#
+#   0.0 -- mốc chuẩn PSR mặc định (`psr_benchmark_sharpe`) và ngưỡng hoà vốn
+#          nói chung (Sharpe = 0, p_ruin = 0%).
+#   1.0 -- ngưỡng hoà vốn của profit factor (thắng = thua).
+#   3.0 -- mốc kurtosis THÔ của một phân phối chuẩn, theo đúng quy ước
+#          `inference.py` dùng (KHÔNG phải "excess kurtosis" = 0).
+_REFERENCE_CONSTANTS: Tuple[float, ...] = (0.0, 1.0, 3.0)
 
 # Số lượt hội thoại trước đó được đưa lại vào prompt. Mỗi lượt cũ vẫn tốn
 # token của mọi lượt sau, nên cắt ở 6 (3 cặp hỏi-đáp): đủ để người dùng hỏi
@@ -166,7 +201,7 @@ class ChatContext:
     has_content: bool = True
 
     def allowed_values(self) -> Set[float]:
-        return {spec.value for spec in self.numbers}
+        return {spec.value for spec in self.numbers} | set(_REFERENCE_CONSTANTS)
 
 
 def _mapping(value: Any) -> Dict[str, Any]:
@@ -298,7 +333,26 @@ def _collect_scoring(out: _Collector, scoring: Dict[str, Any]) -> None:
             out.num(f"  dimension/{name}", value)
 
 
-def _collect_evidence(out: _Collector, evidence: Dict[str, Any]) -> None:
+# Trường thuộc `evidence` mà report page xếp vào panel-market/panel-trades
+# (khoá sau Premium cho vai USER, xem `report_page._render_tab_market`'s
+# nguồn `_render_market_compatibility`/`_render_strategy_section` và
+# `_render_tab_trades`'s nguồn `_render_statistical_inference`). Đặt tên rõ
+# ràng để MỘT chỗ duy nhất định nghĩa ranh giới này, không rải rác điều kiện
+# `if role is ...` khắp `_collect_evidence`.
+_PREMIUM_BEHAVIOUR_TEXT_FIELDS: Tuple[Tuple[str, str], ...] = (
+    ("best_phase", "Best market phase"),
+    ("worst_phase", "Worst market phase"),
+)
+_PREMIUM_EVIDENCE_NOTICE = (
+    "- Detailed market-regime and cross-market analysis (per-phase "
+    "breakdown, unresolved-symbol coverage) is part of the Premium plan and "
+    "is not included in this conversation."
+)
+
+
+def _collect_evidence(
+    out: _Collector, evidence: Dict[str, Any], *, role: ViewRole
+) -> None:
     out.line("")
     out.line("CLOSED-BOOK PERFORMANCE")
     out.num("Closed trades", evidence.get("trade_count"), decimals=0)
@@ -326,6 +380,9 @@ def _collect_evidence(out: _Collector, evidence: Dict[str, Any]) -> None:
 
     out.line("")
     out.line("OBSERVED BEHAVIOUR")
+    # Behavioral DNA cốt lõi (`observed_profile`, `directional_bias`,
+    # `entry_style*`) -- `ideallm.md` §8.1 liệt kê rõ đây là nội dung của
+    # Analyst Result, tab MIỄN PHÍ cho cả hai vai, nên KHÔNG khoá.
     profile = _text(evidence.get("observed_profile"))
     if profile:
         out.line(f"- Observed profile: {profile}")
@@ -333,9 +390,22 @@ def _collect_evidence(out: _Collector, evidence: Dict[str, Any]) -> None:
         ("directional_bias", "Directional bias"),
         ("entry_style", "Entry style"),
         ("entry_style_evidence", "Entry style evidence"),
-        ("best_phase", "Best market phase"),
-        ("worst_phase", "Worst market phase"),
     ):
+        value = _text(evidence.get(key))
+        if value:
+            out.line(f"- {label}: {value}")
+
+    if role is not ViewRole.ADMIN:
+        # Từ đây trở xuống là đúng nội dung `panel-market`/`panel-trades`
+        # (per-phase breakdown = Market Compatibility, unresolved_markets =
+        # Premium Market coverage) -- xem module docstring. KHÔNG THU THẬP,
+        # không phải "thu rồi dặn đừng nói": trường chưa vào `_Collector` thì
+        # không có `NumberSpec` nào của nó, nên cổng khoá số tự chặn bất kỳ
+        # con số nào model đoán ra cho khu vực này.
+        out.line(_PREMIUM_EVIDENCE_NOTICE)
+        return
+
+    for key, label in _PREMIUM_BEHAVIOUR_TEXT_FIELDS:
         value = _text(evidence.get(key))
         if value:
             out.line(f"- {label}: {value}")
@@ -401,13 +471,100 @@ def _collect_simulation(out: _Collector, simulation: Dict[str, Any]) -> None:
     out.num("Median profit over horizon", simulation.get("profit_pct_p50"), percent=True)
     out.num("p05 profit over horizon", simulation.get("profit_pct_p05"), percent=True)
     out.num("p95 profit over horizon", simulation.get("profit_pct_p95"), percent=True)
+    out.num("Worst simulated profit over horizon", simulation.get("profit_pct_worst"), percent=True)
+    out.num("Best simulated profit over horizon", simulation.get("profit_pct_best"), percent=True)
+
+    out.line("")
+    out.line("SIMULATION -- tail risk at the 99% level")
+    out.num("VaR 99%", simulation.get("var_99_pct"), percent=True)
+    out.num("CVaR 99% (expected shortfall)", simulation.get("cvar_99_pct"), percent=True)
+
+    out.line("")
+    out.line("SIMULATION -- return priced against drawdown (MAR ratio)")
+    out.num("MAR ratio, median simulated run", simulation.get("mar_ratio_median"))
+    out.num("MAR ratio, p05 (worst-case band)", simulation.get("mar_ratio_p05"))
+    out.num("Profit factor, median simulated run", simulation.get("profit_factor_median"))
+    out.num("Profit factor, p05 simulated run", simulation.get("profit_factor_p05"))
+
+    out.line("")
+    out.line("SIMULATION -- how deep and how long a drawdown can run")
+    out.num("Probability max drawdown exceeds 10%", simulation.get("p_mdd_gt_10"), percent=True)
+    out.num("Probability max drawdown exceeds 15%", simulation.get("p_mdd_gt_15"), percent=True)
+    out.num("Probability max drawdown exceeds 25%", simulation.get("p_mdd_gt_25"), percent=True)
+    out.num(
+        "Probability a run exceeds the CURRENT drawdown",
+        simulation.get("p_capital_loss_gt_current_dd"),
+        percent=True,
+    )
+    out.num(
+        "Probability drawdown recovery exceeds 30 days",
+        simulation.get("p_recovery_gt_30d"),
+        percent=True,
+    )
+
+    out.line("")
+    out.line("SIMULATION -- loss-streak clustering (simulated vs sample-size baseline)")
+    out.num("5-in-a-row loss streak, simulated probability", simulation.get("p_5_loss_streak"), percent=True)
+    out.num(
+        "5-in-a-row loss streak, sample-size-alone baseline",
+        simulation.get("p_5_loss_streak_baseline"),
+        percent=True,
+    )
+    out.num(
+        "5-in-a-row loss streak, EXCESS over that baseline",
+        simulation.get("p_5_loss_streak_excess"),
+        percent=True,
+    )
+    out.num("10-in-a-row loss streak, simulated probability", simulation.get("p_10_loss_streak"), percent=True)
+    out.num(
+        "10-in-a-row loss streak, sample-size-alone baseline",
+        simulation.get("p_10_loss_streak_baseline"),
+        percent=True,
+    )
+    out.num(
+        "10-in-a-row loss streak, EXCESS over that baseline",
+        simulation.get("p_10_loss_streak_excess"),
+        percent=True,
+    )
+
+    out.line("")
+    out.line("SIMULATION -- terminal equity distribution and horizon dependence")
+    out.num("Expected terminal equity (mean of simulated runs)", simulation.get("expected_terminal_equity"), money=True)
+    out.num("Median terminal equity", simulation.get("median_terminal_equity"), money=True)
+    out.num("p10 terminal equity (worse-case band)", simulation.get("p10_outcome"), money=True)
+    out.num("p90 terminal equity (better-case band)", simulation.get("p90_outcome"), money=True)
+    out.num("Worst simulated terminal equity", simulation.get("worst_terminal_equity"), money=True)
+    out.num("Sharpe per trade (input to PSR/DSR)", simulation.get("sharpe_per_trade"))
+    out.num(
+        "Horizon sensitivity (0 = stable across horizons, 1 = fully reversed)",
+        simulation.get("horizon_sensitivity"),
+    )
+    stability = _text(simulation.get("horizon_stability_label"))
+    if stability:
+        out.line(f"- Horizon stability label: {stability}")
+
     verdict = _text(simulation.get("stress_verdict"))
     if verdict:
         out.line(f"- Stress verdict: {verdict}")
+    if simulation.get("deferred_loss_bias") is True:
+        out.line(
+            "- DEFERRED-LOSS BIAS FLAGGED: every probability in this simulation "
+            "section is drawn from closed trades only and does not count the "
+            "unrealised loss the bot is currently holding, so these figures "
+            "are more optimistic than the account's real position."
+        )
+    if simulation.get("horizon_exceeds_observed") is True:
+        out.line(
+            "- The simulated horizon runs meaningfully beyond the calendar "
+            "span this bot has actually traded -- it extrapolates past this "
+            "bot's own observed history."
+        )
     if simulation.get("sample_is_thin") is True:
         out.line("- The engine flagged this sample as THIN: figures above are weakly supported.")
     if simulation.get("inference_reliable") is False:
         out.line("- The engine flagged its own statistical inference as NOT reliable for this bot.")
+    if simulation.get("is_valid") is False:
+        out.line("- The engine marked this simulation run itself as NOT VALID.")
     out.listing("Simulation warnings", simulation.get("warnings"))
     out.listing("Inference notes", simulation.get("inference_notes"))
 
@@ -597,6 +754,11 @@ def build_chat_prompt(
         "",
         "REFERENCE KNOWLEDGE -- metric definitions, matching this engine's own formulas:",
         chat_knowledge.metric_glossary_block(),
+        "",
+        "REFERENCE KNOWLEDGE -- quantitative reasoning patterns (statistical "
+        "relationships between metrics; state one only when the record's own "
+        "figures actually satisfy every condition it names):",
+        chat_knowledge.reasoning_patterns_block(),
         "",
         "REFERENCE KNOWLEDGE -- OKX and the boundary of this product's data:",
         chat_knowledge.okx_facts_block(),

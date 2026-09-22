@@ -677,8 +677,8 @@ class TestDefaultSelectionCodes:
         )
 
     def test_reads_selection_file_when_present(self, tmp_path: Path) -> None:
-        selection_dir = tmp_path / "universe"
-        selection_dir.mkdir()
+        selection_dir = tmp_path / "market" / "universe"
+        selection_dir.mkdir(parents=True)
         (selection_dir / "bot_selection.json").write_text(
             json.dumps({"unique_codes": ["A", "B"]}), encoding="utf-8"
         )

@@ -189,7 +189,7 @@ def _sample_lead_trader() -> Optional[Dict[str, str]]:
     leading, turning every future probe run into a false "connection broken"
     report instead of an honest "OKX rejected an unrelated stale code".
     """
-    path = Path(config.DATA_DIR) / "universe" / "bot_selection.json"
+    path = Path(config.DATA_DIR) / "market" / "universe" / "bot_selection.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):

@@ -363,7 +363,7 @@ class CohortAssessmentService:
     ) -> None:
         self.data_dir = data_dir or Path(config.DATA_DIR)
         self.history = history or AssessmentHistoryStore(
-            self.data_dir / "state" / "assessments"
+            self.data_dir / "report" / "state" / "assessments"
         )
         self.persist_history = persist_history
         self.evaluation_mode = evaluation_mode
@@ -376,7 +376,7 @@ class CohortAssessmentService:
         The deflated Sharpe needs it: a bot chosen as the best of 68 candidates
         has to clear a far higher bar than one assessed on its own.
         """
-        path = self.data_dir / "universe" / "bot_selection.json"
+        path = self.data_dir / "market" / "universe" / "bot_selection.json"
         if not path.exists():
             return {}
         try:

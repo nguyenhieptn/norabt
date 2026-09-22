@@ -37,7 +37,7 @@ def main():
     ]
 
     # Load or fetch lead traders
-    lead_path = Path("Agent/data/scanned_lead_traders.json")
+    lead_path = Path("Agent/data/market/scanned_lead_traders.json")
     if lead_path.exists():
         with open(lead_path) as f:
             traders = json.load(f)
@@ -107,7 +107,7 @@ def main():
             break
 
     # Save results
-    output_path = Path("Agent/data/asset_traders_mapping.json")
+    output_path = Path("Agent/data/market/asset_traders_mapping.json")
     with open(output_path, "w") as f:
         json.dump(asset_to_traders, f, indent=2)
 

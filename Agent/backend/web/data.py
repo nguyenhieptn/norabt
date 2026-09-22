@@ -3294,7 +3294,7 @@ class WebDataService:
         than raising: a stale/absent snapshot must never break lookup().
         """
         if self._profile_snapshot_cache is None:
-            path = self.data_dir / "universe" / "lead_traders.json"
+            path = self.data_dir / "market" / "universe" / "lead_traders.json"
             rows: List[Dict[str, Any]] = []
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))

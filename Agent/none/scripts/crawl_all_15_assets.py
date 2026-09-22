@@ -154,7 +154,7 @@ def main():
 
     # Load profile info from scanned lead traders if available
     profiles: Dict[str, Dict[str, Any]] = {}
-    scanned_path = DATA_DIR / "scanned_lead_traders.json"
+    scanned_path = DATA_DIR / "market" / "scanned_lead_traders.json"
     if scanned_path.exists():
         try:
             for item in json.loads(scanned_path.read_text(encoding="utf-8")):

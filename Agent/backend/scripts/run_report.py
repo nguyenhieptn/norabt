@@ -485,7 +485,7 @@ def default_selection_codes(
         return {bot}
     if all_bots:
         return None
-    selection_path = Path(data_dir) / "universe" / "bot_selection.json"
+    selection_path = Path(data_dir) / "market" / "universe" / "bot_selection.json"
     if not selection_path.exists():
         return None
     return set(json.loads(selection_path.read_text(encoding="utf-8"))["unique_codes"])

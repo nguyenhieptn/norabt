@@ -535,7 +535,7 @@ def _slot_index(data_dir: Path) -> Dict[str, tuple]:
     filing by traded symbol collapsed all five DEX assets into cex/ and left
     the assessment tree looking like the DEX side had never been assessed.
     """
-    path = Path(data_dir) / "universe" / "bot_selection.json"
+    path = Path(data_dir) / "market" / "universe" / "bot_selection.json"
     if not path.exists():
         return {}
     try:

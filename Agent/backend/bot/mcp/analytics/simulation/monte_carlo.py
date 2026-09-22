@@ -49,6 +49,21 @@ class MonteCarloSimulationEngine:
     MAX_ITERATIONS = 50_000
     MAX_HORIZON = 500
     BATCH_SIZE = 2_000
+    # Bin count for the terminal-outcome histogram (chart type A). Computed
+    # from `profits` (already-materialized array of every simulated path's
+    # final PnL%) AFTER the batch loop -- no extra memory cost, since that
+    # array already exists once to compute the percentile spread.
+    HISTOGRAM_BIN_COUNT = 24
+    # Fractions of `horizon` at which equity is sampled for a smooth
+    # fan/line chart over the trade horizon (chart types B/C), instead of
+    # only the 3 discrete SHORT/MEDIUM/LONG endpoints `horizon_scenarios`
+    # already provided. Extracted as extra COLUMNS of the `equity` array the
+    # batch loop already computes -- not a second simulation pass -- so this
+    # stays inside the same per-batch-then-discard memory budget as
+    # `terminal`/`max_dd` below.
+    CHECKPOINT_FRACTIONS: Tuple[float, ...] = (
+        0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
+    )
 
     # Extra horizons (SHORT/LONG) exist to show *how* an outcome moves with
     # horizon, not to re-measure it at full precision -- the MEDIUM horizon
@@ -472,6 +487,16 @@ class MonteCarloSimulationEngine:
         all_gross_profit: List[np.ndarray] = []
         all_gross_loss: List[np.ndarray] = []
         all_max_dd: List[np.ndarray] = []
+        all_checkpoint_equity: List[np.ndarray] = []
+        # De-duplicated, ascending column indices into `equity` (shape
+        # batch x horizon+1, column 0 = initial_equity) -- e.g. horizon=134
+        # with the fractions above gives trade counts
+        # [14,27,41,54,67,81,94,108,121,134], never 0 (a fraction of a small
+        # horizon can round to 0, which is just initial_equity again and
+        # tells a chart nothing).
+        checkpoint_trades = sorted(
+            {max(1, round(horizon * frac)) for frac in cls.CHECKPOINT_FRACTIONS}
+        )
         counts = {
             "mdd10": 0,
             "mdd15": 0,
@@ -543,6 +568,7 @@ class MonteCarloSimulationEngine:
             if current_drawdown_pct is not None:
                 counts["current_dd"] += int(np.sum(max_dd > current_drawdown_pct))
             all_terminal.append(terminal)
+            all_checkpoint_equity.append(equity[:, checkpoint_trades])
             all_max_dd.append(max_dd)
             gains = np.where(sim_pnls > 0, sim_pnls, 0.0).sum(axis=1)
             losses = np.where(sim_pnls < 0, -sim_pnls, 0.0).sum(axis=1)
@@ -599,6 +625,50 @@ class MonteCarloSimulationEngine:
             float(np.min(profits)),
             *(float(np.percentile(profits, q)) for q in (5, 10, 25, 50, 75, 90, 95)),
             float(np.max(profits)),
+        ]
+
+        # Chart type A (histogram): bin the full terminal-outcome
+        # distribution now, while `profits` is still in scope -- it is
+        # never returned or kept past this function.
+        #
+        # Degenerate range guard: when every simulated path lands on (near)
+        # the same outcome (observed on LIMITED/thin-ledger bots, where a
+        # handful of trades leaves little for the bootstrap to vary),
+        # `np.histogram`'s bin edges collapse to the same float and it
+        # raises ValueError("Too many bins for data range") instead of
+        # returning a real histogram -- caught here as a single bin
+        # spanning the one observed value, not a crash.
+        lo, hi = float(np.min(profits)), float(np.max(profits))
+        if hi - lo < 1e-9:
+            terminal_outcome_histogram = {
+                "bin_edges_pct": [lo, lo + 1e-9],
+                "counts": [int(profits.size)],
+            }
+        else:
+            hist_counts, hist_edges = np.histogram(
+                profits, bins=cls.HISTOGRAM_BIN_COUNT, range=(lo, hi)
+            )
+            terminal_outcome_histogram = {
+                "bin_edges_pct": [float(edge) for edge in hist_edges],
+                "counts": [int(count) for count in hist_counts],
+            }
+
+        # Chart types B/C (fan chart, line chart): percentiles of equity at
+        # each checkpoint trade count, computed across every simulated path
+        # -- same percentile math as `profit_pct` above, just repeated at
+        # `len(checkpoint_trades)` points along the horizon instead of only
+        # the terminal one.
+        checkpoint_equity = np.concatenate(all_checkpoint_equity, axis=0)
+        horizon_checkpoints = [
+            {
+                "trade_count": trade_count,
+                "p05": float(np.percentile(checkpoint_equity[:, i], 5)),
+                "p25": float(np.percentile(checkpoint_equity[:, i], 25)),
+                "p50": float(np.percentile(checkpoint_equity[:, i], 50)),
+                "p75": float(np.percentile(checkpoint_equity[:, i], 75)),
+                "p95": float(np.percentile(checkpoint_equity[:, i], 95)),
+            }
+            for i, trade_count in enumerate(checkpoint_trades)
         ]
 
         # VaR is the loss the worst 5 % (1 %) of runs exceed; CVaR is the average
@@ -671,4 +741,6 @@ class MonteCarloSimulationEngine:
             "p95_max_drawdown": float(np.percentile(max_drawdowns, 95)),
             "p99_max_drawdown": float(np.percentile(max_drawdowns, 99)),
             "worst_percentile_drawdown": float(np.max(max_drawdowns)),
+            "terminal_outcome_histogram": terminal_outcome_histogram,
+            "horizon_checkpoints": horizon_checkpoints,
         }

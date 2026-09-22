@@ -17,7 +17,7 @@ class AssessmentHistoryStore:
     MAX_ENTRIES = 200
 
     def __init__(self, root: Optional[Path] = None) -> None:
-        self.root = root or Path(config.DATA_DIR) / "state" / "assessments"
+        self.root = root or Path(config.DATA_DIR) / "report" / "state" / "assessments"
 
     def _path(self, bot_id: str) -> Path:
         safe = SAFE_ID.sub("_", bot_id).strip("_") or "unknown_bot"

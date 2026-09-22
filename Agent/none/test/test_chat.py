@@ -1,4 +1,4 @@
-"""Hỏi-đáp chỉ-đọc (`Agent/backend/qc/reporting/chat.py`) và tuyến
+"""Hỏi-đáp chỉ-đọc (`Agent/backend/llm/chat.py`) và tuyến
 `POST /api/chat`.
 
 KHÔNG test nào ở đây gọi model thật: mọi lượt đi qua một `NarrativeBackend`
@@ -15,8 +15,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 from starlette.testclient import TestClient
 
-from Agent.backend.report.qc.reporting import chat, chat_knowledge
-from Agent.backend.llm import narrative
+from Agent.backend.llm import chat, chat_knowledge, narrative
 from Agent.backend.web.app import create_app
 
 CODE = "A0EDF7F0D96A7E8C"
@@ -90,6 +89,8 @@ def _record(**overrides: Any) -> Dict[str, Any]:
             "expectancy": 221.4,
             "max_drawdown_pct": 1.8,
             "sharpe_ratio": 0.42,
+            "pnl_skew": -1.58,
+            "pnl_kurtosis": 12.5,
             "open_positions": 8,
             "open_loss": 69963.0,
             "open_loss_to_capital_pct": 13.0,
@@ -124,11 +125,44 @@ def _record(**overrides: Any) -> Dict[str, Any]:
             "iterations": 10000,
             "horizon_trades": 134,
             "median_max_drawdown": 12.4,
+            "var_95_pct": 24.0,
+            "var_99_pct": 33.48,
             "cvar_95_pct": 31.7,
+            "cvar_99_pct": 37.32,
             "p_ruin": 0.0,
+            "psr": 0.32,
             "deflated_sharpe": 0.0,
             "min_track_record_trades": 410,
+            "selection_trials": 49,
             "sample_is_thin": False,
+            # Nhóm trường "sâu" mới thu -- xem
+            # `test_deep_quant_fields_reach_the_prompt_and_allowlist`.
+            "mar_ratio_median": -0.2376,
+            "mar_ratio_p05": -0.9436,
+            "profit_factor_median": 0.9,
+            "profit_factor_p05": 0.46,
+            "p_mdd_gt_10": 64.17,
+            "p_mdd_gt_15": 36.33,
+            "p_mdd_gt_25": 8.04,
+            "p_capital_loss_gt_current_dd": 63.24,
+            "p_recovery_gt_30d": 86.59,
+            "p_5_loss_streak": 99.98,
+            "p_5_loss_streak_baseline": 83.80,
+            "p_5_loss_streak_excess": 16.18,
+            "p_10_loss_streak": 84.65,
+            "p_10_loss_streak_baseline": 2.44,
+            "p_10_loss_streak_excess": 82.21,
+            "expected_terminal_equity": 430477.63,
+            "median_terminal_equity": 431211.87,
+            "p10_outcome": 359315.6,
+            "p90_outcome": 500697.94,
+            "worst_terminal_equity": 238255.87,
+            "sharpe_per_trade": -0.0315,
+            "horizon_sensitivity": 0.1053,
+            "horizon_stability_label": "STABLE ACROSS HORIZONS",
+            "deferred_loss_bias": False,
+            "horizon_exceeds_observed": False,
+            "is_valid": True,
         },
         "expert_assessment": (
             "This bot shows a win rate of 75.0% alongside a profit factor of "
@@ -194,6 +228,97 @@ def test_context_collects_numbers_from_every_block() -> None:
         assert float(value) in allowed, f"{value} missing from the number allowlist"
     assert context.untrusted_nick_name == NICK
     assert context.unique_code == CODE
+
+
+def test_deep_quant_fields_reach_the_prompt_and_allowlist() -> None:
+    """HỒI QUY cho việc mở rộng `_collect_simulation`: trước bản vá này,
+    `mar_ratio_median`, `p_10_loss_streak_excess`, `p_recovery_gt_30d`,
+    `var_99_pct`, `median_terminal_equity` và các trường "sâu" khác nằm sẵn
+    trong `assessment.json` thật nhưng KHÔNG BAO GIỜ tới được model -- chat
+    khi đó không có gì để trả lời một câu hỏi định lượng thật sự."""
+    context = chat.build_chat_context(_record())
+    allowed = context.allowed_values()
+    # Giá trị ĐÃ LÀM TRÒN 2 chữ số thập phân -- `make_number`'s mặc định --
+    # vì đó là con số danh sách trắng thực sự giữ, không phải giá trị thô
+    # trong fixture. Xem `make_number`'s docstring: "value on the returned
+    # spec is the ROUNDED figure ... the allowed set must hold that same
+    # rounded value, never the engine's full-precision original."
+    deep_values = (
+        -0.24,  # mar_ratio_median (thô: -0.2376)
+        82.21,  # p_10_loss_streak_excess
+        86.59,  # p_recovery_gt_30d
+        33.48,  # var_99_pct
+        37.32,  # cvar_99_pct
+        431211.87,  # median_terminal_equity
+        238255.87,  # worst_terminal_equity
+        0.11,  # horizon_sensitivity (thô: 0.1053)
+        -0.03,  # sharpe_per_trade (thô: -0.0315)
+        49,  # selection_trials
+    )
+    for value in deep_values:
+        assert float(value) in allowed, f"{value} missing from the number allowlist"
+    assert "STABLE ACROSS HORIZONS" in context.record_block
+
+
+def test_deferred_loss_bias_recolours_the_whole_simulation_section() -> None:
+    """Cờ này phải in ra một câu CẢNH BÁO rõ, không chỉ một giá trị `True`
+    lặng lẽ -- xem lý do trong `chat_knowledge`'s mục "Deferred-loss bias
+    flag": nó tô lại ý nghĩa của MỌI con số mô phỏng khác, không phải một
+    caveat cục bộ."""
+    record = _record()
+    record["simulation"]["deferred_loss_bias"] = True
+    context = chat.build_chat_context(record)
+    assert "DEFERRED-LOSS BIAS FLAGGED" in context.record_block
+
+
+def test_horizon_extrapolation_is_flagged() -> None:
+    record = _record()
+    record["simulation"]["horizon_exceeds_observed"] = True
+    context = chat.build_chat_context(record)
+    assert "extrapolates past this bot's own observed history" in context.record_block
+
+
+def test_invalid_simulation_is_flagged() -> None:
+    record = _record()
+    record["simulation"]["is_valid"] = False
+    context = chat.build_chat_context(record)
+    assert "NOT VALID" in context.record_block
+
+
+def test_reasoning_patterns_are_conditional_not_verdicts() -> None:
+    """Mỗi mẫu suy luận phải tự nêu điều kiện áp dụng -- nếu không, đây sẽ
+    là đường vòng để cấy sẵn kết luận về một bot cụ thể, đúng thứ luật 6 của
+    `BOUNDARY_RULES` cấm."""
+    for pattern in chat_knowledge._REASONING_PATTERNS:
+        lowered = pattern.lower()
+        assert any(
+            marker in lowered
+            for marker in (
+                "only when",
+                "state this pattern only",
+                "record's own",
+                "when the record",
+            )
+        ), pattern
+
+
+def test_a_deep_quant_answer_using_dsr_psr_and_loss_streak_passes_every_gate() -> None:
+    """Câu trả lời "wow" thật sự: nối DSR/PSR (mẫu suy luận #3) với loss-
+    streak excess (mẫu suy luận #4), đúng lý thuyết, chỉ dùng số có trong bản
+    ghi. Đây là bằng chứng cổng không chặn nhầm một câu trả lời SÂU chỉ vì nó
+    phức tạp hơn một câu mô tả đơn giản."""
+    context = chat.build_chat_context(_record())
+    answer = (
+        "The Deflated Sharpe Ratio is 0.0 even though the Probabilistic "
+        "Sharpe Ratio is 0.32 -- once the fact that this bot was chosen as "
+        "the best of 49 candidates is priced in, the edge is statistically "
+        "indistinguishable from luck. The record also shows a 10-in-a-row "
+        "loss streak excess of 82.21 percentage points over its own "
+        "sample-size baseline, meaning losses cluster far beyond what trade "
+        "count alone would produce."
+    )
+    ok, reason = chat.validate_answer(answer, context.allowed_values())
+    assert ok, reason
 
 
 def test_per_trade_series_never_reaches_the_prompt() -> None:
@@ -264,6 +389,35 @@ def test_invented_number_is_rejected() -> None:
     assert ok is False
     assert "number-lock gate" in (reason or "")
     assert "187.43" in (reason or "")
+
+
+def test_reference_constants_pass_even_though_not_in_this_bots_record() -> None:
+    """HỒI QUY cho một lượt thật đã bị chặn oan (22/09): hỏi so sánh Sharpe
+    với kurtosis, model trích đúng "mốc kurtosis chuẩn 3.0" -- đúng định
+    nghĩa engine (xem `chat_knowledge`'s mục "PnL kurtosis"), nhưng 3.0 không
+    có trong bản ghi bot nên cổng khoá số chặn một câu trả lời ĐÚNG. Cùng
+    loại lỗi tự-gây đã đo với cụm "risk-free" ở `narrative.py`."""
+    context = chat.build_chat_context(_record())
+    answer = (
+        "This bot's PnL kurtosis of 12.5 sits well above the normal-"
+        "distribution baseline of 3.0 used by this engine's own convention, "
+        "meaning extreme results happen far more often than a bell curve "
+        "would predict."
+    )
+    ok, reason = chat.validate_answer(answer, context.allowed_values())
+    assert ok, reason
+
+
+def test_reference_constants_do_not_widen_the_gate_for_unrelated_numbers() -> None:
+    """Danh sách hằng số tham chiếu là TẬP ĐÓNG, cố định -- một con số bịa
+    khác 0/1/3 vẫn phải bị chặn như trước."""
+    context = chat.build_chat_context(_record())
+    ok, reason = chat.validate_answer(
+        "The kurtosis baseline this engine uses is 2.5, not 3.0.",
+        context.allowed_values(),
+    )
+    assert ok is False
+    assert "2.5" in (reason or "")
 
 
 def test_advice_is_rejected() -> None:
@@ -340,6 +494,86 @@ def test_prompt_carries_the_curated_knowledge_not_model_memory() -> None:
     assert "READ-ONLY" in prompt
     for rule in chat_knowledge.BOUNDARY_RULES:
         assert rule in prompt
+
+
+def test_prompt_carries_the_reasoning_patterns() -> None:
+    context = chat.build_chat_context(_record())
+    prompt, _ = chat.build_chat_prompt(context, "is the edge real?")
+    for pattern in chat_knowledge._REASONING_PATTERNS:
+        assert pattern in prompt
+
+
+# --------------------------------------------------------------------------- #
+# Độ chính xác của tri thức nền -- HỒI QUY cho đúng loại lỗi Giai đoạn 7 đã
+# phải sửa (5 định nghĩa lệch công thức engine). Mỗi test dưới đây khoá một
+# sự thật lấy thẳng từ mã nguồn engine, không phải từ trí nhớ.
+# --------------------------------------------------------------------------- #
+
+
+def test_kurtosis_convention_matches_inference_py_exactly() -> None:
+    """`inference.py`'s module docstring: "kurtosis here is RAW (3 for a
+    normal distribution)" -- KHÔNG phải quy ước "excess kurtosis" (0 =
+    chuẩn) phổ biến hơn trong sách giáo khoa. Nói sai chỗ này là dạy model
+    đọc sai MỌI giá trị kurtosis nó thấy."""
+    glossary = chat_knowledge.metric_names()
+    text = glossary["PnL kurtosis"]
+    assert "3.0" in text
+    assert "RAW" in text
+    assert "excess kurtosis" in text  # phải NÊU RA để loại trừ tường minh
+
+
+def test_dsr_cites_selection_trials_not_a_generic_p_value() -> None:
+    """DSR (Bailey & Lopez de Prado 2014) so với Sharpe kỳ vọng của bot TỐT
+    NHẤT trong `selection_trials` ứng viên -- không phải một phép kiểm giả
+    thuyết chung chung. Nhầm chỗ này xoá mất đúng cơ chế khử thiên lệch chọn
+    mẫu mà bot này thực sự dùng (mỗi bot được chọn là tốt nhất trên cùng
+    một tài sản)."""
+    text = chat_knowledge.metric_names()["Deflated Sharpe Ratio (DSR)"]
+    assert "selection_trials" in text
+    assert "BEST of" in text
+
+
+def test_psr_benchmark_is_stated_as_zero_by_default() -> None:
+    """`inference.py`'s `psr_benchmark_sharpe: float = 0.0` -- PSR so với
+    NGƯỠNG này, không so với "Sharpe dương bất kỳ" mơ hồ."""
+    text = chat_knowledge.metric_names()["Probabilistic Sharpe Ratio (PSR)"]
+    assert "zero" in text.lower()
+
+
+def test_var_cvar_are_documented_as_losses_not_returns() -> None:
+    """`monte_carlo.py`: `var95 = -float(np.percentile(profits, 5))` -- VaR/
+    CVaR được LƯU dưới dạng số dương = tiền mất, đã đổi dấu từ phân phối lợi
+    nhuận. Nói sai chiều dấu ở đây khiến model đọc một khoản lỗ 24% thành
+    một khoản lãi 24%."""
+    text = chat_knowledge.metric_names()["VaR 95% / VaR 99%"]
+    assert "positive number means money lost" in text
+
+
+def test_stationary_bootstrap_block_length_matches_monte_carlo_py() -> None:
+    """`monte_carlo.py`: `expected_block = ... len(pnls) ** (1 / 3)` -- độ
+    dài khối kỳ vọng là CĂN BẬC BA số lệnh, phân phối hình học, không phải
+    một hằng số cố định."""
+    text = chat_knowledge.metric_names()["Stationary bootstrap"]
+    assert "cube root" in text
+    assert "geometric" in text
+
+
+def test_mar_ratio_is_per_run_not_a_single_account_wide_figure() -> None:
+    """`monte_carlo.py`: `mar = profits[usable] / max_drawdowns[usable]` --
+    MAR ratio được tính TRÊN TỪNG lượt mô phỏng rồi lấy median/p05 qua các
+    lượt, không phải một tỷ số duy nhất của tài khoản thật."""
+    text = chat_knowledge.metric_names()["MAR ratio (simulated)"]
+    assert "that SAME run's own max drawdown" in text
+
+
+def test_loss_streak_baseline_is_named_as_an_exact_probability_not_a_guess() -> None:
+    """`monte_carlo.py`'s `loss_streak_baseline_probability` docstring: tính
+    bằng quy hoạch động chính xác, không phải một ước lượng mô phỏng có
+    nhiễu -- và lý do tồn tại của nó là "một bot giao dịch nhiều tất nhiên sẽ
+    có chuỗi thua dài dù mỗi lệnh độc lập"."""
+    text = chat_knowledge.metric_names()["Loss-streak probability, baseline, and excess"]
+    assert "independent" in text
+    assert "even if every trade were an independent coin flip" in text
 
 
 def test_history_is_capped_and_labelled_as_client_supplied() -> None:
