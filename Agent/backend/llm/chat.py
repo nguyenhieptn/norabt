@@ -50,16 +50,44 @@ giờ trôi khỏi nhau, và chuỗi per-trade bị bỏ ra ngoài có chủ đ�
 
 PHÂN QUYỀN THEO VAI (`role: ViewRole`, tái dùng ĐÚNG enum
 `view_policy.ViewRole` mà `api_dossier`/report page đang dùng, không tự định
-nghĩa một khái niệm vai trò thứ hai): report page khoá `panel-market` (phân
-tích thị trường sâu) và `panel-trades` (mô phỏng Monte Carlo, DSR/PSR,
-loss-streak, sổ lệnh chi tiết -- xem `report_page._render_tab_trades`) sau
-gói Premium cho vai USER. `build_chat_context(record, role=...)` phải khoá
-ĐÚNG hai nhóm dữ liệu đó cho USER, và khoá bằng cách KHÔNG THU THẬP -- không
+nghĩa một khái niệm vai trò thứ hai): report page khoá hai vùng cho vai
+USER, ĐỌC THẲNG TỪ `report_page.py` chứ không đoán:
+  * `panel-market` (`_render_market_compatibility`/`_render_strategy_section`)
+    -- phân tích chế độ thị trường/cross-market: `phase_breakdown`,
+    `best_phase`/`worst_phase`, `unresolved_markets`, `observed_symbols`.
+  * `panel-trades`'s `_render_statistical_inference` CỤ THỂ (không phải cả
+    tab) -- đúng bốn con số PSR/DSR/MinTRL/Sharpe-per-trade, thứ trả lời
+    "liệu edge có thật hay chỉ là may mắn". PHẦN CÒN LẠI của mô phỏng
+    (percentile spectrum, VaR/CVaR, loss-streak, terminal equity...) nằm ở
+    `_render_monte_carlo`, TAB 1 (Analyst Result) -- MIỄN PHÍ cho cả hai
+    vai. Khoá nhầm cả cụm mô phỏng (bản đầu của patch này từng làm vậy) là
+    một lỗi NGƯỢC HƯỚNG: làm chat cho user Basic nghèo hơn chính report page
+    họ đang xem.
+`build_chat_context(record, role=...)` khoá bằng cách KHÔNG THU THẬP -- không
 phải bằng cách dặn prompt "đừng nói". Đây là điểm quan trọng: nếu chỉ dặn
 prompt, một model bị dẫn dắt khéo (hoặc một lỗi diễn đạt) vẫn có thể đoán ra
 một con số premium hợp lý; nếu trường đó chưa từng vào `NumberSpec`, con số
 đó KHÔNG NẰM trong danh sách trắng, nên cổng khoá số (Cổng 3, không phải
 prompt) tự động chặn nó -- một lớp bảo vệ kỹ thuật, không phải lời hứa.
+
+PHẠM VI CHỦ ĐỀ (`chat_knowledge.BOUNDARY_RULES`'s luật thứ hai): chỉ (a) câu
+hỏi về bản ghi bot đang xem, hoặc (b) lý thuyết tài chính định lượng/OKX nói
+chung. Đây là luật NGÔN TỪ thuần tuý -- "câu hỏi này có đúng chủ đề không"
+là một phán đoán ngữ nghĩa, không có cách nào viết một cổng tất định để
+kiểm nó như số/từ cấm. Đã ĐO ĐƯỢC bằng ~23 lượt gọi thật (22/09, model
+`gemini-3.8-flash-medium` qua `agy`) trên nhiều bot (HEALTHY tới EMERGENCY):
+  * Câu hỏi kết quả + câu lý thuyết thuần (không đụng số của bot đang xem):
+    đều trả lời đúng, đúng số, đúng định nghĩa engine.
+  * 5 kiểu né luật khác nhau đều bị chặn gọn trong một câu, không trả lời
+    một phần: hỏi thẳng system prompt, trộn 1 câu hợp lệ với 1 câu ngoài lề,
+    xin lời khuyên đầu tư, xin dự đoán tương lai, và lịch sử hội thoại GIẢ
+    MẠO tuyên bố model "đã đồng ý trả lời mọi thứ".
+  * Hội thoại nhiều lượt: lượt sau tổng hợp đúng số liệu từ lượt trước
+    (không tự bịa lại hay quên).
+  * Một lượt (trong 13) rơi về `FALLBACK_CHAT_ANSWER` vì backend Gemini báo
+    503 tạm thời ở đúng lượt retry (log: "UNAVAILABLE... service is
+    currently unavailable") -- không phải lỗi ở đây, và là bằng chứng cơ
+    chế dự phòng hoạt động đúng khi hạ tầng ngoài thật sự hỏng.
 """
 
 from __future__ import annotations
@@ -67,7 +95,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from Agent.backend.llm import chat_knowledge
@@ -104,9 +132,20 @@ ENV_CHAT = "NORABT_CHAT"
 # Trần độ dài câu trả lời. Sàn 40 ký tự CỐ Ý thấp hơn nhiều sàn 200 của
 # narrative: ở đây "The record does not contain that figure." là một câu trả
 # lời ĐÚNG và đầy đủ, còn ở narrative thì một đoạn nhận định 40 ký tự là
-# hỏng. Trần 1500 giữ câu trả lời ở mức đọc được trong khung chat.
+# hỏng.
+#
+# Trần 1500 -> 1800 (22/09, ĐO ĐƯỢC trên lượt chạy thật): một câu hỏi tổng
+# hợp sâu thật sự -- ví dụ nối DSR/PSR với loss-streak excess, hay giải
+# thích vì sao stationary bootstrap giữ được autocorrelation -- tự nhiên ra
+# 1550-1650 ký tự khi trả lời đủ ý (nhiều thuật ngữ, mỗi thuật ngữ phải giải
+# thích bằng lời trong câu theo đúng STYLE ở dưới). 13 lượt gọi thật đo được
+# hôm nay có đúng 1 lượt vượt 1500 (1580 ký tự) và bị cổng chặn oan, tốn
+# thêm một lượt retry cho một câu trả lời vốn dĩ đã đúng và đủ ý -- không
+# phải lỗi nội dung, chỉ là trần đặt hơi chặt so với độ sâu chủ dự án đang
+# muốn (xem yêu cầu "phải đủ wow... hiểu sâu lý thuyết tài chính"). 1800 vẫn
+# giữ câu trả lời trong một đoạn văn ngắn, không mở đường cho một bài luận.
 MIN_ANSWER_CHARS = 40
-MAX_ANSWER_CHARS = 1500
+MAX_ANSWER_CHARS = 1800
 
 # Mốc THAM CHIẾU cố định mà `chat_knowledge`'s glossary tự trích khi giải
 # thích một khái niệm -- KHÔNG phải sự thật riêng của bot đang xem, nên
@@ -348,6 +387,13 @@ _PREMIUM_EVIDENCE_NOTICE = (
     "breakdown, unresolved-symbol coverage) is part of the Premium plan and "
     "is not included in this conversation."
 )
+_PREMIUM_SIMULATION_NOTICE = (
+    "- Statistical inference on this simulation (Probabilistic Sharpe Ratio, "
+    "Deflated Sharpe Ratio, Minimum Track Record Length, Sharpe per trade -- "
+    "the figures that separate a real edge from a lucky sample) is part of "
+    "the Premium plan and is not included in this conversation. A record "
+    "exists but these specific figures are withheld at this access level."
+)
 
 
 def _collect_evidence(
@@ -446,7 +492,24 @@ def _collect_evidence(
             out.num(f"  data_quality/{name}", value)
 
 
-def _collect_simulation(out: _Collector, simulation: Dict[str, Any]) -> None:
+# CHỈ sáu trường sau (`psr`, `probabilistic_sharpe`, `deflated_sharpe`,
+# `min_track_record_trades`, `selection_trials`, `sharpe_per_trade` -- rải
+# rác trong thân `_collect_simulation` bên dưới, mỗi chỗ tự kiểm `role`)
+# tương ứng ĐÚNG nhóm `_render_statistical_inference` hiển thị trong
+# `report_page.py` (bảng PSR/DSR/MinTRL/Sharpe-per-trade) -- ĐÂY MỚI là phần
+# thật sự bị khoá sau Premium (`panel-trades`), không phải toàn bộ mô phỏng.
+# ĐO ĐƯỢC LÚC VIẾT (22/09): lần đầu tôi khoá NGUYÊN `_collect_simulation`
+# cho vai USER, tưởng nhầm cả cụm Monte Carlo là Premium -- đọc lại
+# `report_page._render_tab_report` mới thấy `_render_monte_carlo` (percentile
+# spectrum, horizon comparison, key probabilities, loss-streak table,
+# deferred-loss-bias warning) nằm ở TAB 1 (Analyst Result), MIỄN PHÍ cho cả
+# hai vai. Khoá nhầm cụm đó sẽ làm chat cho user Basic NGHÈO HƠN chính report
+# page họ đang xem -- một lỗi ngược hướng với lỗ hổng ban đầu nhưng vẫn sai.
+
+
+def _collect_simulation(
+    out: _Collector, simulation: Dict[str, Any], *, role: ViewRole
+) -> None:
     if not simulation:
         return
     out.line("")
@@ -464,10 +527,13 @@ def _collect_simulation(out: _Collector, simulation: Dict[str, Any]) -> None:
     out.num("Probability of ruin", simulation.get("p_ruin"), percent=True)
     out.num("Probability of loss after the horizon", simulation.get("p_loss_after_horizon"), percent=True)
     out.num("Probability of profit", simulation.get("probability_of_profit"), percent=True)
-    out.num("Deflated Sharpe Ratio", simulation.get("deflated_sharpe"))
-    out.num("Probabilistic Sharpe Ratio", simulation.get("psr"))
-    out.num("Minimum track record (trades)", simulation.get("min_track_record_trades"), decimals=0)
-    out.num("Selection trials discounted", simulation.get("selection_trials"), decimals=0)
+    if role is ViewRole.ADMIN:
+        out.num("Deflated Sharpe Ratio", simulation.get("deflated_sharpe"))
+        out.num("Probabilistic Sharpe Ratio", simulation.get("psr"))
+        out.num("Minimum track record (trades)", simulation.get("min_track_record_trades"), decimals=0)
+        out.num("Selection trials discounted", simulation.get("selection_trials"), decimals=0)
+    else:
+        out.line(_PREMIUM_SIMULATION_NOTICE)
     out.num("Median profit over horizon", simulation.get("profit_pct_p50"), percent=True)
     out.num("p05 profit over horizon", simulation.get("profit_pct_p05"), percent=True)
     out.num("p95 profit over horizon", simulation.get("profit_pct_p95"), percent=True)
@@ -534,7 +600,8 @@ def _collect_simulation(out: _Collector, simulation: Dict[str, Any]) -> None:
     out.num("p10 terminal equity (worse-case band)", simulation.get("p10_outcome"), money=True)
     out.num("p90 terminal equity (better-case band)", simulation.get("p90_outcome"), money=True)
     out.num("Worst simulated terminal equity", simulation.get("worst_terminal_equity"), money=True)
-    out.num("Sharpe per trade (input to PSR/DSR)", simulation.get("sharpe_per_trade"))
+    if role is ViewRole.ADMIN:
+        out.num("Sharpe per trade (input to PSR/DSR)", simulation.get("sharpe_per_trade"))
     out.num(
         "Horizon sensitivity (0 = stable across horizons, 1 = fully reversed)",
         simulation.get("horizon_sensitivity"),
@@ -561,12 +628,13 @@ def _collect_simulation(out: _Collector, simulation: Dict[str, Any]) -> None:
         )
     if simulation.get("sample_is_thin") is True:
         out.line("- The engine flagged this sample as THIN: figures above are weakly supported.")
-    if simulation.get("inference_reliable") is False:
-        out.line("- The engine flagged its own statistical inference as NOT reliable for this bot.")
     if simulation.get("is_valid") is False:
         out.line("- The engine marked this simulation run itself as NOT VALID.")
     out.listing("Simulation warnings", simulation.get("warnings"))
-    out.listing("Inference notes", simulation.get("inference_notes"))
+    if role is ViewRole.ADMIN:
+        if simulation.get("inference_reliable") is False:
+            out.line("- The engine flagged its own statistical inference as NOT reliable for this bot.")
+        out.listing("Inference notes", simulation.get("inference_notes"))
 
 
 def _collect_recommendation(out: _Collector, recommendation: Dict[str, Any]) -> None:
@@ -591,7 +659,7 @@ def _collect_recommendation(out: _Collector, recommendation: Dict[str, Any]) -> 
         out.prose(_text(body) or "", indent="  ")
 
 
-def build_chat_context(record: Any) -> ChatContext:
+def build_chat_context(record: Any, *, role: ViewRole = ViewRole.ADMIN) -> ChatContext:
     """Bản ghi `assessment.json` -> ngữ cảnh hội thoại.
 
     KHÔNG gọi pipeline, KHÔNG đọc thêm file, KHÔNG điền giá trị mặc định cho
@@ -602,6 +670,14 @@ def build_chat_context(record: Any) -> ChatContext:
     từng lệnh (hàng trăm giá trị) -- đưa vào sẽ làm danh sách trắng của cổng
     khoá số phình tới mức vô dụng, đổi lại gần như không giúp gì cho việc
     trả lời, vì mọi câu hỏi tổng hợp đã có đáp số riêng ở các khối trên.
+
+    `role` mặc định `ADMIN` (giữ hành vi cũ cho caller nội bộ/test chưa biết
+    tới khái niệm vai) -- caller HTTP thật (`app.py`'s `api_chat`) LUÔN phải
+    truyền tường minh theo `_is_admin_request(request)`, không được dựa vào
+    mặc định này. Với `USER`, `_collect_evidence` tự cắt phần premium và
+    `_collect_simulation` không được gọi -- xem `_PREMIUM_EVIDENCE_NOTICE`/
+    `_PREMIUM_SIMULATION_NOTICE` và module docstring's giải thích "khoá bằng
+    không thu thập, không phải bằng lời dặn".
     """
     payload = _mapping(record)
     bot = _mapping(payload.get("bot"))
@@ -635,8 +711,8 @@ def build_chat_context(record: Any) -> ChatContext:
 
     _collect_recommendation(out, _mapping(payload.get("recommendation")))
     _collect_scoring(out, _mapping(payload.get("scoring")))
-    _collect_evidence(out, _mapping(payload.get("evidence")))
-    _collect_simulation(out, _mapping(payload.get("simulation")))
+    _collect_evidence(out, _mapping(payload.get("evidence")), role=role)
+    _collect_simulation(out, _mapping(payload.get("simulation")), role=role)
 
     expert = _text(payload.get("expert_assessment"))
     if expert:
@@ -870,6 +946,7 @@ async def answer_question(
     *,
     history: Any = (),
     backend: Optional[NarrativeBackend] = None,
+    role: ViewRole = ViewRole.ADMIN,
 ) -> Optional[str]:
     """`None` KHI VÀ CHỈ KHI tính năng chưa bật -- khi đó không có prompt
     nào được dựng và không tiến trình con nào được sinh, cùng hợp đồng
@@ -877,6 +954,10 @@ async def answer_question(
 
     Mọi trường hợp còn lại luôn trả về MỘT chuỗi: câu trả lời đã qua ba
     cổng, hoặc một câu dự phòng tĩnh. Hàm này không raise ra ngoài.
+
+    `role` mặc định `ADMIN` giữ nguyên hành vi cho mọi caller nội bộ/test đã
+    có trước khi phân quyền tồn tại -- caller HTTP (`app.py`) BẮT BUỘC truyền
+    tường minh, xem `build_chat_context`'s docstring.
     """
     resolved = backend if backend is not None else select_backend_from_env()
     if resolved is None:
@@ -886,7 +967,7 @@ async def answer_question(
     if normalized is None:
         return None
 
-    context = build_chat_context(record)
+    context = build_chat_context(record, role=role)
     if not context.has_content or not context.record_block:
         return EMPTY_RECORD_ANSWER
 
@@ -932,13 +1013,16 @@ def answer_question_sync(
     *,
     history: Any = (),
     backend: Optional[NarrativeBackend] = None,
+    role: ViewRole = ViewRole.ADMIN,
 ) -> Optional[str]:
     """Bọc đồng bộ cho nơi gọi chạy trên worker thread (Starlette's
     `run_in_threadpool`), cùng lý do và cùng cách xử lý `RuntimeError` như
     `narrative.generate_narrative_sync`."""
     try:
         return asyncio.run(
-            answer_question(record, question, history=history, backend=backend)
+            answer_question(
+                record, question, history=history, backend=backend, role=role
+            )
         )
     except RuntimeError as exc:
         logger.warning(
@@ -949,12 +1033,18 @@ def answer_question_sync(
         return FALLBACK_CHAT_ANSWER
 
 
-def suggested_questions(record: Any) -> List[str]:
+def suggested_questions(record: Any, *, role: ViewRole = ViewRole.ADMIN) -> List[str]:
     """Vài câu hỏi mở sẵn cho khung chat, DỰNG TỪ chính bản ghi.
 
     Không phải danh sách cứng: mỗi câu chỉ xuất hiện khi bản ghi thực sự có
     thứ để trả lời nó. Một bot không có lệnh mở thì không được hỏi về khoản
     lỗ treo -- hỏi là mời model bịa.
+
+    `role`: với `USER`, không gợi ý những câu chỉ trả lời được bằng dữ liệu
+    Premium (`untested_phases`/`phase_breakdown` = panel-market,
+    `deflated_sharpe` = panel-trades) -- gợi ý một câu rồi để chat trả lời
+    "phần này thuộc gói Premium" là trải nghiệm tệ hơn nhiều so với không gợi
+    ý câu đó ngay từ đầu.
     """
     payload = _mapping(record)
     evidence = _mapping(payload.get("evidence"))
@@ -970,11 +1060,12 @@ def suggested_questions(record: Any) -> List[str]:
     if isinstance(open_positions, (int, float)) and not isinstance(open_positions, bool):
         if open_positions > 0:
             questions.append("What would happen if the open positions were closed today?")
-    if evidence.get("untested_phases"):
-        questions.append("Which market conditions has this bot never traded in?")
-    if simulation.get("deflated_sharpe") is not None:
-        questions.append("Is this track record good enough to tell skill from luck?")
-    if evidence.get("phase_breakdown"):
-        questions.append("How does this bot behave in a falling market?")
+    if role is ViewRole.ADMIN:
+        if evidence.get("untested_phases"):
+            questions.append("Which market conditions has this bot never traded in?")
+        if simulation.get("deflated_sharpe") is not None:
+            questions.append("Is this track record good enough to tell skill from luck?")
+        if evidence.get("phase_breakdown"):
+            questions.append("How does this bot behave in a falling market?")
     questions.append("What does the risk score actually measure?")
     return questions[:5]

@@ -4,6 +4,7 @@ import concurrent.futures
 import hashlib
 import json
 import time
+import threading
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -30,6 +31,7 @@ from Agent.backend.bot.mcp.analytics.simulation.sharpe_reference import (
     population_sharpe_variance,
 )
 from Agent.backend.bot.mcp.analytics.simulation.stress import StressSimulator
+from Agent.backend.bot.mcp.analytics.strategy.exit_rule import ExitRuleAnalyzer
 from Agent.backend.bot.mcp.analytics.strategy.phases import PhaseTimeline, build_timeline
 from Agent.backend.bot.mcp.analytics.strategy.profile import (
     StrategyPhaseAnalyzer,
@@ -136,6 +138,14 @@ class BotObservationService:
             reference_data_dir if reference_data_dir is not None else self.data_dir
         )
         self._timeline_cache: Dict[str, Optional[PhaseTimeline]] = {}
+        # Guards the cache above. One service instance is now shared by the
+        # threads that read a portfolio's members in parallel (see
+        # `PortfolioSupervisionPipeline.fetch_members`), and two members
+        # trading the same symbol would otherwise both find the cache empty
+        # and each build the same 30k-candle timeline. Dict writes are atomic
+        # under the GIL so nothing corrupts either way -- what the lock buys
+        # is not doing the expensive work twice.
+        self._timeline_lock = threading.Lock()
         self.evaluation_mode = evaluation_mode
         # Defaults to the on-disk crawl output -- every existing caller keeps
         # reading exactly what Agent/none/scripts/crawl_bots.py wrote. Passing a
@@ -390,12 +400,41 @@ class BotObservationService:
                 break
         return build_timeline(symbol, candles) if candles else None
 
+    def phase_timelines(self, symbols: Iterable[str]) -> Dict[str, PhaseTimeline]:
+        """Public access to the cached phase timelines.
+
+        The portfolio path needs them for a ledger merged from several bots,
+        which no single `get_bot_result` call covers. Exposed rather than
+        rebuilt so the caller shares this instance's cache instead of parsing
+        30k candles per symbol a second time.
+        """
+        return self._phase_timelines(symbols)
+
     def _phase_timelines(self, symbols: Iterable[str]) -> Dict[str, PhaseTimeline]:
         """Hourly phase labels for every symbol we hold candles for.
 
         Cached per service instance: one bot can touch a hundred instruments and
         rebuilding a 30k-point timeline for each would dominate the run.
+
+        The whole body is serialised on `self._timeline_lock`. That is not
+        about correctness -- writes here were always safe, for the reason the
+        comment below the loop gives -- it is about not doing the same work
+        twice. One service instance is now shared by the threads that read a
+        portfolio's members concurrently, and those members overwhelmingly
+        trade the same few symbols; without the lock, four threads all find
+        BTC missing at the same instant and all four build the same
+        30k-candle timeline. Serialising here makes the total work the UNION
+        of the members' symbols, built once, which is strictly less than what
+        the threads would otherwise duplicate. The build inside is still
+        parallel across symbols, so the critical section is as short as the
+        work allows.
         """
+        with self._timeline_lock:
+            return self._phase_timelines_locked(symbols)
+
+    def _phase_timelines_locked(
+        self, symbols: Iterable[str]
+    ) -> Dict[str, PhaseTimeline]:
         timelines: Dict[str, PhaseTimeline] = {}
         unique_symbols = {str(s).upper() for s in symbols if s}
         missing: List[str] = []
@@ -901,6 +940,10 @@ class BotObservationService:
                 }
             )
         stress = StressSimulator.run_stress(trades, capital.capital_at_risk)
+        # Exit discipline from the ledger alone -- no market data, no other
+        # bot, so it is produced for every bot including ones trading
+        # instruments this project holds no candles for.
+        exit_rule = ExitRuleAnalyzer.analyze(trades)
         return BotResult(
             identity=BotIdentity(
                 bot_id=f"BOT_{unique_code}_{assessed_symbol}",
@@ -929,6 +972,7 @@ class BotObservationService:
             drawdown_analysis=drawdown,
             simulation_results=simulation,
             stress_results=stress,
+            exit_rule=exit_rule,
             reconciliation=reconciliation,
             capital=capital,
             data_quality=data_quality,

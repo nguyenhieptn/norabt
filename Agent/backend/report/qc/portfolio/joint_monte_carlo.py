@@ -186,6 +186,14 @@ class JointMonteCarloEngine:
             )
 
         rng = np.random.default_rng(seed)
+        # The joint path only ever needs the TOTAL of a bucket, never the
+        # per-bot split, so the sum is done once over T columns instead of
+        # once per drawn path. `matrix[:, shared].sum(axis=0)` is the same
+        # number, but it first materialises an (N, batch, horizon) array --
+        # 64 MB per batch at eight members, against 8 MB here, and that array
+        # is discarded on the very next line. Identical arithmetic, one
+        # dimension less of it.
+        bucket_totals = matrix.sum(axis=0)
         joint_paths: List[np.ndarray] = []
         independent_paths: List[np.ndarray] = []
         remaining = iterations
@@ -194,7 +202,7 @@ class JointMonteCarloEngine:
             # One index vector per path, applied to EVERY bot: the column is
             # taken whole, so the bots' co-movement survives the resampling.
             shared = cls._indices(rng, sample_length, batch, horizon)
-            joint_paths.append(matrix[:, shared].sum(axis=0))
+            joint_paths.append(bucket_totals[shared])
             # The counterfactual: each bot drawn from its own independent
             # index vector, which destroys the co-movement while leaving every
             # marginal distribution untouched.

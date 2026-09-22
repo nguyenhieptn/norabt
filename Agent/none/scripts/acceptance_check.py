@@ -28,7 +28,7 @@ from typing import Any, Dict, Iterator, List, Tuple
 REPO = Path(__file__).resolve().parents[3]
 # 2026-09: assessment_store.persist ghi vào data/report/<bot_id>/latest.json
 # (không còn data/assessment/<venue>/<asset>/bot/.../assessment.json)
-REPORT_DIR = REPO / "Agent" / "data" / "report"
+REPORT_DIR = REPO / "Agent" / "data" / "report" / "single"
 BASE_URL = "http://127.0.0.1:8770"
 
 # Dấu phụ CHỈ có trong tiếng Việt. Cố ý KHÔNG gồm "ó"/"é" trần: chúng xuất

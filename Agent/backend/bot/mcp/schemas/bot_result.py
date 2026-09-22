@@ -560,6 +560,108 @@ class DataQualityAssessment(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class ExitStyle(str, Enum):
+    """How a bot decides a trade is over. One label, from the ledger alone."""
+
+    UNKNOWN = "UNKNOWN"
+    FIXED_TARGET = "FIXED_TARGET"
+    PROTECTIVE_STOP = "PROTECTIVE_STOP"
+    RUN_WINNERS_CUT_LOSSES = "RUN_WINNERS_CUT_LOSSES"
+    HOLD_LOSERS = "HOLD_LOSERS"
+    TIME_EXIT = "TIME_EXIT"
+    DISCRETIONARY = "DISCRETIONARY"
+
+
+class ExitRuleFingerprint(BaseModel):
+    """The bot's exit discipline, reconstructed from closed trades alone.
+
+    WHY THIS IS MEASURED IN PRICE, NOT PnL. Every figure below is the
+    direction-adjusted PRICE move between entry and exit
+    (`(exit - entry) / entry`, negated for shorts), deliberately excluding
+    leverage, size and fees. The question here is *when the bot decided to get
+    out*, and PnL conflates that decision with how big the position was: two
+    bots running the identical exit rule at 5x and 50x look like different
+    strategies in PnL terms and identical ones here, which is the correct
+    answer for a style comparison.
+
+    WHY IT BELONGS TO LOGIC 2. It is a property of the trade ledger, derived
+    with no market data, no QC verdict and no other bot in scope -- the same
+    standing as `behavioral_observations`. That also means it is available on
+    every bot, including one trading instruments no candles exist for.
+
+    WHAT IT CANNOT SEE. Orders that were cancelled, positions still open, and
+    anything hedged off-venue leave no trace in a closed-trade ledger, so this
+    describes exits that HAPPENED, never the rule that was configured.
+    """
+
+    sample_size: int = Field(default=0, ge=0)
+    priced_trades: int = Field(default=0, ge=0)
+    # Share of closed trades carrying both an entry and an exit price. Every
+    # figure below rests on this subset, so a reader can see how much of the
+    # ledger the fingerprint actually speaks for.
+    price_coverage: float = Field(default=0.0, ge=0.0, le=1.0)
+    win_count: int = Field(default=0, ge=0)
+    loss_count: int = Field(default=0, ge=0)
+
+    # --- tails, in percent of entry price -------------------------------
+    win_move_median: Optional[float] = None
+    win_move_p90: Optional[float] = None
+    win_move_max: Optional[float] = None
+    loss_move_median: Optional[float] = None
+    loss_move_p10: Optional[float] = None
+    loss_move_worst: Optional[float] = None
+    # |median loss| / median win. Above 1.0 the bot books losses larger than
+    # its wins, which a win rate alone will never reveal.
+    loss_to_win_ratio: Optional[float] = Field(default=None, ge=0.0)
+    # Coefficient of variation within each side: low means the exits land in
+    # the same place every time, high means they are decided case by case.
+    win_dispersion: Optional[float] = Field(default=None, ge=0.0)
+    loss_dispersion: Optional[float] = Field(default=None, ge=0.0)
+    # p90/median for wins, p10/median for losses: how far the tail runs past
+    # the typical exit. A hard target pins both near 1.
+    win_tail_ratio: Optional[float] = Field(default=None, ge=0.0)
+    loss_tail_ratio: Optional[float] = Field(default=None, ge=0.0)
+
+    # --- hard take-profit / stop-loss detection --------------------------
+    # Share of exits landing within +-15% of that side's median move. A rule
+    # firing at a fixed level concentrates them; a judgement call does not.
+    take_profit_clustering: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    stop_loss_clustering: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    has_hard_take_profit: bool = False
+    has_hard_stop_loss: bool = False
+    # Only populated when the corresponding clustering clears the threshold.
+    # Reporting a "level" for scattered exits would be inventing one.
+    take_profit_level_pct: Optional[float] = None
+    stop_loss_level_pct: Optional[float] = None
+
+    # --- holding behaviour ----------------------------------------------
+    hold_median_minutes: Optional[float] = Field(default=None, ge=0.0)
+    win_hold_median_minutes: Optional[float] = Field(default=None, ge=0.0)
+    loss_hold_median_minutes: Optional[float] = Field(default=None, ge=0.0)
+    # loss hold / win hold. Above 1 means losers are held longer than winners
+    # -- cutting winners and sitting on losers, the single most common way a
+    # healthy-looking win rate hides an unhealthy book.
+    hold_asymmetry: Optional[float] = Field(default=None, ge=0.0)
+    # Ordered histogram over fixed duration bands (see HOLD_BUCKET_LABELS).
+    hold_buckets: Dict[str, int] = Field(default_factory=dict)
+    hold_shape: List[float] = Field(default_factory=list)
+    # More than one duration band standing out: the bot is running two
+    # different behaviours under one name (e.g. scalps plus bag-holding).
+    is_multi_modal: bool = False
+    hold_modes: List[str] = Field(default_factory=list)
+
+    # --- verdict ---------------------------------------------------------
+    exit_style: ExitStyle = ExitStyle.UNKNOWN
+    # Everything detected, not just the label that won the priority order.
+    patterns: List[str] = Field(default_factory=list)
+    # Fixed-order, dimensionless components used to compare two bots. Never
+    # read positionally by name elsewhere -- see `ExitRuleAnalyzer.compare`.
+    rule_vector: List[float] = Field(default_factory=list)
+    evidence: List[str] = Field(default_factory=list)
+    is_valid: bool = False
+    warnings: List[str] = Field(default_factory=list)
+
+
 class BotResult(BaseModel):
     """LOGIC 2 output: bot observations and simulations, never a QC verdict."""
 
@@ -578,6 +680,10 @@ class BotResult(BaseModel):
     drawdown_analysis: DrawdownAnalysis
     simulation_results: SimulationResults
     stress_results: Optional[StressTestResults] = None
+    # Exit discipline reconstructed from the ledger (Logic 2, no market
+    # data involved). Optional so every BotResult serialised before this
+    # field existed still validates; always populated on a fresh run.
+    exit_rule: Optional[ExitRuleFingerprint] = None
     reconciliation: LedgerReconciliation
     capital: CapitalModel
     data_quality: DataQualityAssessment

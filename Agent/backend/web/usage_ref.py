@@ -78,7 +78,7 @@ from Agent.backend.web.identity import USER_REF_LENGTH, USER_REF_RE
 # biệt. Cùng khuôn injectable-default `users_root` của identity.py: mỗi
 # hàm public bên dưới nhận `root=` riêng để test không bao giờ đụng vào kho
 # thật của dự án.
-DEFAULT_USAGE_REFS_ROOT = Path(config.DATA_DIR) / "report" / "usage_refs"
+DEFAULT_USAGE_REFS_ROOT = Path(config.DATA_DIR) / "report" / "single" / "usage_refs"
 
 # Bảng chữ base32 thường -- CHÍNH XÁC alphabet `identity.USER_REF_RE` chấp
 # nhận (`[a-z2-7]`), không phải để encode gì cả, chỉ để rút ngẫu nhiên từng

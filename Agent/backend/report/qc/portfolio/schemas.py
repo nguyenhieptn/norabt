@@ -115,6 +115,44 @@ class AlignmentDiagnostics(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class StyleVerdict(str, Enum):
+    """Whether the members run the same playbook, independent of results."""
+
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+    DISTINCT_PLAYBOOKS = "DISTINCT_PLAYBOOKS"
+    PARTIAL_OVERLAP = "PARTIAL_OVERLAP"
+    SAME_PLAYBOOK = "SAME_PLAYBOOK"
+
+
+class PairStyle(BaseModel):
+    """How alike two members TRADE, as opposed to how alike their results are.
+
+    This exists because the two routinely disagree and the disagreement is the
+    finding. PnL co-movement is a property of the window the bots happened to
+    share; the exit discipline behind it is a property of the strategy. Two
+    grid bots whose PnL offset over one quarter are not diversified, they are
+    one idea that got lucky with timing, and only this half of the comparison
+    can say so.
+    """
+
+    exit_distance: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    exit_similarity: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    rule_distance: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    hold_distance: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    # Which half drove the headline distance: "RULE" or "HOLDING_PERIOD".
+    driver: Optional[str] = None
+    top_rule_component: Optional[str] = None
+    top_rule_gap: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    exit_style_a: Optional[str] = None
+    exit_style_b: Optional[str] = None
+    same_exit_style: bool = False
+    shared_patterns: List[str] = Field(default_factory=list)
+    # The trap this feature exists to catch: results look uncorrelated while
+    # the trading behind them is the same.
+    style_vs_pnl_conflict: bool = False
+    note: str = ""
+
+
 class PairCorrelation(BaseModel):
     """One pair of bots, measured rather than asserted."""
 
@@ -144,6 +182,8 @@ class PairCorrelation(BaseModel):
 
     relationship: PairRelationship = PairRelationship.UNKNOWN
     note: str = ""
+    # `None` when at least one member's ledger is too thin to fingerprint.
+    style: Optional[PairStyle] = None
 
 
 class CorrelationMatrix(BaseModel):
@@ -242,11 +282,16 @@ class ExposureConcentration(BaseModel):
 
 
 class PortfolioRiskAssessment(BaseModel):
-    """LOGIC 3 output for a SET of bots. Never replaces the per-bot assessment.
+    """The diversification section of a portfolio report -- not the report.
 
-    Each member still has its own `BotRiskAssessment`, produced by the same ten
-    lenses as always; this model adds only what cannot be seen from inside a
-    single bot.
+    A multi-bot run produces ONE ordinary `BotRiskAssessment`, built by the
+    usual ten lenses over the members' merged ledger, so it carries every
+    section and every tab a single-bot report has. This model is the one thing
+    that report cannot contain, because it is meaningless for a single bot:
+    whether the members move together, whether they trade the same way, and
+    what their co-movement costs the combined loss tail.
+
+    It therefore holds no risk score of its own -- see `combined_*` below.
     """
 
     schema_version: str = "portfolio_risk_assessment.v1"
@@ -264,21 +309,33 @@ class PortfolioRiskAssessment(BaseModel):
     joint_simulation: Optional[JointSimulationResult] = None
     concentration: ExposureConcentration
 
-    # Capital-weighted mean of the members' own risk scores: the portfolio as
-    # the sum of its parts, before any portfolio-level effect.
-    member_weighted_risk_score: Optional[float] = Field(
-        default=None, ge=0.0, le=100.0
-    )
-    # The above plus what only shows up in combination (co-movement,
-    # concentration, a diversification benefit that failed to appear). It can
-    # legitimately exceed every individual member's score -- that is the
-    # finding, not a bug.
-    portfolio_risk_score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
-    risk_tier: str = "UNKNOWN"
-    score_adjustments: Dict[str, float] = Field(default_factory=dict)
+    # Pointers to the ONE assessment that carries the portfolio's risk score.
+    #
+    # There is deliberately no second score here. The portfolio's risk is
+    # produced by the same ten lenses as any bot's, run over the merged ledger
+    # (see `PortfolioAggregator`), so it lives in that `BotRiskAssessment` and
+    # nowhere else. An independently computed "portfolio score" beside it
+    # would be a second answer to a question that already has one, and the two
+    # would drift. These fields are copies for listings and history tables
+    # only -- the assessment remains the source of truth.
+    combined_bot_id: Optional[str] = None
+    combined_assessment_id: Optional[str] = None
+    combined_risk_score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    combined_quality_score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    combined_risk_tier: Optional[str] = None
+    combined_verdict: Optional[str] = None
 
+    # What only a set of bots can be asked, and the reason this section exists
+    # at all. Not a risk score and never mixed into one: a set can be
+    # perfectly diversified and still be uniformly bad, or tightly correlated
+    # and individually excellent.
     verdict: PortfolioVerdict = PortfolioVerdict.INSUFFICIENT_EVIDENCE
     verdict_reason: str = ""
+    style_verdict: StyleVerdict = StyleVerdict.INSUFFICIENT_EVIDENCE
+    style_verdict_reason: str = ""
+    # At least one pair whose results look independent while its trading does
+    # not. The single most actionable line in this whole section.
+    style_vs_pnl_conflict: bool = False
     evidence: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     limitations: List[str] = Field(default_factory=list)

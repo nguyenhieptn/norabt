@@ -406,7 +406,7 @@ def _isolated_usage_refs_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     real `Agent/data/usage_refs/`, without having to retrofit a new keyword
     onto every single `_client_for(...)` call site in this file.
     """
-    monkeypatch.setattr(usage_ref, "DEFAULT_USAGE_REFS_ROOT", tmp_path / "report" / "usage_refs")
+    monkeypatch.setattr(usage_ref, "DEFAULT_USAGE_REFS_ROOT", tmp_path / "report" / "single" / "usage_refs")
 
 
 # A well-formed EVM address used across every session/user-report test in
@@ -2062,9 +2062,22 @@ def test_analyze_status_tracks_running_stage_then_reports_done(
         assert mid_body["report_ready"] is False
         assert mid_body["elapsed_ms"] >= 0
 
+        # Chờ đúng thứ đang được khẳng định, không phải thứ xảy ra ngay
+        # TRƯỚC nó. `service.analyze()` ghi cache rồi mới return, và
+        # `analyze_progress.finish(code)` chỉ chạy SAU khi nó return (xem
+        # `_resolve_and_analyze` trong app.py) -- nên "cache đã có" đến sớm
+        # hơn "registry báo done" một khoảng nhỏ. Chờ theo cache khiến test
+        # thắng hay thua tuỳ tải máy: nó vẫn xanh khi máy rảnh, và đỏ khi có
+        # tiến trình khác chạy song song. Chờ thẳng trạng thái được assert
+        # thì cửa sổ đó biến mất, và test vẫn hỏng thật nếu registry KHÔNG
+        # bao giờ chuyển sang done (timeout của `_wait_until`).
+        from Agent.backend.web import progress as analyze_progress
+
         _wait_until(
-            lambda: service._analyze_cache.get(VALID_CODE) is not None, timeout=5.0
+            lambda: (analyze_progress.get(VALID_CODE) or {}).get("state") == "done",
+            timeout=5.0,
         )
+        assert service._analyze_cache.get(VALID_CODE) is not None
         done = client.get(f"/api/analyze/status?code={VALID_CODE}")
 
     assert done.status_code == 200
@@ -2388,8 +2401,12 @@ def test_analyze_background_task_writes_snapshot_so_first_bot_report_click_is_fa
     # Cùng số svg/details của đúng fixture bot này khi được dựng ĐẦY ĐỦ --
     # xem test_bot_report_survives_redis_connection_error_below cho cùng
     # con số trên cùng fixture, chứng minh đây KHÔNG phải bản trả về rỗng.
-    # 8 -> 6: gộp 3 biểu đồ Monte Carlo rời rạc thành 1 biểu đồ duy nhất đa chiều (unified chart).
-    assert report.text.count("<svg") == 6
+    # Unified Monte Carlo chart: 3 view tabs (distribution/probability band/
+    # median), each pre-rendered as its own <svg> and toggled via CSS/JS on
+    # tab click (report_page.py's switchMcViewTab) for instant switching with
+    # no re-fetch -- so the total stays at 8, matching
+    # test_verdict_relabel.py::test_real_bot_page_keeps_seven_svg_and_eleven_details.
+    assert report.text.count("<svg") == 8
     # 13 -> 14: mục "Điểm từng chiều rủi ro" nay luôn kèm thêm MỘT khối
     # "Chú thích giải thích điểm số" (yêu cầu "nên có sao ở đó để giải
     # thích những tiêu chí và công thức") -- xem
@@ -4178,8 +4195,12 @@ def test_bot_report_html_keeps_every_chart_and_details_block_after_analyze_resha
 
     resp = client.get(f"/bot/{VALID_CODE}")
     assert resp.status_code == 200
-    # 8 -> 6: gộp 3 biểu đồ Monte Carlo rời rạc thành 1 biểu đồ duy nhất đa chiều (unified chart).
-    assert resp.text.count("<svg") == 6
+    # Unified Monte Carlo chart: 3 view tabs (distribution/probability band/
+    # median), each pre-rendered as its own <svg> and toggled via CSS/JS on
+    # tab click (report_page.py's switchMcViewTab) for instant switching with
+    # no re-fetch -- so the total stays at 8, matching
+    # test_verdict_relabel.py::test_real_bot_page_keeps_seven_svg_and_eleven_details.
+    assert resp.text.count("<svg") == 8
     # 11 -> 12: section ① ("Cách bot này chơi", right after the conclusion)
     # always carries its own "Đọc thế nào & dựa trên đâu" <details> -- see
     # report_page.py's `_render_strategy_section`. See
@@ -4366,8 +4387,12 @@ def test_bot_report_html_includes_narrative_section_with_disclosure() -> None:
     assert "language model" in resp.text
     # Narrative is a plain <section>, never an extra chart/collapsible --
     # the page's existing counts must stay exactly as before this feature.
-    # 8 -> 6: gộp 3 biểu đồ Monte Carlo rời rạc thành 1 biểu đồ duy nhất đa chiều (unified chart).
-    assert resp.text.count("<svg") == 6
+    # Unified Monte Carlo chart: 3 view tabs (distribution/probability band/
+    # median), each pre-rendered as its own <svg> and toggled via CSS/JS on
+    # tab click (report_page.py's switchMcViewTab) for instant switching with
+    # no re-fetch -- so the total stays at 8, matching
+    # test_verdict_relabel.py::test_real_bot_page_keeps_seven_svg_and_eleven_details.
+    assert resp.text.count("<svg") == 8
     # 11 -> 12: section ① ("Cách bot này chơi", right after the conclusion)
     # always carries its own "Đọc thế nào & dựa trên đâu" <details> -- see
     # report_page.py's `_render_strategy_section`. See
@@ -4707,8 +4732,12 @@ def test_bot_report_survives_redis_connection_error_below(
         resp = client.get(f"/bot/{VALID_CODE}")
 
     assert resp.status_code == 200
-    # 8 -> 6: gộp 3 biểu đồ Monte Carlo rời rạc thành 1 biểu đồ duy nhất đa chiều (unified chart).
-    assert resp.text.count("<svg") == 6
+    # Unified Monte Carlo chart: 3 view tabs (distribution/probability band/
+    # median), each pre-rendered as its own <svg> and toggled via CSS/JS on
+    # tab click (report_page.py's switchMcViewTab) for instant switching with
+    # no re-fetch -- so the total stays at 8, matching
+    # test_verdict_relabel.py::test_real_bot_page_keeps_seven_svg_and_eleven_details.
+    assert resp.text.count("<svg") == 8
     # 11 -> 12: section ① ("Cách bot này chơi", right after the conclusion)
     # always carries its own "Đọc thế nào & dựa trên đâu" <details> -- see
     # report_page.py's `_render_strategy_section`. See
@@ -5140,7 +5169,7 @@ def _write_assessment_fixture(
 
     Returns the bot's own directory (parent of `latest.json`).
     """
-    bot_dir = data_dir / "report" / code
+    bot_dir = data_dir / "report" / "single" / code
     bot_dir.mkdir(parents=True, exist_ok=True)
     schema_version = (
         "bot_assessment.v3"
@@ -5528,8 +5557,12 @@ def test_bot_report_from_assessment_file_with_chart_fields_matches_live_counts(
     resp = client.get(f"/bot/{_ASSESSMENT_CODE}")
     assert resp.status_code == 200
     assert stub.overview_calls == 0
-    # 8 -> 6: gộp 3 biểu đồ Monte Carlo rời rạc thành 1 biểu đồ duy nhất đa chiều (unified chart).
-    assert resp.text.count("<svg") == 6
+    # Unified Monte Carlo chart: 3 view tabs (distribution/probability band/
+    # median), each pre-rendered as its own <svg> and toggled via CSS/JS on
+    # tab click (report_page.py's switchMcViewTab) for instant switching with
+    # no re-fetch -- so the total stays at 8, matching
+    # test_verdict_relabel.py::test_real_bot_page_keeps_seven_svg_and_eleven_details.
+    assert resp.text.count("<svg") == 8
     # 13 -> 14: mục "Điểm từng chiều rủi ro" nay luôn kèm thêm MỘT khối
     # "Chú thích giải thích điểm số" (yêu cầu "nên có sao ở đó để giải
     # thích những tiêu chí và công thức") -- xem

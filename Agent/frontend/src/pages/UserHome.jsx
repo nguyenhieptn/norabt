@@ -1,23 +1,54 @@
-import React from "react";
+import React, { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import AnalyzeFlow from "../components/AnalyzeFlow.jsx";
 import BotDetailView from "../components/BotDetailView.jsx";
+import PortfolioDetailView from "../components/PortfolioDetailView.jsx";
 import { Block } from "../components/common.jsx";
 
-/** "/user" -- role `user`'s only screen: the shared two-step lookup ->
- * confirm -> analyze flow, nothing else (task's own spec for this role).
+/** "/user" -- role `user`'s screen:
+ * - Single view input: nhập 1 ID chạy đơn, nhập nhiều ID chạy tổ hợp
+ * - Báo cáo đơn lẻ (BotDetailView) khi phân tích 1 bot
+ * - Báo cáo tổ hợp (PortfolioDetailView) khi phân tích nhiều bot
  */
 export default function UserHome() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const currentTab = searchParams.get("tab");
-  const code = searchParams.get("code");
+  const botCode =
+    searchParams.get("code") ||
+    searchParams.get("bot_code") ||
+    searchParams.get("id_bot") ||
+    searchParams.get("botId") ||
+    searchParams.get("uniqueCode") ||
+    searchParams.get("unique_code");
+  const portfolioId = searchParams.get("id") || searchParams.get("portfolio_id");
+  const [portfolioData, setPortfolioData] = useState(null);
 
-  if (currentTab === "bot" && code) {
+  if (botCode) {
+    return (
+      <div className="page user-page">
+        <BotDetailView
+          code={botCode}
+          onBack={searchParams.get("from") === "search" ? () => setSearchParams({}) : undefined}
+          isUser={true}
+        />
+      </div>
+    );
+  }
+
+  // Điều kiện đọc thẳng từ thứ màn hình này thực sự cần để render: một id tổ
+  // hợp trên URL, hoặc kết quả vừa chạy xong còn giữ trong state. Biến
+  // `currentTab` cũ đã bị bỏ khi `botCode` chuyển sang dò nhiều tham số, nên
+  // nhánh này ném ReferenceError mọi lần `botCode` rỗng.
+  if (portfolioId || portfolioData) {
     return (
       <div className="page">
-        <BotDetailView
-          code={code}
-          onBack={() => setSearchParams({})}
+        <PortfolioDetailView
+          portfolioId={portfolioId}
+          initialData={portfolioData}
+          onBack={() => {
+            setPortfolioData(null);
+            setSearchParams({});
+          }}
+          onOpenBot={(c) => setSearchParams({ tab: "bot", code: c })}
           isUser={true}
         />
       </div>
@@ -27,20 +58,26 @@ export default function UserHome() {
   return (
     <div className="page">
       <div className="head" style={{ marginBottom: "20px" }}>
-        <div className="crumb">MONITORING SYSTEM · ASSESSMENT TOOL</div>
+        <div className="crumb">MONITORING SYSTEM · QUANTITATIVE RISK TOOL</div>
         <div className="head-row">
-          <h1>Look up &amp; analyze a new bot</h1>
+          <h1>Look Up &amp; Analyze Bot Risk</h1>
         </div>
         <p>
-          Enter a bot's OKX identifier (uniqueCode) for instant assessment with a multi-dimensional risk model and Monte Carlo simulation.
+          Enter an OKX bot identifier (uniqueCode) to run a multi-dimensional risk assessment and Monte Carlo simulation. Enter one bot, or multiple bots (comma- or space-separated) to measure portfolio correlation.
         </p>
       </div>
 
       <Block
-        title="Live assessment directly from OKX"
-        note="Monte Carlo engine &amp; risk assessment"
+        title="Direct Quantitative Assessment from OKX"
+        note="Monte Carlo Engine &amp; Portfolio Correlation Assessment"
       >
-        <AnalyzeFlow onOpenBot={(targetCode) => setSearchParams({ tab: "bot", code: targetCode })} />
+        <AnalyzeFlow
+          onOpenBot={(targetCode) => setSearchParams({ tab: "bot", code: targetCode, from: "search" })}
+          onOpenPortfolio={(targetId, data) => {
+            setPortfolioData(data);
+            setSearchParams({ tab: "portfolio", id: targetId });
+          }}
+        />
       </Block>
     </div>
   );

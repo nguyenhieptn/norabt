@@ -356,6 +356,7 @@ from Agent.backend.web import access, identity, snapshot, usage_ref
 from Agent.backend.web import progress as analyze_progress
 from Agent.backend.web.data import (
     InvalidCodeError,
+    validate_portfolio_codes,
     find_assessment_document,
     PerIpRateLimiter,
     WebDataService,
@@ -367,6 +368,7 @@ from Agent.backend.web.data import (
     report_url_is_usable,
     validate_unique_code,
 )
+from Agent.backend.web.portfolio_section import inject_portfolio_section
 from Agent.backend.web.report_page import render_bot_report_html
 from Agent.backend.report.qc.reporting.contracts import ReportProduct
 from Agent.backend.report.qc.reporting.persisted import build_persisted_dossier_view
@@ -406,6 +408,18 @@ DEFAULT_DASHBOARD_PATH = Path(config.BASE_DIR) / "frontend" / "dist" / "index.ht
 # caller on the internet into ONE shared bucket: one caller making 5 calls
 # exhausts ANALYZE_RATE_LIMIT_MAX_REQUESTS for every other caller behind the
 # same proxy too. This must be fixed before this endpoint is reachable from
+# Portfolio ids are produced by `PortfolioAggregator.portfolio_id`/
+# `PortfolioQCService` and are always PORT_ plus hex. Validated before use so a
+# path segment can never reach a cache lookup unchecked.
+def _is_portfolio_id(value: str) -> bool:
+    """PORT_ plus hex, nothing else -- validated before a path segment is used."""
+    if not value.startswith("PORT_"):
+        return False
+    tail = value[5:]
+    return 8 <= len(tail) <= 32 and all(
+        char in "0123456789ABCDEFabcdef" for char in tail
+    )
+
 # a real domain -- see this module's own docstring on why the rate limiter
 # exists at all (bounding CPU/OKX-quota cost per caller, not per proxy hop).
 # --------------------------------------------------------------------------- #
@@ -3333,6 +3347,117 @@ def create_app(
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
 
+    async def api_portfolio_analyze(request: Request) -> Response:
+        """POST /api/portfolio/analyze {"codes": [...]} -- several bots, ONE report.
+
+        The response body is the SAME shape `/api/analyze` returns for a
+        single bot, because its subject is an ordinary vertical result whose
+        bot was merged from several ledgers. The only addition is
+        `portfolio`, the diversification section. A client that already
+        renders a bot report needs no new rendering path, only the extra
+        block.
+
+        Charged against the SAME per-IP budget as `/api/analyze`, and
+        deliberately charged ONCE rather than once per member: the limiter
+        exists to bound how often this process starts an expensive live run,
+        and a portfolio run is one such run from its point of view.
+        """
+        try:
+            body: Any = await request.json()
+        except Exception:  # noqa: BLE001 - a malformed body is a 400, not a 500
+            body = {}
+        raw_codes = None
+        if isinstance(body, dict):
+            raw_codes = body.get("codes") or body.get("code")
+        if raw_codes is None:
+            raw_codes = request.query_params.get("codes")
+        try:
+            codes = validate_portfolio_codes(raw_codes)
+        except InvalidCodeError as exc:
+            return _invalid_param_response(str(exc))
+
+        client_host = resolve_client_ip(request)
+        if not limiter.allow(client_host):
+            return _error_json(
+                "Too many analysis requests from this address; wait a moment "
+                "and try again.",
+                429,
+            )
+        refresh = request.query_params.get("refresh") == "1"
+        try:
+            payload = await run_in_threadpool(
+                service.analyze_portfolio, codes, force=refresh
+            )
+        except InvalidCodeError as exc:
+            return _invalid_param_response(str(exc))
+        except Exception as exc:  # noqa: BLE001 - OKX/disk; never bubble a traceback
+            incident_code = _log_incident("POST /api/portfolio/analyze", exc)
+            return _error_json(_generic_error_message(incident_code), 502)
+        return JSONResponse(payload)
+
+    async def api_portfolios(request: Request) -> Response:
+        """GET /api/portfolios -- the portfolio runs this process has stored.
+
+        A read of history only. It never starts an analysis, so it cannot
+        become a way to trigger N live OKX fetches from an unauthenticated
+        GET.
+        """
+        try:
+            rows = await run_in_threadpool(service.list_portfolio_runs)
+        except Exception as exc:  # noqa: BLE001
+            incident_code = _log_incident("GET /api/portfolios", exc)
+            return _error_json(_generic_error_message(incident_code), 500)
+        return JSONResponse({"portfolios": rows, "count": len(rows)})
+
+    async def portfolio_report(request: Request) -> Response:
+        """GET /portfolio/<id> -- the portfolio page, in the single-bot style.
+
+        Rendered by the very same `render_bot_report_html` the single-bot
+        route uses, on the very same payload shape, so the two pages cannot
+        drift: same three tabs, same stylesheet, same charts. The one
+        difference is the diversification block injected on top.
+
+        Deliberately does NOT re-analyse on a miss. The codes behind an id
+        are not recoverable from the id (it is a digest of the member set),
+        and even if they were, re-fetching OKX because someone opened a link
+        would turn a page view into N live ledger fetches.
+        """
+        portfolio_id = str(request.path_params.get("portfolio_id") or "").strip()
+        if not portfolio_id or not _is_portfolio_id(portfolio_id):
+            return HTMLResponse(
+                _report_error_html("Invalid portfolio id."), status_code=400
+            )
+        try:
+            payload = await run_in_threadpool(service.portfolio_report, portfolio_id)
+        except Exception as exc:  # noqa: BLE001
+            incident_code = _log_incident("GET /portfolio/<id>", exc)
+            return HTMLResponse(
+                _report_error_html(_generic_error_message(incident_code)),
+                status_code=500,
+            )
+        if payload is None:
+            return HTMLResponse(
+                _report_error_html(
+                    "This portfolio run is no longer held by this process. "
+                    "Run the analysis again from the bot codes to rebuild it."
+                ),
+                status_code=404,
+            )
+        is_admin = await _is_admin_request(request)
+        document = render_bot_report_html(
+            payload,
+            is_admin=is_admin,
+            hidden_panels=(
+                USER_HIDDEN_PANELS
+                if request.query_params.get("view") == "user" and not is_admin
+                else ()
+            ),
+        )
+        return HTMLResponse(
+            inject_portfolio_section(document, payload.get("portfolio") or {}),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+
     async def bot_report(request: Request) -> Response:
         """GET /bot/<code> -- the page `report_url` in /api/analyze's own
         response always points at (see data.py's build_report_url).
@@ -3483,6 +3608,24 @@ def create_app(
                 503,
             )
 
+        # PHÂN QUYỀN: cùng một hàm, cùng cách gọi `api_dossier` đã dùng ở
+        # trên -- một vai KHÔNG được đọc ra một bản ghi khác, chỉ được đọc ra
+        # một ngữ cảnh HẸP HƠN từ CÙNG bản ghi đó. `role` quyết định
+        # `chat.build_chat_context` có thu thập nhóm "statistical inference"
+        # (PSR/DSR/MinTRL/Sharpe-per-trade/selection_trials, đúng nội dung
+        # `report_page._render_statistical_inference`) và market-regime
+        # cross-tab (Premium: `panel-market`/`panel-trades`) hay không -- xem
+        # `chat.py`'s module docstring mục "PHÂN QUYỀN THEO VAI". DÒNG NÀY
+        # ĐÃ MẤT MỘT LẦN (22/09, tái xuất hiện sau một commit "migrate to new
+        # report schema" ở nơi khác đè lên) khiến MỌI caller được `role`
+        # mặc định `ADMIN` của `chat.answer_question` -- tức lỗ hổng paywall
+        # ban đầu tái phát nguyên xi. Nếu dòng này biến mất lần nữa, mọi test
+        # `test_endpoint_scopes_an_anonymous_caller_to_the_user_role`/
+        # `test_endpoint_gives_an_admin_caller_the_full_premium_context`
+        # trong `test_chat.py` sẽ đỏ ngay lập tức.
+        is_admin = await _is_admin_request(request)
+        role = ViewRole.ADMIN if is_admin else ViewRole.USER
+
         try:
             document = await run_in_threadpool(
                 find_assessment_document, service.data_dir, code
@@ -3495,7 +3638,7 @@ def create_app(
 
         try:
             answer = await chat.answer_question(
-                document, question, history=body.get("history")
+                document, question, history=body.get("history"), role=role
             )
         except Exception as exc:  # noqa: BLE001 - last line of defence
             # `answer_question` tự cam kết không raise ra ngoài (mọi hỏng hóc
@@ -3518,8 +3661,9 @@ def create_app(
                 "code": code,
                 "answer": answer,
                 # Gợi ý dựng TỪ chính bản ghi, không phải danh sách cứng --
-                # xem `chat.suggested_questions`.
-                "suggested_questions": chat.suggested_questions(document),
+                # xem `chat.suggested_questions`. Cùng `role` để không gợi ý
+                # một câu chỉ trả lời được bằng dữ liệu Premium cho vai USER.
+                "suggested_questions": chat.suggested_questions(document, role=role),
             }
         )
 
@@ -3928,7 +4072,14 @@ def create_app(
         Route("/api/analyze/status", api_analyze_status, methods=["GET"]),
         Route("/api/v2/dossier", api_dossier, methods=["GET"]),
         Route("/api/chat", api_chat, methods=["POST"]),
+        Route(
+            "/api/portfolio/analyze", api_portfolio_analyze, methods=["GET", "POST"]
+        ),
+        Route("/api/portfolios", api_portfolios, methods=["GET"]),
         Route("/bot/{code}", bot_report, methods=["GET"]),
+        # Registered BEFORE the catch-all "/{user_ref}_{code}" below, which
+        # would otherwise swallow any single-segment path.
+        Route("/portfolio/{portfolio_id}", portfolio_report, methods=["GET"]),
         # Việc 2: the SPA's own JS/CSS bundle (Agent/frontend/build.sh's
         # output, see `assets_dir` above). `check_dir=False` -- a fresh
         # checkout that has not run the frontend build yet must not crash

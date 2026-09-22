@@ -23,18 +23,24 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
+# (label_a, label_b, pearson, exit-rule distance) for a pair whose results look
+# independent while its trading does not.
+PairCorrelationConflict = Tuple[str, str, float, float]
+
+from Agent.backend.bot.mcp.analytics.strategy.exit_rule import ExitRuleAnalyzer
 from Agent.backend.bot.mcp.schemas.bot_result import BotResult, PositionSide
-from Agent.backend.report.qc.evaluator.common import tier_for
 from Agent.backend.report.qc.portfolio.correlation import CorrelationAnalyzer
 from Agent.backend.report.qc.portfolio.joint_monte_carlo import JointMonteCarloEngine
 from Agent.backend.report.qc.portfolio.schemas import (
     CorrelationMatrix,
     ExposureConcentration,
+    PairStyle,
     PortfolioMember,
     PortfolioRiskAssessment,
     PortfolioVerdict,
+    StyleVerdict,
 )
 from Agent.backend.report.qc.portfolio.timeseries import TimeSeriesMerger
 from Agent.backend.report.qc.schemas.risk_assessment import BotRiskAssessment
@@ -57,6 +63,16 @@ class PortfolioQCService:
     METHODOLOGY_VERSION = "portfolio_qc.v1"
 
     MIN_MEMBERS = 2
+    # Style bands, set from the measured spread of exit-rule distances across
+    # the bots in this dataset (66 pairs: min 0.06, p25 0.16, median 0.27).
+    # They are descriptive cut points on an observed distribution, not a claim
+    # that 0.15 is a universal constant.
+    SAME_PLAYBOOK_DISTANCE = 0.15
+    PARTIAL_OVERLAP_DISTANCE = 0.30
+    # A pair whose results look independent while its trading does not. The
+    # PnL bar is generous on purpose: "not visibly correlated" is exactly the
+    # reading this trap hides behind.
+    CONFLICT_PEARSON_MAX = 0.2
     # Verdict bands on the AVERAGE pairwise Pearson, with a separate trip on
     # the single worst pair: a portfolio whose average is a comfortable 0.3
     # because one pair sits at 0.9 and the rest near zero is still holding one
@@ -64,13 +80,6 @@ class PortfolioQCService:
     MODERATE_AVG_PEARSON = 0.3
     HIGH_AVG_PEARSON = 0.6
     HIGH_MAX_PEARSON = 0.8
-    # Points added to the capital-weighted member average. Each is bounded and
-    # attributed in `score_adjustments`; none of them can act twice.
-    CORRELATION_PENALTY_MAX = 25.0
-    CONCENTRATION_PENALTY_MAX = 12.0
-    DIRECTIONAL_PENALTY_MAX = 8.0
-    NO_BENEFIT_PENALTY = 10.0
-    NO_BENEFIT_THRESHOLD = 0.05
 
     # ------------------------------------------------------------------ #
     # Member assembly
@@ -286,6 +295,124 @@ class PortfolioQCService:
         )
 
     # ------------------------------------------------------------------ #
+    # Style: how alike they TRADE, which the results can contradict
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def _attach_style(
+        cls,
+        correlation: CorrelationMatrix,
+        by_code: Dict[str, BotResult],
+    ) -> tuple[StyleVerdict, str, bool]:
+        """Fill `pairs[].style` and decide the playbook verdict.
+
+        Kept apart from the correlation verdict on purpose. A pair can be
+        uncorrelated in PnL and identical in behaviour, and collapsing the two
+        into one label would delete exactly the case worth reporting.
+        """
+        distances: List[float] = []
+        conflicts: List[PairCorrelationConflict] = []
+
+        for pair in correlation.pairs:
+            left = by_code.get(pair.code_a)
+            right = by_code.get(pair.code_b)
+            if left is None or right is None:
+                continue
+            if left.exit_rule is None or right.exit_rule is None:
+                continue
+            compared = ExitRuleAnalyzer.compare(left.exit_rule, right.exit_rule)
+            if compared is None:
+                continue
+            distance = float(compared["distance"])
+            distances.append(distance)
+            conflict = bool(
+                pair.pearson is not None
+                and pair.pearson <= cls.CONFLICT_PEARSON_MAX
+                and distance <= cls.SAME_PLAYBOOK_DISTANCE
+            )
+            if conflict:
+                conflicts.append((pair.label_a, pair.label_b, pair.pearson, distance))
+            if conflict:
+                note = (
+                    f"Results look independent (r = {pair.pearson:+.2f}) but the exit "
+                    f"discipline is nearly identical (distance {distance:.2f}"
+                    + (
+                        f", both {left.exit_rule.exit_style.value}"
+                        if compared["same_exit_style"]
+                        else ""
+                    )
+                    + "). The offset is a property of this window, not of the "
+                    "strategies -- do not bank on it."
+                )
+            elif distance <= cls.SAME_PLAYBOOK_DISTANCE:
+                note = (
+                    f"Same playbook (distance {distance:.2f}); their results move "
+                    "together too, which is at least consistent"
+                )
+            elif distance >= cls.PARTIAL_OVERLAP_DISTANCE:
+                note = (
+                    f"Genuinely different trading (distance {distance:.2f}), driven by "
+                    f"{'holding period' if compared['driver'] == 'HOLDING_PERIOD' else compared['top_rule_component']}"
+                )
+            else:
+                note = (
+                    f"Partly overlapping trading (distance {distance:.2f}); closest on "
+                    f"{compared['top_rule_component']}"
+                )
+            pair.style = PairStyle(
+                exit_distance=distance,
+                exit_similarity=float(compared["similarity"]),
+                rule_distance=compared["rule_distance"],
+                hold_distance=compared["hold_distance"],
+                driver=str(compared["driver"]),
+                top_rule_component=str(compared["top_rule_component"]),
+                top_rule_gap=compared["top_rule_gap"],
+                exit_style_a=left.exit_rule.exit_style.value,
+                exit_style_b=right.exit_rule.exit_style.value,
+                same_exit_style=bool(compared["same_exit_style"]),
+                shared_patterns=list(compared["shared_patterns"]),
+                style_vs_pnl_conflict=conflict,
+                note=note,
+            )
+
+        if not distances:
+            return (
+                StyleVerdict.INSUFFICIENT_EVIDENCE,
+                "No pair has two ledgers long enough to fingerprint their exit "
+                "discipline",
+                False,
+            )
+        if conflicts:
+            worst = min(conflicts, key=lambda item: item[3])
+            return (
+                StyleVerdict.SAME_PLAYBOOK,
+                f"[{worst[0]}] and [{worst[1]}] trade almost identically (exit-rule "
+                f"distance {worst[3]:.2f}) while their PnL looks unrelated "
+                f"(r = {worst[2]:+.2f}). Their offset is timing, not design.",
+                True,
+            )
+        average = sum(distances) / len(distances)
+        if average <= cls.SAME_PLAYBOOK_DISTANCE:
+            return (
+                StyleVerdict.SAME_PLAYBOOK,
+                f"One playbook run several times: average exit-rule distance "
+                f"{average:.2f}",
+                False,
+            )
+        if average <= cls.PARTIAL_OVERLAP_DISTANCE:
+            return (
+                StyleVerdict.PARTIAL_OVERLAP,
+                f"Partly shared behaviour: average exit-rule distance {average:.2f}",
+                False,
+            )
+        return (
+            StyleVerdict.DISTINCT_PLAYBOOKS,
+            f"The members genuinely trade differently: average exit-rule distance "
+            f"{average:.2f}",
+            False,
+        )
+
+    # ------------------------------------------------------------------ #
     # Entry point
     # ------------------------------------------------------------------ #
 
@@ -294,10 +421,17 @@ class PortfolioQCService:
         cls,
         candidates: Sequence[PortfolioCandidate],
         *,
+        combined: Optional[BotRiskAssessment] = None,
         iterations: int = JointMonteCarloEngine.DEFAULT_ITERATIONS,
         seed: Optional[int] = 42,
         as_of_ms: Optional[int] = None,
     ) -> PortfolioRiskAssessment:
+        """Build the diversification section for a set of bots.
+
+        `combined` is the ONE assessment the portfolio report is built from
+        (the ten lenses over the merged ledger). It is mirrored here for
+        listings; nothing in this method recomputes or second-guesses it.
+        """
         if len(candidates) < cls.MIN_MEMBERS:
             raise ValueError(
                 f"A portfolio needs at least {cls.MIN_MEMBERS} bots; "
@@ -310,6 +444,7 @@ class PortfolioQCService:
         labels = cls._labels(candidates)
         members = cls._members(candidates, labels)
         bots = [candidate.bot for candidate in candidates]
+        by_code = {bot.identity.unique_code: bot for bot in bots}
 
         series = TimeSeriesMerger.merge(bots, labels)
         exposure_by_code = {
@@ -345,60 +480,19 @@ class PortfolioQCService:
             )
 
         concentration = cls._concentration(candidates)
-
-        # ---- score -----------------------------------------------------
-        scored = [member for member in members if member.risk_score is not None]
-        weighted: Optional[float] = None
-        limitations: List[str] = []
-        if scored:
-            weights = [member.capital_weight for member in scored]
-            if all(weight is not None for weight in weights) and sum(weights) > 0:
-                weighted = sum(
-                    member.risk_score * member.capital_weight for member in scored
-                ) / sum(weights)
-            else:
-                weighted = sum(member.risk_score for member in scored) / len(scored)
-                limitations.append(
-                    "Members are weighted equally because at least one has no "
-                    "resolvable capital at risk; a capital-weighted average would "
-                    "have required inventing that figure"
-                )
-        if len(scored) != len(members):
-            limitations.append(
-                f"{len(members) - len(scored)} of {len(members)} members carry no "
-                "individual risk score, so the portfolio score rests on the rest"
-            )
-
-        adjustments: Dict[str, float] = {}
-        if correlation.is_valid and correlation.average_pearson is not None:
-            adjustments["correlation"] = round(
-                max(0.0, correlation.average_pearson) * cls.CORRELATION_PENALTY_MAX, 2
-            )
-        if concentration.normalised_hhi is not None:
-            adjustments["concentration"] = round(
-                concentration.normalised_hhi * cls.CONCENTRATION_PENALTY_MAX, 2
-            )
-        if concentration.directional_alignment is not None:
-            adjustments["directional_alignment"] = round(
-                concentration.directional_alignment * cls.DIRECTIONAL_PENALTY_MAX, 2
-            )
-        if (
-            joint is not None
-            and joint.is_valid
-            and joint.diversification_ratio is not None
-            and joint.diversification_ratio < cls.NO_BENEFIT_THRESHOLD
-        ):
-            adjustments["no_diversification_benefit"] = cls.NO_BENEFIT_PENALTY
-
-        portfolio_score = (
-            min(100.0, max(0.0, weighted + sum(adjustments.values())))
-            if weighted is not None
-            else None
+        style_verdict, style_reason, has_conflict = cls._attach_style(
+            correlation, by_code
         )
-
         verdict, reason = cls._verdict(correlation)
 
-        # ---- narrative --------------------------------------------------
+        limitations: List[str] = []
+        unscored = [member for member in members if member.risk_score is None]
+        if unscored:
+            limitations.append(
+                f"{len(unscored)} of {len(members)} members carry no individual risk "
+                "score of their own; they are still inside every combined figure"
+            )
+
         evidence: List[str] = []
         if correlation.is_valid:
             evidence.append(
@@ -409,9 +503,12 @@ class PortfolioQCService:
             for pair in correlation.pairs:
                 if pair.pearson is None:
                     continue
-                evidence.append(
-                    f"[{pair.label_a}] vs [{pair.label_b}]: {pair.note}"
-                )
+                evidence.append(f"[{pair.label_a}] vs [{pair.label_b}]: {pair.note}")
+                if pair.style is not None and pair.style.style_vs_pnl_conflict:
+                    evidence.append(
+                        f"[{pair.label_a}] vs [{pair.label_b}] (behaviour): "
+                        f"{pair.style.note}"
+                    )
         if joint is not None and joint.is_valid:
             evidence.append(
                 f"Joint 95% VaR {joint.var_95_pct:.1f}% of "
@@ -443,7 +540,13 @@ class PortfolioQCService:
                     f"{member.excluded_reason}"
                 )
 
-        if verdict is PortfolioVerdict.HIGH_CORRELATION_CLUSTER:
+        if has_conflict:
+            action = (
+                "Do not treat the offsetting PnL as diversification: at least one "
+                "pair trades the same way and will fail together when the regime "
+                "turns"
+            )
+        elif verdict is PortfolioVerdict.HIGH_CORRELATION_CLUSTER:
             action = (
                 "Treat this as one position, not several: size it as a single bet "
                 "and cut the overlap before adding capital"
@@ -455,8 +558,8 @@ class PortfolioQCService:
             )
         elif verdict is PortfolioVerdict.DIVERSIFIED:
             action = (
-                "The spread is real; keep it by watching the pair correlations "
-                "rather than the count of bots"
+                "The spread is real on both results and behaviour; keep it by "
+                "watching the pair correlations rather than the count of bots"
             )
         else:
             action = (
@@ -472,14 +575,12 @@ class PortfolioQCService:
             {
                 "methodology": cls.METHODOLOGY_VERSION,
                 "portfolio": portfolio_id,
+                "combined": combined.assessment_id if combined else None,
                 "members": sorted(
                     (
                         candidate.bot.identity.unique_code,
                         candidate.bot.as_of_ms,
                         candidate.bot.identity.ledger_fingerprint,
-                        candidate.assessment.assessment_id
-                        if candidate.assessment
-                        else None,
                     )
                     for candidate in candidates
                 ),
@@ -504,20 +605,17 @@ class PortfolioQCService:
             correlation=correlation,
             joint_simulation=joint,
             concentration=concentration,
-            member_weighted_risk_score=(
-                round(weighted, 2) if weighted is not None else None
-            ),
-            portfolio_risk_score=(
-                round(portfolio_score, 2) if portfolio_score is not None else None
-            ),
-            risk_tier=(
-                tier_for(portfolio_score).value
-                if portfolio_score is not None
-                else "UNKNOWN"
-            ),
-            score_adjustments=adjustments,
+            combined_bot_id=combined.bot_id if combined else None,
+            combined_assessment_id=combined.assessment_id if combined else None,
+            combined_risk_score=combined.risk_score if combined else None,
+            combined_quality_score=combined.quality_score if combined else None,
+            combined_risk_tier=combined.risk_tier.value if combined else None,
+            combined_verdict=combined.verdict if combined else None,
             verdict=verdict,
             verdict_reason=reason,
+            style_verdict=style_verdict,
+            style_verdict_reason=style_reason,
+            style_vs_pnl_conflict=has_conflict,
             evidence=evidence,
             warnings=warnings,
             limitations=limitations,

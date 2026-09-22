@@ -220,7 +220,7 @@ def _validate_user_ref(raw: Any) -> str:
 # in this project that touches disk) override it via the `users_root`
 # keyword every function below accepts, the same injectable-default pattern
 # `WebDataService.__init__`'s own `data_dir` parameter already uses.
-DEFAULT_USERS_ROOT = Path(config.DATA_DIR) / "report" / "users"
+DEFAULT_USERS_ROOT = Path(config.DATA_DIR) / "report" / "single" / "users"
 
 # Hard cap on how many `analyzed` entries a single profile keeps, most
 # recent first survival. Unbounded growth here would mean a single very

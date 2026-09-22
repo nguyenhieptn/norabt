@@ -209,6 +209,40 @@ class RiskSupervisionPipeline:
             # tục -- không để nó rơi vào nền qua khỏi đời `run()`.
             speculative_market.join()
 
+        return self.assess_prepared(
+            bot,
+            as_of_ms=as_of_ms,
+            previous_assessment=previous_assessment,
+            portfolio_bots=portfolio_bots,
+            notify=_notify,
+        )
+
+    def assess_prepared(
+        self,
+        bot: BotResult,
+        as_of_ms: Optional[int] = None,
+        previous_assessment: Optional[BotRiskAssessment] = None,
+        portfolio_bots: Optional[List[BotResult]] = None,
+        notify: Optional[Callable[[str], None]] = None,
+    ) -> RiskSupervisionResult:
+        """Everything after the ledger: markets -> QC -> control record.
+
+        Split out of `run()` unchanged so a caller that already HAS a
+        `BotResult` can take the identical path. The portfolio pipeline needs
+        exactly that: its subject is a synthetic bot merged from several
+        ledgers (see `bot.mcp.aggregate.PortfolioAggregator`), which no
+        `bot_service` can fetch. Re-implementing the coverage/QC/decision
+        block over there would have left two copies of the rule that only the
+        primary market may enter `QCCoreService.assess_bot`, and copies of
+        that rule are exactly how a bot ends up scored against a market it
+        never traded.
+        """
+        traded_symbol = bot.identity.symbol
+
+        def _notify(stage: str) -> None:
+            if notify is not None:
+                notify(stage)
+
         # Phủ sóng theo mục tiêu (thay "luôn đúng 2 thị trường: chính + phụ"
         # ở bản trước) -- xem Agent/backend/market/coverage.py cho toàn bộ
         # lý do (đo thật trên 30 bot: chỉ giải 1-2 mã như trước chỉ phủ

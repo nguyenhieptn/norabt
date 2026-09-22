@@ -18,11 +18,11 @@ rõ **[NGƯỜI THẬT]**.
   route mà nginx đang lo, trong khi server Starlette phía sau chưa có xác
   thực riêng của nó.
 - `Agent/data` mount **chỉ-đọc**, trừ hai nhánh con **đọc-ghi**:
-  `Agent/data/cache/candles` (cache nến agent-web tự ghi) và
-  `Agent/data/users` (hồ sơ người dùng do wallet-address identity tạo, xem
-  Bước 3.5 dưới đây). Đừng nới thêm quyền ghi ra ngoài hai nhánh đó — batch
-  report/crawler ghi phần còn lại của `Agent/data` từ NGOÀI container,
-  agent-web chỉ nên đọc lại.
+  `Agent/data/market/cache/candles` (cache nến agent-web tự ghi) và
+  `Agent/data/report` (kết quả chấm điểm, hồ sơ người dùng do wallet-address
+  identity tạo, và mã lượt-dùng ẩn danh — xem Bước 3.5 dưới đây). Đừng nới
+  thêm quyền ghi ra ngoài hai nhánh đó — batch report/crawler ghi phần còn
+  lại của `Agent/data` từ NGOÀI container, agent-web chỉ nên đọc lại.
 - Giới hạn tài nguyên `cpus: 2` / `mem_limit: 2g` trong `docker-compose.yml`
   nằm trong ràng buộc cứng ≤12 core/≤14GB của toàn dự án trên máy 24 core/30GB
   đang chạy 6 container khác + MySQL/MongoDB/PHP-FPM/nginx. Xem comment ngay
@@ -172,56 +172,48 @@ docker run --rm norabt-agent-web:latest python3 -c "import os; print(os.listdir(
 # rỗng chờ mount, KHÔNG có 'test', KHÔNG có '.env'.
 ```
 
-### Bước 3.5 — Tạo thư mục ghi-được cho hồ sơ người dùng **[NGƯỜI THẬT]**
+### Bước 3.5 — Tạo thư mục ghi-được cho data/report **[NGƯỜI THẬT]**
 
-`docker-compose.yml` mount `../data/users:/app/Agent/data/users:rw` (xem
-comment ngay tại dòng đó) để `Agent/backend/web/identity.py` ghi
-`data/users/<user_ref>/profile.json` mỗi khi có người khai địa chỉ ví qua
-`POST /api/session`. Thư mục này **phải tồn tại trên host VÀ thuộc đúng
-uid/gid trước khi `docker compose up` lần đầu** — nếu chưa có, Docker tự
-tạo nó lúc mount và gán quyền root, còn container lại chạy bằng
-`user: "1000:1000"` (xem `docker-compose.yml`) nên vẫn không ghi được vào
-thư mục root vừa tạo đó, tái diễn đúng lỗi "read-only filesystem" mà nhánh
-mount này định sửa.
+`docker-compose.yml` mount `../data/report:/app/Agent/data/report:rw` (xem
+comment ngay tại dòng đó). `data/report/` có ĐÚNG HAI nhánh con —
+`single/` (mọi thứ về một bot) và `multi/` (đánh giá multi-bot correlation,
+xem `Agent/backend/pipeline_portfolio.py`) — và CẢ BA nhánh ghi-được cũ đều
+nằm trong `single/`: `Agent/backend/report/qc/reporting/assessment_store.py`
+ghi `data/report/single/<bot_id>/latest.json`,
+`Agent/backend/web/identity.py` ghi `data/report/single/users/<user_ref>/
+profile.json` mỗi khi có người khai địa chỉ ví qua `POST /api/session`, và
+`Agent/backend/web/usage_ref.py` (Việc 2) ghi `data/report/single/
+usage_refs/<ref>.json` mỗi khi `POST`/`GET /api/analyze` phân tích thành
+công cho một caller KHÔNG đăng nhập (chính là luồng OKX) — cả `users/` và
+`usage_refs/` nằm trong `single/` vì hiện tại cả hai chỉ phục vụ luồng
+phân tích một-bot, chưa có gì tương đương cho portfolio. Thư mục
+`data/report/` **phải tồn tại trên host VÀ thuộc đúng uid/gid trước khi
+`docker compose up` lần đầu** —
+nếu chưa có, Docker tự tạo nó lúc mount và gán quyền root, còn container
+lại chạy bằng `user: "1000:1000"` (xem `docker-compose.yml`) nên vẫn không
+ghi được vào thư mục root vừa tạo đó, tái diễn đúng lỗi "read-only
+filesystem" mà nhánh mount này định sửa. ĐÃ CẮN THẬT một lần: khi đường
+dẫn host đổi theo kiến trúc mới mà `docker-compose.yml` không đồng bộ
+theo, Docker tự tạo lại đường dẫn CŨ (`Agent/data/users`,
+`Agent/data/usage_refs`, `Agent/data/cache`) thuộc quyền root lúc container
+khởi động lại — luôn `grep "\.\./data/" Agent/docker/docker-compose.yml`
+đối chiếu với cấu trúc `Agent/data/` thật trên host sau bất kỳ lần đổi tên
+thư mục nào trong `data/`.
 
 ```bash
-mkdir -p Agent/data/users
-touch Agent/data/users/.gitkeep
+mkdir -p Agent/data/report
+touch Agent/data/report/.gitkeep
 # Nếu uid chạy `docker compose up` KHÔNG PHẢI 1000 (kiểm bằng `id -u`),
 # đổi chủ thư mục cho khớp user: "1000:1000" trong docker-compose.yml:
-#   sudo chown 1000:1000 Agent/data/users
+#   sudo chown 1000:1000 Agent/data/report
 ```
 
 **Kiểm tra:**
 
 ```bash
-stat -c "%u:%g %a %n" Agent/data/users
+stat -c "%u:%g %a %n" Agent/data/report
 # Kỳ vọng: uid:gid khớp đúng "1000:1000" (hoặc uid/gid thật sự chạy
 # container, nếu docker-compose.yml's user: đã được đổi khỏi mặc định).
-```
-
-### Bước 3.6 — Tạo thư mục ghi-được cho mã lượt-dùng ẩn danh **[NGƯỜI THẬT]**
-
-CÙNG LÝ DO, CÙNG KHUÔN với Bước 3.5 ở trên: `docker-compose.yml` mount
-`../data/usage_refs:/app/Agent/data/usage_refs:rw` để
-`Agent/backend/web/usage_ref.py` (Việc 2) ghi `data/usage_refs/<ref>.json`
-mỗi khi `POST`/`GET /api/analyze` phân tích thành công cho một caller
-KHÔNG đăng nhập (chính là luồng OKX -- xem module đó để biết vì sao link
-chi tiết trả về không được mang mã bot đoán-được). Thư mục này cũng phải
-tồn tại trên host VÀ thuộc đúng uid/gid trước khi `docker compose up` lần
-đầu, vì đúng lý do Bước 3.5 đã nêu.
-
-```bash
-mkdir -p Agent/data/usage_refs
-touch Agent/data/usage_refs/.gitkeep
-# sudo chown 1000:1000 Agent/data/usage_refs   # nếu uid chạy compose khác 1000
-```
-
-**Kiểm tra:**
-
-```bash
-stat -c "%u:%g %a %n" Agent/data/usage_refs
-# Kỳ vọng: giống hệt kết quả của Agent/data/users ở trên.
 ```
 
 ### Bước 4 — Chạy container
@@ -240,8 +232,8 @@ curl -s http://127.0.0.1:8770/healthz | python3 -m json.tool
 # Kỳ vọng {"status": "ok", "uptime_seconds": ..., "snapshot": "disabled",
 # "bots_on_disk": <N>, "okx_public_reachable": true|false}. "bots_on_disk"
 # xác nhận mount Agent/data:ro đã đúng -- <N> phải bằng đúng số thư mục có
-# assessment.json trong Agent/data/assessment/ ở thời điểm chạy (đếm bằng
-#   find Agent/data/assessment -name assessment.json | wc -l
+# latest.json trong Agent/data/report/ ở thời điểm chạy (đếm bằng
+#   find Agent/data/report -maxdepth 2 -name latest.json | wc -l
 # ). Đừng ghi cứng một con số vào đây: dataset lớn dần theo mỗi đợt chấm
 # điểm, và một con số cũ chỉ làm người đọc tưởng là hỏng. "snapshot": "disabled" là
 # đúng ở bước này (NORABT_SNAPSHOT_REDIS_URL chưa cấu hình) -- xem Bước 11
@@ -265,7 +257,7 @@ curl -s -X POST http://127.0.0.1:8770/api/session \
 # kèm header "set-cookie:" -- xác nhận mount Bước 3.5 ở trên đã ghi được
 # (nếu vẫn read-only, đây trả 500 với thông báo chung "chưa lưu được hồ
 # sơ" + mã sự cố, xem Agent/backend/web/identity.py's ProfileStoreError).
-ls Agent/data/users/*/profile.json
+ls Agent/data/report/single/users/*/profile.json
 # Kỳ vọng: thấy đúng 1 file profile.json vừa được request ở trên tạo ra
 # TRÊN HOST (container ghi qua mount rw, không phải bên trong container).
 ```
@@ -273,7 +265,7 @@ ls Agent/data/users/*/profile.json
 Nếu `bots_on_disk` là `null` (`status: "degraded"`) → xem bảng sự cố, mục
 "agent không lên" / mount sai đường dẫn. Nếu `POST /api/session` báo lỗi
 "chưa lưu được hồ sơ" → quay lại Bước 3.5, kiểm tra quyền thư mục
-`Agent/data/users`.
+`Agent/data/report`.
 
 ### Bước 5 — DNS **[đã làm xong, chỉ cần hiểu hệ quả]**
 
@@ -804,9 +796,9 @@ sudo certbot delete --cert-name agent.expsolution.io
 | **Cloudflare trả lỗi 526 "Invalid SSL certificate" hoặc 525 "SSL handshake failed"** | Cloudflare đang ở Full (strict) nhưng origin không có cert hợp lệ ở cổng 443 (chưa làm Bước 10, hoặc cert hết hạn/sai domain) | `curl -vI https://127.0.0.1 --resolve agent.expsolution.io:443:127.0.0.1` trên host để xem lỗi TLS thật từ origin. Nếu origin chưa có vhost 443: đổi Cloudflare tạm về Flexible cho tới khi làm xong Bước 10, hoặc hoàn tất Bước 10 ngay. |
 | **Chứng chỉ TLS của ORIGIN hết hạn / trình duyệt báo not secure dù đã ở Giai đoạn B** | certbot's cron/timer gia hạn tự động đã ngừng chạy, hoặc renew thất bại (thường do nginx đang down lúc renew làm HTTP-01 challenge fail) — CHỈ áp dụng sau khi đã làm Bước 10, Giai đoạn A không có chứng chỉ origin để hết hạn | `sudo certbot certificates` xem ngày hết hạn thật. `sudo certbot renew --dry-run` để xem lỗi cụ thể. `systemctl status certbot.timer` (hoặc `snap.certbot.renew.timer`) xem timer có active không. Renew thủ công: `sudo certbot renew && sudo systemctl reload nginx`. |
 | **OKX chặn IP / trả lỗi liên tục** (`healthz` báo `okx_public_reachable: false` kéo dài, hoặc `/api/analyze` luôn lỗi 502) | IP `103.141.141.24` bị OKX rate-limit hoặc chặn (khác hẳn lỗi mạng cục bộ) | Kiểm tra trực tiếp từ host: `curl -s https://www.okx.com/api/v5/public/time` — nếu cũng lỗi/timeout từ chính host (không qua container) thì đúng là OKX/mạng phía OKX có vấn đề, không phải lỗi ở agent-web. Việc này nằm ngoài khả năng tự sửa của container — theo dõi `Agent/backend/okx/probe.py`'s `check_public_access()` để có chẩn đoán chi tiết hơn (mã lỗi OKX cụ thể), và cân nhắc giãn tần suất gọi nếu do rate-limit. |
-| **Hết dung lượng cache nến** (`Agent/data/cache/candles` phình to, hoặc container báo lỗi ghi đĩa) | Cache nến 1H tích luỹ theo số lượng asset từng được `/api/analyze` tra cứu — không tự dọn | `du -sh Agent/data/cache/candles` để xem kích thước thật. An toàn để xoá bớt/xoá sạch thư mục này bất cứ lúc nào (`rm -rf Agent/data/cache/candles/*` trên host, container không cần restart) — đây chỉ là cache, `LiveMarketDataSource` (xem `Agent/backend/sources/market_source.py`) tự tải lại từ OKX khi thiếu, không mất dữ liệu gốc nào. |
-| **`POST /api/session` báo "Hệ thống tạm thời chưa lưu được hồ sơ" (HTTP 500, kèm một mã sự cố 8 ký tự)** | `Agent/data/users` chưa được tạo trước khi `docker compose up` (nên Docker tự tạo nó thuộc quyền root — xem Bước 3.5), hoặc sai uid/gid, hoặc host hết dung lượng đĩa. Thông báo trả về CỐ Ý không nêu chi tiết (đường dẫn, mã lỗi OS) để tránh lộ cấu trúc nội bộ ra ngoài — xem `Agent/backend/web/identity.py`'s `ProfileStoreError` | `docker compose logs agent-web \| grep "mã sự cố đó"` (copy đúng mã 8 ký tự người dùng báo lại) để xem chi tiết đầy đủ (loại lỗi, traceback) mà `Agent/backend/web/app.py`'s `_log_incident` đã ghi kèm đúng mã đó. Rồi kiểm `stat -c "%u:%g %a %n" Agent/data/users` và `df -h` trên host, sửa theo Bước 3.5. |
-| **`/api/analyze` trả về nhưng `report_url`/dòng "xem chi tiết trực quan" bị THIẾU cho một caller ẩn danh (không đăng nhập, không phải admin)** | `Agent/data/usage_refs` chưa được tạo trước khi `docker compose up` (giống hệt lỗi ở dòng trên nhưng cho Việc 2's usage-ref store thay vì profile), nên `usage_ref.mint_usage_ref` không ghi được và request rơi vào nhánh lỗi 500 chung (`_log_incident`) — KHÔNG BAO GIỜ lộ mã bot thật `/bot/<code>` ra thay thế | `docker compose logs agent-web \| grep "mã sự cố đó"`, rồi kiểm `stat -c "%u:%g %a %n" Agent/data/usage_refs` và `df -h`, sửa theo Bước 3.6. |
+| **Hết dung lượng cache nến** (`Agent/data/market/cache/candles` phình to, hoặc container báo lỗi ghi đĩa) | Cache nến 1H tích luỹ theo số lượng asset từng được `/api/analyze` tra cứu — không tự dọn | `du -sh Agent/data/market/cache/candles` để xem kích thước thật. An toàn để xoá bớt/xoá sạch thư mục này bất cứ lúc nào (`rm -rf Agent/data/market/cache/candles/*` trên host, container không cần restart) — đây chỉ là cache, `LiveMarketDataSource` (xem `Agent/backend/external/sources/market_source.py`) tự tải lại từ OKX khi thiếu, không mất dữ liệu gốc nào. |
+| **`POST /api/session` báo "Hệ thống tạm thời chưa lưu được hồ sơ" (HTTP 500, kèm một mã sự cố 8 ký tự)** | `Agent/data/report` chưa được tạo trước khi `docker compose up` (nên Docker tự tạo nó thuộc quyền root — xem Bước 3.5), hoặc sai uid/gid, hoặc host hết dung lượng đĩa. Thông báo trả về CỐ Ý không nêu chi tiết (đường dẫn, mã lỗi OS) để tránh lộ cấu trúc nội bộ ra ngoài — xem `Agent/backend/web/identity.py`'s `ProfileStoreError` | `docker compose logs agent-web \| grep "mã sự cố đó"` (copy đúng mã 8 ký tự người dùng báo lại) để xem chi tiết đầy đủ (loại lỗi, traceback) mà `Agent/backend/web/app.py`'s `_log_incident` đã ghi kèm đúng mã đó. Rồi kiểm `stat -c "%u:%g %a %n" Agent/data/report` và `df -h` trên host, sửa theo Bước 3.5. |
+| **`/api/analyze` trả về nhưng `report_url`/dòng "xem chi tiết trực quan" bị THIẾU cho một caller ẩn danh (không đăng nhập, không phải admin)** | `Agent/data/report` chưa được tạo trước khi `docker compose up` (giống hệt lỗi ở dòng trên nhưng cho Việc 2's usage-ref store thay vì profile), nên `usage_ref.mint_usage_ref` không ghi được và request rơi vào nhánh lỗi 500 chung (`_log_incident`) — KHÔNG BAO GIỜ lộ mã bot thật `/bot/<code>` ra thay thế | `docker compose logs agent-web \| grep "mã sự cố đó"`, rồi kiểm `stat -c "%u:%g %a %n" Agent/data/report` và `df -h`, sửa theo Bước 3.5. |
 | **Log đầy đĩa** | Log container đã bị giới hạn (`max-size: 10m`, `max-file: 5` → tối đa 50MB, xem `docker-compose.yml`) nhưng log nginx riêng của vhost thì chưa có giới hạn riêng ở đây | Kiểm tra `/etc/logrotate.d/nginx` trên host đã bao gồm pattern `/var/log/nginx/*.log` (mặc định Ubuntu là vậy — vhost mới đặt tên `agent-expsolution-*.log` nên khớp pattern này tự động). Nếu không, thêm một block logrotate riêng cho hai file này. |
 | **`docker compose config` báo lỗi thiếu `Agent/.env`** | Bước 1 (tạo `Agent/.env`) chưa làm, hoặc chạy lệnh từ sai thư mục | Quay lại Bước 1. Lệnh `docker compose -f Agent/docker/docker-compose.yml ...` chạy được từ bất kỳ thư mục nào (đường dẫn `-f` là tuyệt đối/tương đối tới file, `env_file: ../.env` bên trong luôn tính tương đối theo vị trí `docker-compose.yml`, không theo thư mục đang đứng khi gõ lệnh). |
 | **`/healthz` báo `"snapshot": "unreachable"` dù đã làm Bước 11** | `agent-redis` chưa healthy/chưa chạy, hoặc `NORABT_SNAPSHOT_REDIS_URL` bị sửa sai khỏi giá trị mặc định `redis://agent-redis:6379` | `docker compose ps agent-redis` xem container có "healthy" không; `docker compose logs agent-redis` nếu không. Nếu container ổn nhưng vẫn `unreachable`: kiểm tra `Agent/.env`'s `NORABT_SNAPSHOT_REDIS_URL` đúng `redis://agent-redis:6379` (không phải `host.docker.internal` hay `127.0.0.1` -- đó là địa chỉ SAI cho service riêng này). KHÔNG phải lỗi cần "sửa" gấp trong lúc chẩn đoán -- tính năng fail-open, mọi request vẫn chấm điểm trực tiếp như hôm nay, không ai bị ảnh hưởng. |

@@ -64,7 +64,7 @@ def population_sharpe_variance(data_dir: Path) -> Optional[float]:
     Có khoá và có TTL vì hàm này bị gọi từ nhiều luồng phân tích cùng lúc (xem
     phần song song hoá trong pipeline) và mỗi lần quét là một lượt đi đĩa.
     """
-    analysis_dir = Path(data_dir) / "report"
+    analysis_dir = Path(data_dir) / "report" / "single"
     key = str(analysis_dir)
     now = time.monotonic()
     with _LOCK:

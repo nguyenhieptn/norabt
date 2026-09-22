@@ -911,6 +911,33 @@ def _findings_list(findings: Any, limit: int = 4) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def _nice_tick_step(y_range: float, target_ticks: int = 6) -> float:
+    """A gridline step that scales with the data instead of a fixed table.
+
+    A bot whose Monte Carlo P50 compounds into the thousands of percent
+    (a real, observed fixture: checkpoints spanning +1680% to +4736%) blew
+    past every hand-picked step tier this chart used to have (capped at a
+    flat 5% for the median line, 20% for the fan chart) -- the tick loop
+    kept stepping by that tiny fixed amount across a huge range and drew
+    on the order of a thousand overlapping gridlines/labels, turning the
+    chart into an unreadable smear instead of a professional chart.
+
+    Standard "nice number" tick sizing instead: pick the step from
+    {1, 2, 2.5, 5} x 10^n closest to `y_range / target_ticks`, so the
+    number of gridlines stays roughly constant (~target_ticks) no matter
+    how small or how enormous the value range is.
+    """
+    if y_range <= 0 or not math.isfinite(y_range):
+        return 1.0
+    raw_step = y_range / max(1, target_ticks)
+    magnitude = 10.0 ** math.floor(math.log10(raw_step))
+    for candidate in (1.0, 2.0, 2.5, 5.0, 10.0):
+        step = candidate * magnitude
+        if step >= raw_step:
+            return step
+    return 10.0 * magnitude
+
+
 def _svg(
     width: float,
     height: float,
@@ -1049,9 +1076,9 @@ def _horizontal_bars(
         return ""
     row_h = 38.0  # khoảng thở thoáng đãng giữa các thanh
     top_pad = 8.0
-    label_w = 236.0
-    star_x = 242.0
-    track_x = 252.0
+    label_w = 300.0
+    star_x = 306.0
+    track_x = 316.0
     track_w = max(width - track_x - value_w - 10.0, 40.0)
     height = top_pad * 2 + row_h * len(rows)
     parts: List[str] = []
@@ -3193,6 +3220,104 @@ def _render_deterministic_thesis(result: Dict[str, Any]) -> str:
     return "".join(parts)
 
 
+# --------------------------------------------------------------------------- #
+# Ask Nora AI -- widget hỏi-đáp, gọi `POST /api/chat`
+# (`Agent/backend/llm/chat.py`).
+#
+# CỐ Ý không kiểm `chat.chat_enabled()` hay vai (USER/ADMIN) ở ĐÂY: đúng
+# triết lý "hiện khối, dặn giới hạn công khai" (`view_policy.WITHHELD_MARKER`)
+# đã dùng cho các panel bị khoá khác -- widget luôn hiện, câu trả lời tự nói
+# "phần này thuộc Premium" khi cần (xem `chat._PREMIUM_SIMULATION_NOTICE`),
+# và khi tính năng tắt hẳn ở backend thì JS bên dưới hiện đúng câu 503 server
+# trả về. Không có đường nào ở widget này gọi lại `/api/analyze` hay bất kỳ
+# tuyến ghi nào -- CHỈ `POST /api/chat`, đúng ranh giới "Mode C, không phải
+# Mode B" của `chat.py`'s module docstring.
+# --------------------------------------------------------------------------- #
+
+
+def _render_chat_widget(result: Dict[str, Any]) -> str:
+    """Nút nổi "Ask Nora AI" ở góc phải dưới màn hình -- click mở/đóng một
+    khung hội thoại, đúng khuôn widget chat hỗ trợ (Intercom/Crisp-style),
+    theo yêu cầu tường minh của chủ dự án (22/09). Đứng NGOÀI cả ba tab
+    (`panel-report`/`panel-market`/`panel-trades`), hiện xuyên suốt bất kể
+    tab nào đang mở -- xem call site trong `render_bot_report_html`.
+
+    HAI LÝ DO cố tình KHÔNG dùng `_section()` (khối `<section class="card"
+    id="...">` mà mọi mục khác trong ba tab đều dùng), vẫn nguyên vẹn dù đổi
+    sang dạng nổi:
+      1. `test_render_invariants.py::test_result_tab_stays_an_overview` khoá
+         CỨNG tab Analyst Result ở đúng 5 section -- một quyết định sản phẩm
+         có chủ đích ("người dùng thường chỉ xem tab này, phải giữ nó là bản
+         tóm lược"), đã từng bị phá bởi các mục thử-rồi-bỏ trước đây. Thêm
+         một `_section()` thứ sáu vào đó là lặp lại đúng lỗi đã sửa.
+      2. `test_report_page.py`'s `_tab_ids("panel-trades", ...)` cắt chuỗi
+         tới HẾT phần còn lại của trang (panel-trades là tab cuối, không có
+         `class="tab-panel` nào theo sau để làm mốc dừng) -- nên bất kỳ
+         `<section class="card">` nào đặt sau `tabs_html`, DÙ ở ngoài mọi
+         div tab, vẫn bị đếm lẫn vào tab đó. Dùng thẻ khác `<section
+         class="card">` (ở đây là `<aside>` + `<button>` FAB riêng) khiến
+         regex của cả hai test không bao giờ khớp, bất kể đặt ở đâu.
+
+    Đóng theo mặc định (`hidden` + `aria-hidden="true"` trên panel,
+    `aria-expanded="false"` trên nút nổi) -- một khung chat bung sẵn ngay
+    khi mở trang là đúng thứ yêu cầu này muốn tránh. JS bật/tắt ở
+    `nora-chat-runtime` bên dưới; không JS thì panel vẫn tồn tại trong DOM
+    (không phải progressive-enhancement-cấm) nhưng nút nổi không phản hồi
+    click -- chấp nhận được vì toàn bộ tính năng vốn đã cần JS để gọi
+    `/api/chat`.
+    """
+    code = result.get("code") or ""
+    if not code:
+        return ""
+    return (
+        '<button type="button" class="nora-chat-fab" id="nora-chat-fab" '
+        'aria-haspopup="dialog" aria-expanded="false" '
+        'aria-controls="nora-chat-widget" aria-label="Ask Nora AI">'
+        '<span class="nora-chat-fab-pulse"></span>'
+        '<span class="nora-chat-fab-icon" aria-hidden="true">&#128172;</span>'
+        '<span class="nora-chat-fab-label">Ask Nora AI</span>'
+        "</button>"
+        '<aside class="nora-chat-widget" id="nora-chat-widget" '
+        f'data-bot-code="{_esc(code)}" role="dialog" aria-modal="false" '
+        'aria-label="Ask Nora AI" aria-hidden="true" hidden>'
+        '<div class="nora-chat-head">'
+        '<div class="nora-chat-avatar-head"></div>'
+        '<div class="nora-chat-title-group">'
+        '<div class="nora-chat-title-row">'
+        '<h2>Nora AI</h2>'
+        # Không ghi tên model cụ thể ở đây có chủ đích: badge này đã từng
+        # ghi "GPT-4o QUANT" trong khi backend thật (`NORABT_NARRATIVE_BACKEND`)
+        # là Gemini qua `agy`, không phải GPT-4o -- sai sự thật hiển thị công
+        # khai cho người dùng. Đổi model backend (đã xảy ra ít nhất 2 lần
+        # trong lịch sử dự án, xem `narrative.py`'s "Đổi LLM sang agy/Gemini")
+        # không nên bắt phải sửa lại UI, nên nhãn chỉ nói ĐÚNG cái người dùng
+        # cần biết -- đây là trợ lý định lượng, không phải mô hình cụ thể nào.
+        '<span class="badge badge-info">QUANT AI</span>'
+        '</div>'
+        '<div class="nora-chat-status-sub">'
+        '<span class="nora-chat-online-dot"></span>'
+        '<span>Online &middot; Risk Assistant</span>'
+        '</div>'
+        '</div>'
+        '<button type="button" class="nora-chat-close" id="nora-chat-close" '
+        'aria-label="Close chat">&times;</button>'
+        '</div>'
+        '<div class="nora-chat-log" id="nora-chat-log"></div>'
+        '<div class="nora-chat-status" id="nora-chat-status"></div>'
+        '<div class="nora-chat-chips" id="nora-chat-chips"></div>'
+        '<form class="nora-chat-form" id="nora-chat-form">'
+        '<input type="text" id="nora-chat-input" class="nora-chat-input" '
+        'maxlength="500" autocomplete="off" '
+        'placeholder="Ask me anything&hellip;" />'
+        '<button type="submit" id="nora-chat-send" class="nora-chat-send" aria-label="Ask">&uarr;</button>'
+        '</form>'
+        '<p class="nora-chat-disclaimer">'
+        'Inferences are generated directly from this bot&rsquo;s audit data. Not financial advice.'
+        '</p>'
+        '</aside>'
+    )
+
+
 def _render_narrative(result: Dict[str, Any]) -> str:
     text = result.get("narrative")
     if not isinstance(text, str) or not text.strip():
@@ -4260,250 +4385,459 @@ def _render_horizon_comparison(mc: Dict[str, Any]) -> str:
     )
 
 
-def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
-    """Biểu đồ hợp nhất toàn diện Monte Carlo: kết hợp cả 3 yếu tố cốt tử:
-      1. Phân vị kết cục (P05..P95) chặn sàn thanh lý -100.0%
-      2. Mức độ sụt giảm tối đa (Median & Worst Drawdown)
-      3. Diễn tiến xác suất có lãi & cháy vốn theo đa kỳ hạn (Short/Medium/Long)
-    trên một khung nhìn trực quan chuẩn mực tài chính, hoàn toàn không đè chữ/nhãn.
-    """
-    scenarios = mc.get("horizon_scenarios")
-    if not isinstance(scenarios, list) or not scenarios:
-        return ""
-    by_label = {s.get("label"): s for s in scenarios if isinstance(s, dict)}
-    valid_scenarios = []
-    for key in ("SHORT", "MEDIUM", "LONG"):
-        s = by_label.get(key)
-        if s and isinstance(s, dict):
-            valid_scenarios.append((key, s))
-    if not valid_scenarios:
+def _normalize_mc_checkpoints(mc: Dict[str, Any]) -> List[Dict[str, float]]:
+    """Normalize horizon checkpoints (10 points or fallback scenarios) to return % and trade counts."""
+    checkpoints = mc.get("horizon_checkpoints")
+    initial_equity = float(mc.get("initial_equity") or 10000.0)
+    norm_cps: List[Dict[str, float]] = []
+
+    if isinstance(checkpoints, list) and checkpoints:
+        for cp in checkpoints:
+            if not isinstance(cp, dict):
+                continue
+            tc = int(cp.get("trade_count", 0))
+            p05 = float(cp.get("p05", 0.0))
+            p25 = float(cp.get("p25", 0.0))
+            p50 = float(cp.get("p50", 0.0))
+            p75 = float(cp.get("p75", 0.0))
+            p95 = float(cp.get("p95", 0.0))
+            # If values appear to be absolute equity (e.g. around 10,000), convert to % return
+            if abs(p50) > 200.0:
+                norm_cps.append({
+                    "tc": float(tc),
+                    "p05": (p05 - initial_equity) / initial_equity * 100.0,
+                    "p25": (p25 - initial_equity) / initial_equity * 100.0,
+                    "p50": (p50 - initial_equity) / initial_equity * 100.0,
+                    "p75": (p75 - initial_equity) / initial_equity * 100.0,
+                    "p95": (p95 - initial_equity) / initial_equity * 100.0,
+                })
+            else:
+                norm_cps.append({
+                    "tc": float(tc),
+                    "p05": p05,
+                    "p25": p25,
+                    "p50": p50,
+                    "p75": p75,
+                    "p95": p95,
+                })
+
+    # Fallback to horizon_scenarios if horizon_checkpoints is absent
+    if not norm_cps:
+        scenarios = mc.get("horizon_scenarios")
+        if isinstance(scenarios, list) and scenarios:
+            by_label = {s.get("label"): s for s in scenarios if isinstance(s, dict)}
+            for key in ("SHORT", "MEDIUM", "LONG"):
+                s = by_label.get(key)
+                if s and isinstance(s, dict):
+                    tc = float(s.get("trades") or (20 if key == "SHORT" else 100 if key == "MEDIUM" else 300))
+                    p05 = float(s.get("profit_pct_p05") if _is_finite_number(s.get("profit_pct_p05")) else -100.0)
+                    p50 = float(s.get("profit_pct_p50") if _is_finite_number(s.get("profit_pct_p50")) else 0.0)
+                    p95 = float(s.get("profit_pct_p95") if _is_finite_number(s.get("profit_pct_p95")) else 0.0)
+                    p25 = p05 + (p50 - p05) * 0.5
+                    p75 = p50 + (p95 - p50) * 0.5
+                    norm_cps.append({
+                        "tc": tc,
+                        "p05": p05,
+                        "p25": p25,
+                        "p50": p50,
+                        "p75": p75,
+                        "p95": p95,
+                    })
+
+    # If still empty, but profit_pct_* exist, create dummy single-horizon
+    if not norm_cps and _is_finite_number(mc.get("profit_pct_p50")):
+        tc = float(mc.get("horizon_trades") or 100)
+        p05 = float(mc.get("profit_pct_p05") if _is_finite_number(mc.get("profit_pct_p05")) else -100.0)
+        p50 = float(mc.get("profit_pct_p50"))
+        p95 = float(mc.get("profit_pct_p95") if _is_finite_number(mc.get("profit_pct_p95")) else 0.0)
+        p25 = float(mc.get("profit_pct_p25") if _is_finite_number(mc.get("profit_pct_p25")) else (p05 + (p50 - p05) * 0.5))
+        p75 = float(mc.get("profit_pct_p75") if _is_finite_number(mc.get("profit_pct_p75")) else (p50 + (p95 - p50) * 0.5))
+        norm_cps.append({"tc": tc, "p05": p05, "p25": p25, "p50": p50, "p75": p75, "p95": p95})
+
+    return norm_cps
+
+
+def _get_mc_histogram_data(mc: Dict[str, Any]) -> Tuple[List[float], List[int]]:
+    """Retrieve 24-bin histogram edges and counts, synthesizing if older mock/fallback."""
+    hist = mc.get("terminal_outcome_histogram")
+    if isinstance(hist, dict):
+        edges = hist.get("bin_edges_pct")
+        counts = hist.get("counts")
+        if isinstance(edges, list) and isinstance(counts, list) and len(edges) >= 2 and len(counts) >= 1:
+            return [float(e) for e in edges], [int(c) for c in counts]
+
+    # Fallback synthesis based on percentiles if histogram field is absent
+    p50 = mc.get("profit_pct_p50")
+    if _is_finite_number(p50):
+        p50_f = float(p50)
+        p05_f = float(mc.get("profit_pct_p05") if _is_finite_number(mc.get("profit_pct_p05")) else p50_f - 15.0)
+        p95_f = float(mc.get("profit_pct_p95") if _is_finite_number(mc.get("profit_pct_p95")) else p50_f + 15.0)
+        span = max(p95_f - p05_f, 2.0)
+        lo = p50_f - span * 1.2
+        hi = p50_f + span * 1.2
+        n_bins = 24
+        bin_w = (hi - lo) / n_bins
+        edges = [lo + i * bin_w for i in range(n_bins + 1)]
+        iterations = int(mc.get("iterations") or 3000)
+        sigma = max(span / 3.29, 0.5)
+        counts = []
+        for i in range(n_bins):
+            mid = (edges[i] + edges[i + 1]) / 2.0
+            z = (mid - p50_f) / sigma
+            density = math.exp(-0.5 * z * z)
+            counts.append(max(1, int(density * (iterations / 7.0))))
+        return edges, counts
+
+    return [], []
+
+
+def _render_mc_histogram_svg(mc: Dict[str, Any]) -> str:
+    bin_edges, counts = _get_mc_histogram_data(mc)
+    if not bin_edges or not counts or len(bin_edges) < 2:
         return ""
 
     width = 800.0
     height = 420.0
     pad_l = 80.0
-    pad_r = 105.0
+    pad_r = 50.0
+    # 96, not 50: reserves room for up to 3 STAGGERED percentile-marker pill
+    # tiers (see the P50/P05/P95 block below) -- a tight outcome spread
+    # (all three within a fifth of the plot's width) needs all 3 tiers at
+    # once, and 50px only ever fit one.
+    pad_t = 96.0
+    pad_b = 68.0
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    y_base = pad_t + plot_h
+
+    lo = float(bin_edges[0])
+    hi = float(bin_edges[-1])
+    domain_min = min(lo, 0.0)
+    domain_max = max(hi, 0.0)
+    span = max(domain_max - domain_min, 1.0)
+    x_min = domain_min - span * 0.04
+    x_max = domain_max + span * 0.04
+    x_span = max(x_max - x_min, 0.01)
+
+    def to_x(v: float) -> float:
+        return pad_l + ((v - x_min) / x_span) * plot_w
+
+    max_c = max(counts) if counts else 1
+    y_ceil = math.ceil(max_c * 1.18) if max_c > 0 else 10
+
+    def to_y(c: float) -> float:
+        return (pad_t + plot_h) - (c / y_ceil) * plot_h
+
+    svg_parts: List[str] = []
+
+    # 1. Background Grid lines (Horizontal count ticks)
+    for i in range(5):
+        c_tick = y_ceil * (i / 4.0)
+        y_tick = to_y(c_tick)
+        svg_parts.append(_line(pad_l, y_tick, pad_l + plot_w, y_tick, stroke="var(--mc-grid-line, #334155)", width=1.0, dash="4,4", extra='opacity="0.5"'))
+        svg_parts.append(_text(pad_l - 8.0, y_tick + 4.0, f"{int(c_tick):,}", anchor="end", fill="var(--mc-grid-text, #94a3b8)", extra='font-size="10" font-family="var(--mono)"'))
+
+    # Y-axis label
+    svg_parts.append(_text(pad_l - 12.0, pad_t - 14.0, "Frequency (Paths)", anchor="start", fill="var(--mc-grid-text, #94a3b8)", extra='font-size="10" font-weight="600"'))
+
+    # 2. Breakeven 0% line
+    x_zero = to_x(0.0)
+    svg_parts.append(_line(x_zero, pad_t, x_zero, y_base, stroke="var(--mc-be-line, rgba(255, 255, 255, 0.45))", width=1.5, dash="4,4"))
+    svg_parts.append(_rect(x_zero - 42.0, y_base + 12.0, 84.0, 16.0, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--mc-pill-border, #334155)" stroke-width="0.8"'))
+    svg_parts.append(_text(x_zero, y_base + 24.0, "0% Breakeven", anchor="middle", fill="var(--mc-be-text, #94a3b8)", extra='font-size="9.5" font-weight="700" font-family="var(--mono)"'))
+
+    # 3. Bars
+    total_samples = sum(counts) if counts else 1
+    n_bins = min(len(counts), len(bin_edges) - 1)
+    for i in range(n_bins):
+        e0 = float(bin_edges[i])
+        e1 = float(bin_edges[i + 1])
+        x0 = to_x(e0)
+        x1 = to_x(e1)
+        w = max(1.2, (x1 - x0) - 1.2)
+        bx = x0 + 0.6
+        c = counts[i]
+        by = to_y(c)
+        bh = max(0.0, y_base - by)
+        mid = (e0 + e1) / 2.0
+        color = "var(--up, #10b981)" if mid >= 0 else "var(--down, #ef4444)"
+        tip = _esc(f"{c:,} runs ({c / total_samples * 100.0:.1f}%) in [{e0:+.1f}% .. {e1:+.1f}%]")
+        svg_parts.append(f'<rect x="{bx:.1f}" y="{by:.1f}" width="{w:.1f}" height="{bh:.1f}" rx="2" fill="{color}" fill-opacity="0.85"><title>{tip}</title></rect>')
+
+    # 4. Percentile Markers (P50, P05, P95) -- a bot whose outcomes cluster
+    # tightly (e.g. P05=+204%, P50=+235%, P95=+268%, all within a fifth of
+    # the plot's own width) used to get all three pill labels stamped at
+    # the SAME height, so they overlapped into unreadable mush. Each marker
+    # now gets a full-height line down to the axis, but its PILL is staggered
+    # onto whichever of 3 fixed tiers keeps it clear of its neighbours'
+    # pills, found by simple horizontal-overlap testing in x-sorted order.
+    markers = []
+    p50 = mc.get("profit_pct_p50")
+    if _is_finite_number(p50):
+        markers.append({"x": to_x(float(p50)), "half_w": 34.0, "color": "var(--amber, #f59e0b)", "label": f"P50 {float(p50):+.1f}%", "width": 68.0})
+    p05 = mc.get("profit_pct_p05")
+    if _is_finite_number(p05):
+        markers.append({"x": to_x(float(p05)), "half_w": 34.0, "color": "var(--down, #ef4444)", "label": f"P05 {float(p05):+.1f}%", "width": 68.0})
+    p95 = mc.get("profit_pct_p95")
+    if _is_finite_number(p95):
+        markers.append({"x": to_x(float(p95)), "half_w": 34.0, "color": "var(--up, #10b981)", "label": f"P95 {float(p95):+.1f}%", "width": 68.0})
+
+    markers.sort(key=lambda m: m["x"])
+    tier_right_edge: List[float] = []  # rightmost pixel already claimed on each tier
+    for m in markers:
+        tier = 0
+        while tier < len(tier_right_edge) and m["x"] - m["half_w"] < tier_right_edge[tier] + 4.0:
+            tier += 1
+        if tier == len(tier_right_edge):
+            tier_right_edge.append(m["x"] + m["half_w"])
+        else:
+            tier_right_edge[tier] = m["x"] + m["half_w"]
+        m["tier"] = tier
+
+    tier_height = 22.0
+    top_tier_y = pad_t - 6.0 - tier_height * max(1, len(tier_right_edge))
+    for m in markers:
+        pill_y = top_tier_y + m["tier"] * tier_height
+        pill_mid_y = pill_y + 9.0
+        svg_parts.append(_line(m["x"], pill_y + 20.0, m["x"], y_base, stroke=m["color"], width=1.5, dash="2,2", extra='opacity="0.85"'))
+        svg_parts.append(_rect(m["x"] - m["width"] / 2.0, pill_y, m["width"], 16.0, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra=f'stroke="{m["color"]}" stroke-width="0.9"'))
+        svg_parts.append(_text(m["x"], pill_mid_y + 3.0, m["label"], anchor="middle", fill=m["color"], extra='font-size="8.5" font-weight="700" font-family="var(--mono)"'))
+
+    # 5. Axis bottom label
+    svg_parts.append(_text(pad_l + plot_w / 2.0, y_base + 46.0, "Terminal Return Distribution (%)", anchor="middle", fill="var(--ink-2, #94a3b8)", extra='font-size="11" font-weight="600"'))
+
+    return _svg(width, height, "".join(svg_parts), extra_class="mc-unified-svg mc-chart-histogram")
+
+
+def _render_mc_fan_chart_svg(mc: Dict[str, Any]) -> str:
+    norm_cps = _normalize_mc_checkpoints(mc)
+    if not norm_cps:
+        return ""
+
+    width = 800.0
+    height = 420.0
+    pad_l = 80.0
+    pad_r = 115.0
     pad_t = 48.0
     pad_b = 68.0
     plot_w = width - pad_l - pad_r
     plot_h = height - pad_t - pad_b
+    y_base = pad_t + plot_h
 
-    # --- Y domain -------------------------------------------------------- #
-    lows: List[float] = []
-    highs: List[float] = []
-    ruin_risk = False
-    for _, s in valid_scenarios:
-        raw_05 = s.get("profit_pct_p05")
-        p05_v = float(raw_05) if _is_finite_number(raw_05) else -100.0
-        if p05_v <= -100.0:
-            ruin_risk = True
-        lows.append(max(-100.0, p05_v))
-        dd_v = s.get("median_max_drawdown")
-        if _is_finite_number(dd_v):
-            lows.append(max(-100.0, -float(dd_v)))
-        v = s.get("profit_pct_p95")
-        if _is_finite_number(v):
-            highs.append(float(v))
-        pr = s.get("p_ruin")
-        if _is_finite_number(pr) and float(pr) > 0.05:
-            ruin_risk = True
+    tc_min = norm_cps[0]["tc"]
+    tc_max = norm_cps[-1]["tc"]
+    span_tc = max(tc_max - tc_min, 1.0)
+    tc_start = max(0.0, tc_min - span_tc * 0.04)
+    tc_end = tc_max + span_tc * 0.04
 
-    data_low = min(lows) if lows else -100.0
-    data_high = max(highs) if highs else 10.0
-    # Breakeven is always on the axis: it is the line every reader compares to.
-    data_low = min(data_low, 0.0)
-    data_high = max(data_high, 0.0)
+    def to_x(tc: float) -> float:
+        return pad_l + ((tc - tc_start) / (tc_end - tc_start)) * plot_w
 
-    if ruin_risk:
-        y_floor_val = -100.0
-    else:
-        headroom = max(6.0, (data_high - data_low) * 0.12)
-        y_floor_val = math.floor((data_low - headroom) / 10.0) * 10.0
-    y_ceil_val = math.ceil((data_high + max(6.0, (data_high - data_low) * 0.12)) / 10.0) * 10.0
-    if y_ceil_val <= y_floor_val:
-        y_ceil_val = y_floor_val + 10.0
-    y_span = max(y_ceil_val - y_floor_val, 1.0)
+    all_y = [c["p05"] for c in norm_cps] + [c["p95"] for c in norm_cps] + [0.0]
+    y_min = min(all_y)
+    y_max = max(all_y)
+    y_span = max(y_max - y_min, 1.0)
+    y_floor = math.floor((y_min - y_span * 0.12) / 5.0) * 5.0
+    y_ceil = math.ceil((y_max + y_span * 0.12) / 5.0) * 5.0
+    if y_ceil <= y_floor:
+        y_ceil = y_floor + 10.0
+    y_range = y_ceil - y_floor
 
-    def to_y(val: float) -> float:
-        c_val = max(y_floor_val, min(y_ceil_val, val))
-        ratio = (c_val - y_floor_val) / y_span
-        return (pad_t + plot_h) - ratio * plot_h
-
-    y_ruin = to_y(-100.0)
-    y_zero = to_y(0.0)
+    def to_y(v: float) -> float:
+        return y_base - ((v - y_floor) / y_range) * plot_h
 
     svg_parts: List[str] = []
 
-    # 1. Background grid with dynamic step
-    raw_step = y_span / 5.0
-    magnitude = 10.0 ** math.floor(math.log10(raw_step)) if raw_step > 0 else 10.0
-    for candidate in (1.0, 2.0, 2.5, 5.0, 10.0):
-        step = candidate * magnitude
-        if step >= raw_step:
-            break
-    tick = math.ceil(y_floor_val / step) * step
-    while tick <= y_ceil_val + 1e-9:
-        y_t = to_y(tick)
-        if abs(tick) > 1e-9 and pad_t + 6 <= y_t <= pad_t + plot_h - 6:
-            svg_parts.append(_line(pad_l, y_t, pad_l + plot_w, y_t, stroke="var(--mc-grid-line, #334155)", width=1.0, dash="4,4", extra='opacity="0.6"'))
-            svg_parts.append(_text(pad_l - 8, y_t + 4, f"{tick:+.0f}%", anchor="end", fill="var(--mc-grid-text, #94a3b8)", extra='font-size="10" font-family="var(--mono)"'))
+    # 1. Grid lines
+    step = _nice_tick_step(y_range)
+    tick = math.ceil(y_floor / step) * step
+    while tick <= y_ceil + 1e-9:
+        yt = to_y(tick)
+        if pad_t + 5.0 <= yt <= y_base - 5.0:
+            svg_parts.append(_line(pad_l, yt, pad_l + plot_w, yt, stroke="var(--mc-grid-line, #334155)", width=1.0, dash="4,4", extra='opacity="0.5"'))
+            svg_parts.append(_text(pad_l - 8.0, yt + 4.0, f"{tick:+.0f}%", anchor="end", fill="var(--mc-grid-text, #94a3b8)", extra='font-size="10" font-family="var(--mono)"'))
         tick += step
 
-    # Ruin floor
-    if ruin_risk:
-        svg_parts.append(_line(pad_l, y_ruin, pad_l + plot_w, y_ruin, stroke="var(--down, #dc2626)", width=2.0, dash="6,4"))
-        svg_parts.append(_text(pad_l - 8, y_ruin + 4, "-100%", anchor="end", fill="var(--down, #ef4444)", extra='font-size="10" font-weight="bold"'))
-        svg_parts.append(_rect(pad_l + 4, y_ruin - 16, 175, 15, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--down, #dc2626)" stroke-width="0.75"'))
-        svg_parts.append(_text(pad_l + 8, y_ruin - 5, "RUIN / LIQUIDATION FLOOR", fill="var(--down, #ef4444)", extra='font-size="9.5" font-weight="bold"'))
+    # 2. Breakeven 0% line
+    y_zero = to_y(0.0)
+    svg_parts.append(_line(pad_l, y_zero, pad_l + plot_w, y_zero, stroke="var(--mc-be-line, rgba(255, 255, 255, 0.45))", width=1.5, dash="4,4"))
+    svg_parts.append(_rect(pad_l + 4.0, y_zero - 14.0, 68.0, 15.0, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--mc-pill-border, #334155)" stroke-width="0.75"'))
+    svg_parts.append(_text(pad_l + 8.0, y_zero - 3.0, "Breakeven", anchor="start", fill="var(--mc-be-text, #94a3b8)", extra='font-size="9" font-weight="600"'))
 
-    # Breakeven line (0%) with anti-bleed pill
-    svg_parts.append(_line(pad_l, y_zero, pad_l + plot_w, y_zero, stroke="var(--mc-be-line, rgba(255, 255, 255, 0.35))", width=1.5, extra='opacity="0.5"'))
-    svg_parts.append(_text(pad_l - 8, y_zero + 4, "0%", anchor="end", fill="var(--mc-be-text, #94a3b8)", extra='font-weight="bold" font-size="10"'))
-    svg_parts.append(_rect(pad_l + 4, y_zero - 15, 68, 15, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--mc-pill-border, #334155)" stroke-width="0.75"'))
-    svg_parts.append(_text(pad_l + 8, y_zero - 4, "Breakeven", anchor="start", fill="var(--mc-be-text, #94a3b8)", extra='font-size="9.5" font-weight="600"'))
+    # 3. Outer Ribbon: P05 to P95
+    pts_p95 = [(to_x(c["tc"]), to_y(c["p95"])) for c in norm_cps]
+    pts_p05 = [(to_x(c["tc"]), to_y(c["p05"])) for c in reversed(norm_cps)]
+    poly_outer = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts_p95 + pts_p05)
+    svg_parts.append(f'<polygon points="{poly_outer}" fill="var(--up, #10b981)" fill-opacity="0.12"/>')
 
-    n_cols = len(valid_scenarios)
-    col_x_list = []
-    for i in range(n_cols):
-        cx = pad_l + plot_w * (2 * i + 1) / (2 * n_cols)
-        col_x_list.append(cx)
+    # 4. Inner Ribbon: P25 to P75
+    pts_p75 = [(to_x(c["tc"]), to_y(c["p75"])) for c in norm_cps]
+    pts_p25 = [(to_x(c["tc"]), to_y(c["p25"])) for c in reversed(norm_cps)]
+    poly_inner = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts_p75 + pts_p25)
+    svg_parts.append(f'<polygon points="{poly_inner}" fill="var(--up, #10b981)" fill-opacity="0.22"/>')
 
-    # 2. Shaded Fan Ribbons connecting columns
-    if n_cols >= 2:
-        p95_points = []
-        p50_points = []
-        p05_points = []
-        for i, (_, s) in enumerate(valid_scenarios):
-            cx = col_x_list[i]
-            p95_val = float(s.get("profit_pct_p95") or 0.0)
-            p50_val = float(s.get("profit_pct_p50") or 0.0)
-            raw_05 = s.get("profit_pct_p05")
-            p05_val = float(raw_05) if _is_finite_number(raw_05) else -100.0
-            p95_points.append((cx, to_y(p95_val)))
-            p50_points.append((cx, to_y(p50_val)))
-            p05_points.append((cx, to_y(max(-100.0, p05_val))))
+    # 5. Median Line: P50
+    pts_p50 = [(to_x(c["tc"]), to_y(c["p50"])) for c in norm_cps]
+    path_d = " ".join(f"{'M' if i == 0 else 'L'}{x:.1f},{y:.1f}" for i, (x, y) in enumerate(pts_p50))
+    svg_parts.append(f'<path d="{path_d}" fill="none" stroke="var(--amber, #f59e0b)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>')
 
-        poly_upper_pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in p95_points)
-        poly_upper_pts += " " + " ".join(f"{x:.1f},{y:.1f}" for x, y in reversed(p50_points))
-        svg_parts.append(f'<polygon points="{poly_upper_pts}" fill="var(--up, #10b981)" fill-opacity="0.14" />')
+    # 6. Checkpoint Nodes on P50
+    for i, c in enumerate(norm_cps):
+        cx, cy = pts_p50[i]
+        tip = _esc(f"Trade #{int(c['tc'])}: P50 {c['p50']:+.1f}% | P25-P75 [{c['p25']:+.1f}% .. {c['p75']:+.1f}%] | P05-P95 [{c['p05']:+.1f}% .. {c['p95']:+.1f}%]")
+        svg_parts.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3.5" fill="var(--amber, #f59e0b)" stroke="#ffffff" stroke-width="1.2"><title>{tip}</title></circle>')
+        svg_parts.append(_text(cx, y_base + 16.0, f"{int(c['tc'])}", anchor="middle", fill="var(--ink-2, #94a3b8)", extra='font-size="10" font-family="var(--mono)"'))
 
-        poly_lower_pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in p50_points)
-        poly_lower_pts += " " + " ".join(f"{x:.1f},{y:.1f}" for x, y in reversed(p05_points))
-        svg_parts.append(f'<polygon points="{poly_lower_pts}" fill="var(--down, #ef4444)" fill-opacity="0.14" />')
+    # 7. Terminal Callout Pills at last checkpoint
+    last = norm_cps[-1]
+    lx = to_x(last["tc"])
+    ly_p95 = to_y(last["p95"])
+    ly_p50 = to_y(last["p50"])
+    ly_p05 = to_y(last["p05"])
+    callout_x = lx + 12.0
 
-        med_path = " ".join(f"{'M' if i == 0 else 'L'}{x:.1f},{y:.1f}" for i, (x, y) in enumerate(p50_points))
-        svg_parts.append(f'<path d="{med_path}" fill="none" stroke="var(--amber, #f59e0b)" stroke-width="2" stroke-dasharray="4,3" />')
+    svg_parts.append(_line(lx, ly_p95, callout_x + 4.0, ly_p95, stroke="var(--up, #10b981)", width=1.0, dash="2,2"))
+    svg_parts.append(_rect(callout_x + 4.0, ly_p95 - 9.0, 78.0, 18.0, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--up, #10b981)" stroke-width="0.85"'))
+    svg_parts.append(_text(callout_x + 43.0, ly_p95 + 4.0, f"P95: {last['p95']:+.1f}%", anchor="middle", fill="var(--up, #10b981)", extra='font-size="9" font-weight="700" font-family="var(--mono)"'))
 
-    # 3. Render Columns with Zero-Collision Positioning Engine
-    for i, (key, s) in enumerate(valid_scenarios):
-        cx = col_x_list[i]
-        trades = s.get("horizon_trades")
-        pop = s.get("probability_of_profit")
-        p_ruin = s.get("p_ruin")
-        p95_val = float(s.get("profit_pct_p95") or 0.0)
-        p50_val = float(s.get("profit_pct_p50") or 0.0)
-        raw_p05 = s.get("profit_pct_p05")
-        p05_val = float(raw_p05) if _is_finite_number(raw_p05) else -100.0
-        dd_val = float(s.get("median_max_drawdown") or 0.0)
+    svg_parts.append(_line(lx, ly_p50, callout_x + 4.0, ly_p50, stroke="var(--amber, #f59e0b)", width=1.0, dash="2,2"))
+    svg_parts.append(_rect(callout_x + 4.0, ly_p50 - 9.0, 78.0, 18.0, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--amber, #f59e0b)" stroke-width="1.0"'))
+    svg_parts.append(_text(callout_x + 43.0, ly_p50 + 4.0, f"P50: {last['p50']:+.1f}%", anchor="middle", fill="var(--amber, #f59e0b)", extra='font-size="9" font-weight="700" font-family="var(--mono)"'))
 
-        is_liquidated = p05_val <= -100.0
-        clamped_p05 = max(-100.0, p05_val)
+    svg_parts.append(_line(lx, ly_p05, callout_x + 4.0, ly_p05, stroke="var(--down, #ef4444)", width=1.0, dash="2,2"))
+    svg_parts.append(_rect(callout_x + 4.0, ly_p05 - 9.0, 78.0, 18.0, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--down, #ef4444)" stroke-width="0.85"'))
+    svg_parts.append(_text(callout_x + 43.0, ly_p05 + 4.0, f"P05: {last['p05']:+.1f}%", anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9" font-weight="700" font-family="var(--mono)"'))
 
-        y_p95 = to_y(p95_val)
-        y_p50 = to_y(p50_val)
-        y_p05 = to_y(clamped_p05)
+    # 8. Bottom axis label
+    svg_parts.append(_text(pad_l + plot_w / 2.0, y_base + 46.0, "Simulated Trade Checkpoints", anchor="middle", fill="var(--ink-2, #94a3b8)", extra='font-size="11" font-weight="600"'))
 
-        # Whisker line
-        svg_parts.append(_line(cx, y_p05, cx, y_p95, stroke="var(--mc-whisker, #64748b)", width=2.0))
+    return _svg(width, height, "".join(svg_parts), extra_class="mc-unified-svg mc-chart-fan")
 
-        # Upper box (P50 to P95)
-        box_w = 48.0
-        box_x = cx - box_w / 2.0
-        h_upper = max(2.0, y_p50 - y_p95)
-        svg_parts.append(_rect(box_x, y_p95, box_w, h_upper, fill="var(--up, #10b981)", rx=3.0, extra='opacity="0.85"'))
 
-        # Lower box (P05 to P50)
-        h_lower = max(2.0, y_p05 - y_p50)
-        svg_parts.append(_rect(box_x, y_p50, box_w, h_lower, fill="var(--down, #ef4444)", rx=3.0, extra='opacity="0.85"'))
+def _render_mc_median_line_svg(mc: Dict[str, Any]) -> str:
+    norm_cps = _normalize_mc_checkpoints(mc)
+    if not norm_cps:
+        return ""
 
-        # --- Median Marker & Label with Collision Protection ---
-        if min(h_upper, h_lower) < 18.0:
-            svg_parts.append(_line(cx - box_w / 2.0 - 2, y_p50, cx + box_w / 2.0 + 2, y_p50, stroke="var(--amber, #f59e0b)", width=2.5))
-            tag_w = 68.0
-            tag_h = 18.0
-            tag_x = cx - box_w / 2.0 - 8.0
-            svg_parts.append(_line(cx - box_w / 2.0, y_p50, tag_x, y_p50, stroke="var(--amber, #f59e0b)", width=1.2, dash="2,2"))
-            svg_parts.append(_rect(tag_x - tag_w, y_p50 - tag_h / 2.0, tag_w, tag_h, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--amber, #f59e0b)" stroke-width="1.0"'))
-            svg_parts.append(_text(tag_x - tag_w / 2.0, y_p50 + 4.0, f"P50 {p50_val:+.1f}%", anchor="middle", fill="var(--amber, #f59e0b)", extra='font-size="9" font-weight="700" font-family="var(--mono)"'))
-        else:
-            svg_parts.append(_line(cx - box_w / 2.0 - 3, y_p50, cx + box_w / 2.0 + 3, y_p50, stroke="var(--amber, #f59e0b)", width=2.5))
-            lbl_w = 54.0
-            lbl_h = 16.0
-            svg_parts.append(_rect(cx - lbl_w / 2.0, y_p50 - lbl_h / 2.0, lbl_w, lbl_h, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--amber, #f59e0b)" stroke-width="0.85"'))
-            svg_parts.append(_text(cx, y_p50 + 4.0, f"{p50_val:+.1f}%", anchor="middle", fill="var(--mc-med-text, #ffffff)", extra='font-size="9.5" font-weight="700" font-family="var(--mono)"'))
+    width = 800.0
+    height = 420.0
+    pad_l = 80.0
+    pad_r = 115.0
+    pad_t = 48.0
+    pad_b = 68.0
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    y_base = pad_t + plot_h
 
-        # --- P95 Label with Backdrop Pill ---
-        p95_lbl_y = y_p95 - 8.0
-        if p95_lbl_y < pad_t + 10.0:
-            p95_lbl_y = pad_t + 10.0
-        pill_w = 78.0
-        pill_h = 16.0
-        svg_parts.append(_rect(cx - pill_w / 2.0, p95_lbl_y - 12.0, pill_w, pill_h, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--up, #10b981)" stroke-width="0.85"'))
-        svg_parts.append(_text(cx, p95_lbl_y, f"P95: {p95_val:+.1f}%", anchor="middle", fill="var(--up, #10b981)", extra='font-size="9.5" font-weight="600" font-family="var(--mono)"'))
+    tc_min = norm_cps[0]["tc"]
+    tc_max = norm_cps[-1]["tc"]
+    span_tc = max(tc_max - tc_min, 1.0)
+    tc_start = max(0.0, tc_min - span_tc * 0.04)
+    tc_end = tc_max + span_tc * 0.04
 
-        # --- P05 Label with Vertical Clearance Enforcement ---
-        p05_lbl_y = max(y_p05 + 14.0, y_p50 + 20.0)
-        if p05_lbl_y > pad_t + plot_h - 4.0:
-            p05_lbl_y = pad_t + plot_h - 4.0
-        p05_pill_w = 96.0 if is_liquidated else 78.0
-        p05_pill_h = 16.0
-        p05_text = "P05: RUIN (-100%)" if is_liquidated else f"P05: {p05_val:+.1f}%"
-        svg_parts.append(_rect(cx - p05_pill_w / 2.0, p05_lbl_y - 12.0, p05_pill_w, p05_pill_h, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--down, #ef4444)" stroke-width="0.85"'))
-        svg_parts.append(_text(cx, p05_lbl_y, p05_text, anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9.5" font-weight="600" font-family="var(--mono)"'))
+    def to_x(tc: float) -> float:
+        return pad_l + ((tc - tc_start) / (tc_end - tc_start)) * plot_w
 
-        # --- Drawdown Indicator with Stepped Leader Anti-Collision ---
-        y_dd = to_y(-dd_val)
-        dd_txt_x = cx + box_w / 2.0 + 16.0
-        if abs(y_dd - p05_lbl_y) < 18.0:
-            dd_disp_y = p05_lbl_y + 18.0 if p05_lbl_y + 18.0 <= pad_t + plot_h - 4.0 else p05_lbl_y - 18.0
-            svg_parts.append(f'<path d="M {cx + box_w / 2.0 + 3.0:.1f} {y_dd:.1f} L {cx + box_w / 2.0 + 9.0:.1f} {y_dd:.1f} L {dd_txt_x - 3.0:.1f} {dd_disp_y - 3.0:.1f} H {dd_txt_x + 4.0:.1f}" fill="none" stroke="var(--down, #ef4444)" stroke-width="1.2" stroke-dasharray="2,2"/>')
-        else:
-            dd_disp_y = y_dd
-            svg_parts.append(_line(cx + box_w / 2.0 + 3.0, y_dd, dd_txt_x - 3.0, y_dd, stroke="var(--down, #ef4444)", width=1.2))
-        svg_parts.append(f'<circle cx="{_coord(cx + box_w / 2.0 + 3.0)}" cy="{_coord(y_dd)}" r="2.5" fill="var(--down, #ef4444)"/>')
+    all_y = [c["p50"] for c in norm_cps] + [0.0]
+    y_min = min(all_y)
+    y_max = max(all_y)
+    y_span = max(y_max - y_min, 1.0)
+    y_floor = math.floor((y_min - y_span * 0.15) / 2.0) * 2.0
+    y_ceil = math.ceil((y_max + y_span * 0.15) / 2.0) * 2.0
+    if y_ceil <= y_floor:
+        y_ceil = y_floor + 5.0
+    y_range = y_ceil - y_floor
 
-        dd_pill_w = 70.0
-        dd_pill_h = 15.0
-        svg_parts.append(_rect(dd_txt_x - 2.0, dd_disp_y - 11.0, dd_pill_w, dd_pill_h, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--down, #ef4444)" stroke-width="0.6"'))
-        svg_parts.append(_text(dd_txt_x + 2.0, dd_disp_y, f"DD: -{dd_val:.1f}%", anchor="start", fill="var(--down, #ef4444)", extra='font-size="9" font-family="var(--mono)" font-weight="600"'))
+    def to_y(v: float) -> float:
+        return y_base - ((v - y_floor) / y_range) * plot_h
 
-        # Probability of profit badge at top
-        pop_num = float(pop) if _is_finite_number(pop) else 0.0
-        pop_str = _format_prob_pct(pop)
-        pop_bg = "var(--up, #10b981)" if pop_num >= 50.0 else ("var(--amber, #f59e0b)" if pop_num >= 20.0 else "var(--down, #ef4444)")
-        badge_w = 88.0
-        badge_x = cx - badge_w / 2.0
-        badge_y = 14.0
-        svg_parts.append(_rect(badge_x, badge_y, badge_w, 20.0, fill=pop_bg, rx=4.0))
-        svg_parts.append(_text(cx, badge_y + 14.0, f"PoP: {pop_str}", anchor="middle", fill="#ffffff", extra='font-size="10" font-weight="bold"'))
+    svg_parts: List[str] = []
 
-        # X-axis label
-        label_y = pad_t + plot_h + 18.0
-        svg_parts.append(_text(cx, label_y, key, anchor="middle", fill="var(--ink, #0f172a)", extra='font-size="11" font-weight="bold"'))
-        svg_parts.append(_text(cx, label_y + 14.0, f"{_int_text(trades)} trds", anchor="middle", fill="var(--ink-3, #94a3b8)", extra='font-size="10"'))
+    # 1. Grid lines
+    step = _nice_tick_step(y_range)
+    tick = math.ceil(y_floor / step) * step
+    tick_decimals = 1 if step < 2.0 else 0
+    while tick <= y_ceil + 1e-9:
+        yt = to_y(tick)
+        if pad_t + 5.0 <= yt <= y_base - 5.0:
+            svg_parts.append(_line(pad_l, yt, pad_l + plot_w, yt, stroke="var(--mc-grid-line, #334155)", width=1.0, dash="4,4", extra='opacity="0.5"'))
+            svg_parts.append(_text(pad_l - 8.0, yt + 4.0, f"{tick:+.{tick_decimals}f}%", anchor="end", fill="var(--mc-grid-text, #94a3b8)", extra='font-size="10" font-family="var(--mono)"'))
+        tick += step
 
-        # Ruin indicator
-        if _is_finite_number(p_ruin) and float(p_ruin) > 0.05:
-            ruin_str = f"Ruin: {_format_prob_pct(p_ruin)} ⚠"
-            svg_parts.append(_text(cx, label_y + 28.0, ruin_str, anchor="middle", fill="var(--down, #ef4444)", extra='font-size="9.5" font-weight="bold"'))
-        else:
-            svg_parts.append(_text(cx, label_y + 28.0, "Safe Floor ✔", anchor="middle", fill="var(--up, #10b981)", extra='font-size="9.5"'))
+    # 2. Breakeven 0% line
+    y_zero = to_y(0.0)
+    svg_parts.append(_line(pad_l, y_zero, pad_l + plot_w, y_zero, stroke="var(--mc-be-line, rgba(255, 255, 255, 0.45))", width=1.5, dash="4,4"))
+    svg_parts.append(_rect(pad_l + 4.0, y_zero - 14.0, 68.0, 15.0, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="var(--mc-pill-border, #334155)" stroke-width="0.75"'))
+    svg_parts.append(_text(pad_l + 8.0, y_zero - 3.0, "Breakeven", anchor="start", fill="var(--mc-be-text, #94a3b8)", extra='font-size="9" font-weight="600"'))
 
-    svg_content = "".join(svg_parts)
-    chart_svg = _svg(width, height, svg_content, extra_class="mc-unified-svg")
+    # 3. Shaded polygon under curve down to y_zero
+    pts_p50 = [(to_x(c["tc"]), to_y(c["p50"])) for c in norm_cps]
+    poly_pts = pts_p50 + [(pts_p50[-1][0], y_zero), (pts_p50[0][0], y_zero)]
+    poly_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in poly_pts)
+    is_positive = norm_cps[-1]["p50"] >= 0
+    area_color = "var(--up, #10b981)" if is_positive else "var(--down, #ef4444)"
+    svg_parts.append(f'<polygon points="{poly_str}" fill="{area_color}" fill-opacity="0.12"/>')
+
+    # 4. Bold Median Path
+    path_d = " ".join(f"{'M' if i == 0 else 'L'}{x:.1f},{y:.1f}" for i, (x, y) in enumerate(pts_p50))
+    svg_parts.append(f'<path d="{path_d}" fill="none" stroke="#38bdf8" stroke-width="3.0" stroke-linecap="round" stroke-linejoin="round"/>')
+
+    # 5. Nodes and value badges
+    for i, c in enumerate(norm_cps):
+        cx, cy = pts_p50[i]
+        tip = _esc(f"Trade #{int(c['tc'])}: P50 {c['p50']:+.2f}%")
+        svg_parts.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="4.0" fill="#0f172a" stroke="#38bdf8" stroke-width="2.2"><title>{tip}</title></circle>')
+        val_y = cy - 12.0
+        svg_parts.append(_rect(cx - 24.0, val_y - 9.0, 48.0, 15.0, fill="var(--mc-pill-bg, #0b111e)", rx=3.0, extra='stroke="#38bdf8" stroke-width="0.65"'))
+        svg_parts.append(_text(cx, val_y + 2.0, f"{c['p50']:+.1f}%", anchor="middle", fill="#38bdf8", extra='font-size="8.5" font-weight="700" font-family="var(--mono)"'))
+        svg_parts.append(_text(cx, y_base + 16.0, f"{int(c['tc'])}", anchor="middle", fill="var(--ink-2, #94a3b8)", extra='font-size="10" font-family="var(--mono)"'))
+
+    # 6. Terminal Highlight Pill
+    last = norm_cps[-1]
+    lx = to_x(last["tc"])
+    ly = to_y(last["p50"])
+    callout_x = lx + 12.0
+    svg_parts.append(_line(lx, ly, callout_x + 4.0, ly, stroke="#38bdf8", width=1.2, dash="2,2"))
+    svg_parts.append(_rect(callout_x + 4.0, ly - 10.0, 88.0, 20.0, fill="var(--mc-pill-bg, #0b111e)", rx=4.0, extra='stroke="#38bdf8" stroke-width="1.2"'))
+    svg_parts.append(_text(callout_x + 48.0, ly + 4.0, f"P50: {last['p50']:+.1f}%", anchor="middle", fill="#38bdf8", extra='font-size="10" font-weight="700" font-family="var(--mono)"'))
+
+    # 7. Bottom axis label
+    svg_parts.append(_text(pad_l + plot_w / 2.0, y_base + 46.0, "Simulated Trade Checkpoints", anchor="middle", fill="var(--ink-2, #94a3b8)", extra='font-size="11" font-weight="600"'))
+
+    return _svg(width, height, "".join(svg_parts), extra_class="mc-unified-svg mc-chart-median")
+
+
+def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
+    """Unified Monte Carlo Multi-Horizon Panel with 3 selectable view modes via tabs:
+      1. Distribution (Histogram 24 outcome bins)
+      2. Probability Cone (Fan chart 10 checkpoints)
+      3. Median Trajectory (Line chart P50)
+    """
+    scenarios = mc.get("horizon_scenarios")
+    checkpoints = mc.get("horizon_checkpoints")
+    histogram = mc.get("terminal_outcome_histogram")
+
+    # Invariant preservation: if horizon_scenarios is explicitly empty list, or if no data is present, return empty
+    if isinstance(scenarios, list) and len(scenarios) == 0:
+        return ""
+    if not scenarios and not checkpoints and not histogram:
+        return ""
+
+    # Check ruin risk across scenarios or checkpoints
+    ruin_risk = False
+    p_ruin = mc.get("p_ruin")
+    if _is_finite_number(p_ruin) and float(p_ruin) > 0.05:
+        ruin_risk = True
+
+    hist_svg = _render_mc_histogram_svg(mc)
+    fan_svg = _render_mc_fan_chart_svg(mc)
+    med_svg = _render_mc_median_line_svg(mc)
+
+    if not hist_svg and not fan_svg and not med_svg:
+        return ""
 
     subtitle = (
-        f"{_int_text(mc.get('iterations') or 10000)} bootstrap paths &middot; "
+        f"{_int_text(mc.get('iterations') or 3000)} bootstrap paths &middot; "
         + (
             "liquidation floor at -100%"
             if ruin_risk
@@ -4531,26 +4865,49 @@ def _render_unified_monte_carlo_chart(mc: Dict[str, Any]) -> str:
         '</div>'
     )
 
-    # --- Parameter glossary (* notes) rendered as an aligned two-column grid
-    # matching the style of the existing score-basis notes in the rest of the report.
+    # 3-button tab row placed directly above the chart SVGs
+    tabs_html = (
+        '<div class="mc-view-tabs" role="tablist" aria-label="Monte Carlo views">'
+        '  <button type="button" class="mc-view-tab-btn active" data-tab="dist" onclick="switchMcViewTab(this, \'dist\')">'
+        '    <span class="mc-tab-icon">📊</span> Distribution'
+        '  </button>'
+        '  <button type="button" class="mc-view-tab-btn" data-tab="fan" onclick="switchMcViewTab(this, \'fan\')">'
+        '    <span class="mc-tab-icon">📈</span> Probability Cone'
+        '  </button>'
+        '  <button type="button" class="mc-view-tab-btn" data-tab="median" onclick="switchMcViewTab(this, \'median\')">'
+        '    <span class="mc-tab-icon">📉</span> Median Trajectory'
+        '  </button>'
+        '</div>'
+    )
+
+    views_html = (
+        '<div class="mc-views-wrapper">'
+        f'  <div class="mc-view-panel active" data-view="dist" style="display:block;">{hist_svg}</div>'
+        f'  <div class="mc-view-panel" data-view="fan" style="display:none;">{fan_svg}</div>'
+        f'  <div class="mc-view-panel" data-view="median" style="display:none;">{med_svg}</div>'
+        '</div>'
+    )
+
     param_notes_html = (
         '<div class="mc-param-notes">'
         '<div class="mc-param-notes-grid">'
-        '<div class="mc-param-note-item"><span class="mc-param-star">PoP</span>'
-        '<span class="mc-param-desc">Probability of Profit &mdash; share of simulated paths ending with positive return (terminal equity &gt; starting equity).</span></div>'
+        '<div class="mc-param-note-item"><span class="mc-param-star">Distribution (Histogram)</span>'
+        '<span class="mc-param-desc">Real 24-bin outcome frequency histogram across bootstrap paths (X: terminal return %, Y: path count).</span></div>'
+        '<div class="mc-param-note-item"><span class="mc-param-star">Probability Cone (Fan Chart)</span>'
+        '<span class="mc-param-desc">10-checkpoint forward probability cone (X: trade count): shaded P05&ndash;P95 outer band, P25&ndash;P75 inner band, widening as trades progress.</span></div>'
+        '<div class="mc-param-note-item"><span class="mc-param-star">Median Trajectory (Line Chart)</span>'
+        '<span class="mc-param-desc">Single trajectory connecting 10 P50 median points along trade checkpoints &mdash; clean baseline for bot comparison.</span></div>'
         '<div class="mc-param-note-item"><span class="mc-param-star">P05 / P50 / P95</span>'
-        '<span class="mc-param-desc">5th / 50th (median) / 95th percentile of terminal return across all bootstrap paths. P05 = stress scenario; P95 = upside scenario.</span></div>'
-        '<div class="mc-param-note-item"><span class="mc-param-star">DD</span>'
-        '<span class="mc-param-desc">Median maximum drawdown &mdash; the typical deepest peak-to-trough capital decline observed across simulated paths.</span></div>'
+        '<span class="mc-param-desc">5th (stress scenario), 50th (median expectation), and 95th (upside potential) percentiles of return.</span></div>'
+        '<div class="mc-param-note-item"><span class="mc-param-star">0% Breakeven</span>'
+        '<span class="mc-param-desc">Starting equity baseline dividing profitable outcomes from capital decline.</span></div>'
         '<div class="mc-param-note-item"><span class="mc-param-star">Safe Floor ✔ / Ruin</span>'
-        '<span class="mc-param-desc">Safe Floor: no simulated path reached &minus;100% (liquidation boundary). Ruin %: fraction of paths that hit full liquidation.</span></div>'
-        '<div class="mc-param-note-item"><span class="mc-param-star">SHORT / MEDIUM / LONG</span>'
-        '<span class="mc-param-desc">Simulated horizons at 0.2&times;, 1.0&times;, and 3.0&times; the observed trade count. Horizon stability tests whether edge persists at scale.</span></div>'
+        '<span class="mc-param-desc">Safe Floor: no simulated path reached &minus;100% liquidation. Ruin %: share of paths reaching total liquidation.</span></div>'
         '</div>'
         '</div>'
     )
 
-    return f'<div class="mc-unified-panel">{header_html}{chart_svg}{param_notes_html}</div>'
+    return f'<div class="mc-unified-panel">{header_html}{tabs_html}{views_html}{param_notes_html}</div>'
 
 
 def _render_horizon_probability_chart(mc: Dict[str, Any]) -> str:
@@ -9410,6 +9767,557 @@ details.theory[open] summary {
   color: var(--ink, #ffffff);
   font-weight: 500;
 }
+/* Nút nổi -- luôn ở góc phải dưới, mọi tab. Biến mất khi panel đang mở
+   (`aria-expanded="true"`, JS tự đặt) -- nút đóng trong panel thay thế vai
+   trò của nó, tránh hai affordance "đóng" chồng nhau trên màn hình. */
+/* ========================================================================= */
+/* NORA AI CHAT ASSISTANT (MINI CHATGPT FLOATING WIDGET) */
+/* ========================================================================= */
+
+/* Floating Launch Button (FAB) */
+.nora-chat-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  height: 48px;
+  padding: 0 20px 0 16px;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 24px;
+  background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px -4px rgba(2, 132, 199, 0.5), 0 2px 6px rgba(0, 0, 0, 0.2);
+  z-index: 900;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: var(--font-base, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+}
+
+.nora-chat-fab:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 12px 30px -4px rgba(2, 132, 199, 0.65), 0 4px 10px rgba(0, 0, 0, 0.3);
+  border-color: #38bdf8;
+}
+
+.nora-chat-fab[aria-expanded="true"] {
+  display: none;
+}
+
+.nora-chat-fab-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 8px #34d399;
+  animation: pulseGreen 2s infinite ease-in-out;
+}
+
+@keyframes pulseGreen {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.6; }
+}
+
+.nora-chat-fab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nora-chat-fab-label {
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Chat Widget Panel (Mini ChatGPT Window) */
+.nora-chat-widget {
+  position: fixed;
+  right: 24px;
+  bottom: 84px;
+  width: 410px;
+  max-width: calc(100vw - 32px);
+  height: 590px;
+  max-height: min(650px, calc(100vh - 100px));
+  z-index: 901;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel, #0f131a);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 20px;
+  box-shadow: 0 24px 60px -10px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(20px);
+  overflow: hidden;
+  box-sizing: border-box;
+  animation: nora-chat-pop-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root[data-theme="light"] .nora-chat-widget {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 24px 60px -10px rgba(15, 23, 42, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+.nora-chat-widget[hidden] {
+  display: none;
+}
+
+@keyframes nora-chat-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Header */
+.nora-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
+}
+
+:root[data-theme="light"] .nora-chat-head {
+  background: #f8fafc;
+  border-bottom-color: #e2e8f0;
+}
+
+.nora-chat-avatar-head {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #38bdf8;
+  flex-shrink: 0;
+}
+
+.nora-chat-title-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nora-chat-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nora-chat-title-row h2 {
+  font-size: 14.5px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--ink, #ffffff);
+  letter-spacing: -0.01em;
+}
+
+:root[data-theme="light"] .nora-chat-title-row h2 {
+  color: #0f172a;
+}
+
+.nora-chat-title-row .badge {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.nora-chat-status-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink-3, #94a3b8);
+}
+
+.nora-chat-online-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.nora-chat-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--ink-3, #94a3b8);
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.nora-chat-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink, #ffffff);
+}
+
+:root[data-theme="light"] .nora-chat-close:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+/* Chat Message Log */
+.nora-chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-sizing: border-box;
+}
+
+.nora-chat-log:empty {
+  display: none;
+}
+
+/* Message Rows & Alignment */
+.nora-chat-msg-row {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  align-items: flex-end;
+  box-sizing: border-box;
+}
+
+/* User Message: ALIGNED TO THE RIGHT */
+.nora-chat-msg-row.msg-user {
+  justify-content: flex-end;
+}
+
+/* Assistant Message: ALIGNED TO THE LEFT */
+.nora-chat-msg-row.msg-assistant {
+  justify-content: flex-start;
+}
+
+.nora-chat-msg-row.msg-error {
+  justify-content: flex-start;
+}
+
+.nora-chat-avatar-head::before,
+.nora-chat-avatar::before {
+  content: "✦";
+  font-size: 13px;
+  line-height: 1;
+  color: #38bdf8;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.4));
+}
+
+/* Assistant Avatar next to message */
+.nora-chat-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #38bdf8;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
+/* Bubbles */
+.nora-chat-bubble {
+  font-size: 13px;
+  line-height: 1.6;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* User Bubble: Right, Gradient Blue/Cyan with White text */
+.nora-chat-bubble.role-user {
+  background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
+  color: #ffffff;
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 15px;
+  max-width: 82%;
+  box-shadow: 0 3px 12px rgba(37, 99, 235, 0.28);
+}
+
+/* Assistant Bubble: Left, Sleek Surface */
+.nora-chat-bubble.role-assistant {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: var(--ink-2, #e2e8f0);
+  border-radius: 16px 16px 16px 4px;
+  padding: 11px 15px;
+  max-width: 86%;
+}
+
+:root[data-theme="light"] .nora-chat-bubble.role-assistant {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
+/* Số liệu được tô đậm trong câu trả lời của assistant -- CÙNG ngôn ngữ thị
+   giác với `.expert-metric` (đoạn nhận định ở trang report: mono, đậm,
+   nền nhẹ, bo góc nhỏ) để một con số trông giống nhau dù xuất hiện ở chat
+   hay ở báo cáo tĩnh. */
+.nora-chat-metric {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+:root[data-theme="light"] .nora-chat-metric {
+  background: rgba(15, 23, 42, 0.07);
+}
+
+/* Error Bubble */
+.nora-chat-bubble.role-error {
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  color: #fda4af;
+  border-radius: 12px;
+  padding: 10px 14px;
+  max-width: 90%;
+}
+
+/* Typing / Thinking Indicator */
+.nora-chat-status {
+  padding: 0 16px 6px;
+  min-height: 0;
+}
+
+.nora-chat-status:empty {
+  display: none;
+}
+
+.nora-chat-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 11.5px;
+  color: #7dd3fc;
+}
+
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
+}
+
+.tdot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #38bdf8;
+  animation: typingBounce 1.4s infinite ease-in-out both;
+}
+
+.tdot:nth-child(1) { animation-delay: -0.32s; }
+.tdot:nth-child(2) { animation-delay: -0.16s; }
+.tdot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
+  40% { transform: scale(1.2); opacity: 1; }
+}
+
+/* Prompt Chips */
+.nora-chat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 16px 8px;
+  flex-shrink: 0;
+}
+
+.nora-chat-chips:empty {
+  display: none;
+}
+
+.nora-chat-chip {
+  font-family: inherit;
+  font-size: 11.5px;
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.07);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 16px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  text-align: left;
+}
+
+.nora-chat-chip:hover {
+  color: #ffffff;
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #38bdf8;
+  transform: translateY(-1px);
+}
+
+:root[data-theme="light"] .nora-chat-chip {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+  color: #0284c7;
+}
+
+:root[data-theme="light"] .nora-chat-chip:hover {
+  background: #e0f2fe;
+  border-color: #0284c7;
+  color: #0369a1;
+}
+
+/* Thanh nhập -- dạng "viên thuốc" (pill) một khối duy nhất, theo đúng ảnh
+   tham chiếu chủ dự án gửi (22/09): placeholder nằm thẳng trong viên, nút
+   gửi tròn nổi bật ở cuối, KHÔNG có khung/hover bọc quanh riêng ô nhập --
+   viên pill là ranh giới thị giác DUY NHẤT, input bên trong luôn trong
+   suốt/không viền dù có focus hay không (yêu cầu tường minh: "tránh thêm
+   hover bọc nhập text"). */
+.nora-chat-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 16px 8px;
+  background: var(--panel-2, #141822);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 999px;
+  padding: 4px 4px 4px 16px;
+  flex-shrink: 0;
+}
+
+:root[data-theme="light"] .nora-chat-form {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.nora-chat-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--ink, #ffffff);
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  padding: 9px 0;
+}
+
+/* Cố tình LẶP LẠI "không viền" ở trạng thái focus -- không phải thừa: nếu
+   không có quy tắc riêng cho `:focus`, một số trình duyệt (Safari, Firefox
+   cũ) tự vẽ viền/outline mặc định của hệ điều hành lên input khi focus,
+   đúng thứ "hover bọc nhập text" cần tránh. */
+.nora-chat-input:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .nora-chat-input {
+  color: #0f172a;
+}
+
+.nora-chat-input::placeholder {
+  color: var(--ink-3, #64748b);
+  opacity: 0.85;
+}
+
+.nora-chat-send {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #0284c7, #2563eb);
+  color: #ffffff;
+  font-size: 15px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.nora-chat-send:hover:not(:disabled) {
+  transform: scale(1.06);
+}
+
+.nora-chat-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.nora-chat-disclaimer {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink-3, #94a3b8);
+  text-align: center;
+  margin: 0 16px 10px;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .nora-chat-widget {
+    right: 12px;
+    left: 12px;
+    bottom: 80px;
+    width: auto;
+    max-width: none;
+    height: calc(100vh - 120px);
+    max-height: none;
+  }
+  .nora-chat-fab {
+    right: 16px;
+    bottom: 16px;
+    padding: 0 14px;
+  }
+  .nora-chat-fab-label {
+    display: none;
+  }
+}
+/* HỒI QUY (22/09) VỪA SỬA: khối `@media` ở trên từng đóng ngoặc sớm ngay
+   sau `.nora-chat-fab-label`, để lại hai rule mồ côi phía sau nó --
+   ".nora-chat-form { flex-direction: column }" và một rule `.nora-chat-send`
+   -- khiến cả hai áp dụng cho MỌI kích thước màn hình chứ không riêng
+   mobile, và một dấu `}` thừa đứng một mình. Dáng "viên thuốc" (pill) mới
+   vốn đã là một hàng ngang gọn (input co giãn + nút tròn cố định 34px),
+   không cần xếp dọc trên mobile nữa nên hai rule đó bị bỏ hẳn thay vì sửa
+   lại vị trí ngoặc. */
 .methodology-footer {
   margin-top: 1rem;
 }
@@ -10634,7 +11542,42 @@ svg .pie-empty { fill: var(--ink-3, #94a3b8); font-size: 12px; }
   margin-top: 0.5rem;
 }
 .pie-cell { min-width: 0; }
-.pie-cell h4 { margin: 0 0 0.3rem; font-size: var(--font-size-md); color: var(--muted); }
+.btn-subnav-back {
+  background: var(--panel-2, rgba(255, 255, 255, 0.05));
+  color: var(--ink, #f1f5f9);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.btn-subnav-back:hover {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  transform: translateX(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+:root[data-theme="light"] .btn-subnav-back {
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+:root[data-theme="light"] .btn-subnav-back:hover {
+  background: #f8fafc;
+  border-color: #0284c7;
+  color: #0284c7;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.15);
+  transform: translateX(-2px);
+}
 .admin-banner {
   display: none !important;
 }
@@ -11817,6 +12760,80 @@ footer.report-footer {
   margin: 0 auto;
 }
 
+/* Monte Carlo View Mode Tabs */
+.mc-view-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 12px 0;
+  padding: 4px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  width: fit-content;
+}
+:root[data-theme="light"] .mc-view-tabs {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+.mc-view-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted, #94a3b8);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  outline: none;
+  user-select: none;
+}
+:root[data-theme="light"] .mc-view-tab-btn {
+  color: #64748b;
+}
+.mc-view-tab-btn:hover {
+  color: var(--ink, #ffffff);
+  background: rgba(255, 255, 255, 0.05);
+}
+:root[data-theme="light"] .mc-view-tab-btn:hover {
+  color: #0f172a;
+  background: #e2e8f0;
+}
+.mc-view-tab-btn.active {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+:root[data-theme="light"] .mc-view-tab-btn.active {
+  color: #0284c7;
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.mc-tab-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+.mc-views-wrapper {
+  position: relative;
+  width: 100%;
+}
+.mc-view-panel {
+  width: 100%;
+}
+.mc-view-panel svg {
+  display: block;
+  width: 100%;
+  max-width: 820px;
+  height: auto;
+  margin: 0 auto;
+}
+
 /* Parameter glossary (* notes) below the Outcome distribution chart */
 .mc-param-notes {
   margin: 10px 0 4px;
@@ -12151,7 +13168,11 @@ def render_bot_report_html(
         tabs_html = _render_tabs_wrapper(
             tab1_content, tab2_content, tab3_content, hidden_panels=hidden_panels
         )
-        body = f"{header_html}{tabs_html}"
+        # Đứng NGOÀI `tabs_html` có chủ đích -- hiện xuyên suốt bất kể tab
+        # nào đang mở, không đếm vào bất kỳ tab nào. Nếu cả ba tab rỗng,
+        # nhánh ngay dưới đây thay thế TOÀN BỘ `body` bằng trang "not found",
+        # nên widget cũng biến mất theo -- đúng ý, không cần điều kiện riêng.
+        body = f"{header_html}{tabs_html}{_render_chat_widget(result)}"
         if not (tab1_content or tab2_content or tab3_content):
             # Nuốt lặng lẽ: một `result` HỢP LỆ mà cả ba tab ra rỗng thì
             # người đọc nhận về trang "không tìm thấy" y hệt trường hợp mã
@@ -12286,8 +13307,39 @@ _RUNTIME_SCRIPT = (
     f'window.METRIC_INFO = {json.dumps(METRIC_FORMULA_INFO, ensure_ascii=False)};\n'
     """window.openFormulaModal = function(key) {};
 window.closeFormulaModal = function() {};
+window.switchMcViewTab = function(btn, tabId) {
+  try {
+    var panel = btn.closest('.mc-unified-panel');
+    if (!panel) return;
+    var btns = panel.querySelectorAll('.mc-view-tab-btn');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.remove('active');
+    }
+    btn.classList.add('active');
+    var views = panel.querySelectorAll('.mc-view-panel');
+    for (var j = 0; j < views.length; j++) {
+      var v = views[j];
+      if (v.getAttribute('data-view') === tabId) {
+        v.style.display = 'block';
+        v.classList.add('active');
+      } else {
+        v.style.display = 'none';
+        v.classList.remove('active');
+      }
+    }
+  } catch (e) {}
+};
 (function() {
   try {
+    document.addEventListener('click', function(e) {
+      var btn = e.target && e.target.closest && e.target.closest('.mc-view-tab-btn');
+      if (btn) {
+        var tabId = btn.getAttribute('data-tab');
+        if (window.switchMcViewTab && tabId) {
+          window.switchMcViewTab(btn, tabId);
+        }
+      }
+    });
     // Chuyển tiếp mượt mà vào SPA để giữ header cố định, không load lại trang
     if (window.location.pathname.startsWith('/bot/') || /^\\/[a-zA-Z0-9]+_[a-zA-Z0-9]+$/.test(window.location.pathname)) {
       var seg = window.location.pathname.replace(/^\\/bot\\//, '').replace(/^\\/[^_]+_/, '');
@@ -12531,6 +13583,258 @@ window.closeFormulaModal = function() {};
       });
     }
     initRichTooltips();
+  } catch (err) {}
+})();
+</script>"""
+    + """
+<script id="nora-chat-runtime">
+(function() {
+  try {
+    // TỰ RÚT LUI KHI KHÔNG CẦN THIẾT -- lỗi thật đã đo hai lượt (22/09):
+    //
+    // Lượt 1 (đã sửa): trong luồng SPA, mỗi lần `BotDetailView.jsx` fetch
+    // lại trang đều duyệt lại toàn bộ thẻ script tìm thấy và CHẠY LẠI TỪ
+    // ĐẦU. `document.addEventListener` không tự khử trùng lặp, nên không
+    // chặn thì mỗi lượt chạy lại cộng thêm một listener chồng lên listener
+    // cũ -- `window.__noraChatWired` bên dưới chặn đúng việc này.
+    //
+    // Lượt 2 (lỗi thật vẫn còn SAU lượt 1, tin nhắn vẫn lặp): `BotDetailView.jsx`
+    // giờ TỰ nối sự kiện riêng cho đúng các phần tử này (`#nora-chat-fab`,
+    // `#nora-chat-chips`, `#nora-chat-form`...) bằng `useEffect` chạy SAU
+    // khi HTML đã thật sự được chèn vào DOM -- cùng cách nó đã làm cho tab/
+    // nút back/link hash từ trước. Vậy trong luồng SPA giờ có HAI hệ thống
+    // độc lập cùng lắng nghe cùng một cú click: script này (qua uỷ quyền
+    // trên `document`) VÀ `useEffect` kia (qua `root.querySelector` sau khi
+    // chèn thật) -- mỗi bên gọi `ask()` một lần, ra đúng hai tin nhắn giống
+    // hệt nhau như ảnh chụp thật cho thấy.
+    //
+    // CÁCH PHÂN BIỆT: script này chạy vào một trong hai thời điểm, và chỉ
+    // một trong hai có nghĩa là "tôi phải tự lo nối sự kiện":
+    //   * Trang gốc (không qua SPA, `#x` bỏ qua chuyển hướng): trình duyệt
+    //     phân tích cú pháp HTML THEO THỨ TỰ, nên tới lúc chạy script này,
+    //     `<button id="nora-chat-fab">` (đứng TRƯỚC nó trong mã nguồn) chắc
+    //     chắn ĐÃ có trong DOM thật.
+    //   * SPA: `BotDetailView.jsx` chạy lại script này TRƯỚC khi chèn HTML
+    //     thật (đọc từ một `doc` đã tách rời, xem module docstring của
+    //     `_render_chat_widget`), nên tại đúng thời điểm này, phần tử ĐÓ
+    //     CHƯA tồn tại trong DOM thật (kể cả ở lượt refetch thứ hai trở đi
+    //     -- nút CŨ từ lượt render trước có thể vẫn còn, nhưng cờ
+    //     `__noraChatWired` bên dưới đã chặn từ lượt đầu nên không quan
+    //     trọng nữa).
+    // Do đó: phần tử CHƯA tồn tại lúc này => đang ở luồng SPA => tự thoát
+    // ngay, không gắn bất kỳ listener nào, nhường toàn quyền cho
+    // `useEffect` của React lo -- đúng NƠI DUY NHẤT nên xử lý việc này khi
+    // chạy trong SPA, vì nó chạy đúng lúc DOM thật đã sẵn sàng.
+    if (!document.getElementById('nora-chat-fab')) { return; }
+    if (window.__noraChatWired) { return; }
+    window.__noraChatWired = true;
+
+    // Event delegation on document to handle dynamic rendering cleanly
+    function el(id) {
+      return document.getElementById(id);
+    }
+
+    var HISTORY_CAP = 6;
+    var history = [];
+    var busy = false;
+
+    // Thoát HTML bằng chính DOM (gán `textContent` rồi đọc lại `innerHTML`)
+    // -- không tự viết regex thoát tay, vì trình duyệt escape đúng MỌI ký
+    // tự đặc biệt, kể cả những ký tự một regex tự viết dễ bỏ sót. Câu trả
+    // lời của model đi qua đây TRƯỚC khi tô đậm số liệu, nên số liệu tô
+    // đậm không thể mở lại một lỗ XSS nào.
+    function escapeHtml(text) {
+      var div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Tô đậm số liệu trong câu trả lời -- CÙNG một biểu thức chính quy với
+    // `report_page._format_expert_metric_highlights` (dùng cho đoạn nhận
+    // định ở trang report) để hai nơi hiển thị số liệu nhất quán về mặt
+    // hình ảnh. Chỉ khớp số có `%`, hậu tố `x` (bội số, "4.04x"), hoặc có
+    // dấu thập phân -- một số nguyên trần ("212 closed trades") không được
+    // tô, đúng chủ đích bản gốc: tô những con số ĐỌC NHƯ MỘT CHỈ SỐ, không
+    // tô mọi con số.
+    var METRIC_RE = /(\\b\\d{1,3}(?:,\\d{3})*(?:\\.\\d+)?%|\\b\\d+(?:\\.\\d+)?x\\b|\\b\\d+\\.\\d+\\b)/g;
+    function highlightMetrics(escapedHtml) {
+      return escapedHtml.replace(METRIC_RE, '<strong class="nora-chat-metric">$1</strong>');
+    }
+
+    // Tách câu để xuống dòng cho dễ đọc trong khung chat hẹp -- model trả
+    // lời 2-6 câu liền một mạch (xem STYLE trong chat.py), dồn hết vào một
+    // đoạn văn trông rất bí. Tách theo ranh giới câu: dấu kết câu + khoảng
+    // trắng + MỘT CHỮ HOA ngay sau -- điều kiện "chữ hoa ngay sau" cố ý để
+    // KHÔNG cắt nhầm vào số thập phân kiểu "57.08%" (sau dấu "." ở đó là
+    // chữ số "08", không phải chữ hoa, nên không khớp).
+    var SENTENCE_SPLIT_RE = /(?<=[.!?])\\s+(?=[A-Z])/;
+    function formatAnswer(text) {
+      var sentences = text.split(SENTENCE_SPLIT_RE)
+        .map(function(s) { return s.trim(); })
+        .filter(function(s) { return s.length > 0; });
+      return sentences.map(function(s) {
+        return highlightMetrics(escapeHtml(s));
+      }).join('<br><br>');
+    }
+
+    function addBubble(role, text) {
+      var log = el('nora-chat-log');
+      if (!log) { return; }
+      var row = document.createElement('div');
+      row.className = 'nora-chat-msg-row msg-' + role;
+
+      if (role === 'assistant') {
+        var avatar = document.createElement('div');
+        avatar.className = 'nora-chat-avatar';
+        avatar.setAttribute('aria-hidden', 'true');
+        row.appendChild(avatar);
+      }
+
+      var bubble = document.createElement('div');
+      bubble.className = 'nora-chat-bubble role-' + role;
+      if (role === 'assistant') {
+        // CHỈ vai assistant được định dạng -- câu hỏi của người dùng và
+        // câu lỗi giữ nguyên `textContent` thuần, không cần tô/tách câu.
+        bubble.innerHTML = formatAnswer(text);
+      } else {
+        bubble.textContent = text;
+      }
+      row.appendChild(bubble);
+
+      log.appendChild(row);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function setChips(questions) {
+      var chipsBox = el('nora-chat-chips');
+      if (!chipsBox) { return; }
+      chipsBox.innerHTML = '';
+      if (!questions || !questions.forEach) { return; }
+      questions.forEach(function(q) {
+        if (typeof q !== 'string' || !q) { return; }
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'nora-chat-chip';
+        chip.textContent = q;
+        chipsBox.appendChild(chip);
+      });
+    }
+
+    function setBusy(next, message) {
+      busy = next;
+      var input = el('nora-chat-input');
+      var sendBtn = el('nora-chat-send');
+      var status = el('nora-chat-status');
+      if (input) { input.disabled = next; }
+      if (sendBtn) { sendBtn.disabled = next; }
+      if (status) {
+        if (next) {
+          status.innerHTML = '<div class="nora-chat-typing"><span class="tdot"></span><span class="tdot"></span><span class="tdot"></span><span style="margin-left:6px;font-size:11.5px;color:var(--ink-3);">Nora AI is thinking...</span></div>';
+        } else {
+          status.innerHTML = '';
+        }
+      }
+      var log = el('nora-chat-log');
+      if (log) { log.scrollTop = log.scrollHeight; }
+    }
+
+    function ask(question) {
+      question = (question || '').trim();
+      if (!question || busy) { return; }
+      var widget = el('nora-chat-widget');
+      var input = el('nora-chat-input');
+      var code = widget ? (widget.getAttribute('data-bot-code') || '') : '';
+      if (!code) { return; }
+      addBubble('user', question);
+      history.push({ role: 'user', text: question });
+      if (history.length > HISTORY_CAP) { history = history.slice(-HISTORY_CAP); }
+      if (input) { input.value = ''; }
+      setChips([]);
+      setBusy(true);
+      fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code, question: question, history: history })
+      }).then(function(resp) {
+        return resp.json().catch(function() { return null; }).then(function(data) {
+          return { ok: resp.ok, status: resp.status, data: data };
+        });
+      }).then(function(result) {
+        setBusy(false);
+        var data = result.data;
+        if (result.ok && data && typeof data.answer === 'string') {
+          addBubble('assistant', data.answer);
+          history.push({ role: 'assistant', text: data.answer });
+          if (history.length > HISTORY_CAP) { history = history.slice(-HISTORY_CAP); }
+          // CỐ TÌNH không gọi lại `setChips(data.suggested_questions)` ở
+          // đây nữa: gợi ý chỉ hiện MỘT LẦN lúc mở panel (trong `openChat`),
+          // trước khi có tin nhắn nào. Một khi cuộc trò chuyện đã bắt đầu,
+          // dải chip che mất khoảng trống hẹp giữa log và ô nhập trong một
+          // panel nhỏ -- yêu cầu tường minh của chủ dự án (22/09): "gợi ý
+          // khi đã chat thì ẩn nó đi, tránh che nội dung". `data` vẫn trả
+          // về `suggested_questions` từ server (không đổi API) -- chỉ phía
+          // hiển thị này không dùng tới sau lượt hỏi đầu tiên.
+        } else {
+          var message = (data && data.message) || 'Something went wrong answering that. Please try again.';
+          addBubble('error', message);
+        }
+      }).catch(function() {
+        setBusy(false);
+        addBubble('error', 'Could not reach the server. Please check your connection and try again.');
+      });
+    }
+
+    function openChat() {
+      var widget = el('nora-chat-widget');
+      var fab = el('nora-chat-fab');
+      if (!widget || !fab) { return; }
+      widget.hidden = false;
+      widget.setAttribute('aria-hidden', 'false');
+      fab.setAttribute('aria-expanded', 'true');
+      var log = el('nora-chat-log');
+      var chipsBox = el('nora-chat-chips');
+      if (log && chipsBox && !log.childElementCount && !chipsBox.childElementCount) {
+        addBubble('assistant', 'Hello! I am Nora AI risk assistant. Ask me anything about this bot\\'s risk rating, Monte Carlo stress tests, drawdowns, or classification verdict.');
+        setChips([
+          'What does the Risk Score measure?',
+          'Why did this bot get warned or vetoed?',
+          'Explain the verdict and Monte Carlo tests',
+          'Is this bot vulnerable to slippage or illiquidity?'
+        ]);
+      }
+      var input = el('nora-chat-input');
+      if (input) { input.focus(); }
+    }
+    function closeChat() {
+      var widget = el('nora-chat-widget');
+      var fab = el('nora-chat-fab');
+      if (!widget || !fab) { return; }
+      widget.hidden = true;
+      widget.setAttribute('aria-hidden', 'true');
+      fab.setAttribute('aria-expanded', 'false');
+      fab.focus();
+    }
+
+    document.addEventListener('click', function(ev) {
+      var target = ev.target;
+      if (!target || typeof target.closest !== 'function') { return; }
+      if (target.closest('#nora-chat-fab')) { openChat(); return; }
+      if (target.closest('#nora-chat-close')) { closeChat(); return; }
+      var chip = target.closest('.nora-chat-chip');
+      if (chip) { ask(chip.textContent); }
+    });
+    document.addEventListener('submit', function(ev) {
+      if (ev.target && ev.target.id === 'nora-chat-form') {
+        ev.preventDefault();
+        var input = el('nora-chat-input');
+        ask(input ? input.value : '');
+      }
+    });
+    document.addEventListener('keydown', function(ev) {
+      if (ev.key !== 'Escape') { return; }
+      var widget = el('nora-chat-widget');
+      if (widget && !widget.hidden) { closeChat(); }
+    });
   } catch (err) {}
 })();
 </script>"""

@@ -29,7 +29,10 @@ class PortfolioHistoryStore:
     MAX_ENTRIES = 50
 
     def __init__(self, root: Optional[Path] = None) -> None:
-        self.root = root or Path(config.DATA_DIR) / "report" / "state" / "portfolios"
+        self.root = (
+            root
+            or Path(config.DATA_DIR) / "report" / "multi" / "state" / "portfolios"
+        )
 
     def _path(self, portfolio_id: str) -> Path:
         safe = SAFE_ID.sub("_", portfolio_id).strip("_") or "unknown_portfolio"

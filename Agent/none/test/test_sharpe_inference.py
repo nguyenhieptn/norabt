@@ -243,7 +243,7 @@ def test_population_variance_is_read_from_the_scored_bots(tmp_path) -> None:
     from Agent.backend.bot.mcp.analytics.simulation import sharpe_reference
 
     sharpe_reference.reset_cache()
-    report_root = tmp_path / "report"
+    report_root = tmp_path / "report" / "single"
     values = [0.1, 0.2, -0.05, 0.4, 0.15, 0.0, 0.3, -0.2, 0.25, 0.05, 0.6, -0.1]
     for index, value in enumerate(values):
         folder = report_root / f"bot_{index}"
@@ -257,5 +257,5 @@ def test_population_variance_is_read_from_the_scored_bots(tmp_path) -> None:
     # Dưới ngưỡng mẫu tối thiểu thì thà không có còn hơn dựng ngưỡng bịa.
     sharpe_reference.reset_cache()
     thin = tmp_path / "thin"
-    (thin / "report").mkdir(parents=True)
+    (thin / "report" / "single").mkdir(parents=True)
     assert sharpe_reference.population_sharpe_variance(thin) is None

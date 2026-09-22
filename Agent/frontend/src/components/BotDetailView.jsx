@@ -1,6 +1,19 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useSession } from "../context/SessionContext.jsx";
 
-export default function BotDetailView({ code, onBack, isUser = false }) {
+/**
+ * Renders a server-built report document inside the SPA.
+ *
+ * `reportPath` exists so a PORTFOLIO can use this component unchanged. A
+ * portfolio report is produced by the same backend renderer as a single bot's
+ * -- its subject is just a bot merged from several ledgers -- so the two pages
+ * share one stylesheet, one tab implementation, one set of charts and all of
+ * the rewiring below. Building a second React view for portfolios would have
+ * meant two things to keep in sync forever, and they would not have stayed in
+ * sync.
+ */
+export default function BotDetailView({ code, reportPath, onBack, isUser = false }) {
+  const { session } = useSession();
   const [htmlContent, setHtmlContent] = useState("");
   const [botMeta, setBotMeta] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -9,22 +22,25 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
   const containerRef = useRef(null);
   const reAnalyzeBtnRef = useRef(null);
 
-  const isUserView = isUser || window.location.hash.startsWith("#/user");
+  const isUserView = isUser || !session || session.role !== "admin";
 
   function loadReport(isRefresh = false) {
-    if (!code) return;
+    if (!code && !reportPath) return;
     setLoading(true);
     setError(null);
 
     // Role scoping is decided by the server (see backend/qc/reporting/view_policy.py).
     // The SPA asks for the user-scoped document instead of deleting panels out
     // of an admin document after the fact -- stripping client-side made
-    // "withheld from you" look identical to "never measured".
+    // "withheld from you" look identical to "never measured". Only actually
+    // ask for it when THIS view is the user-scoped one (isUserView) -- an
+    // admin opening the same component (from /#/admin) must see the full,
+    // unrestricted document, not the user's trimmed one.
     const params = new URLSearchParams();
     if (isRefresh) params.set("refresh", "1");
-    params.set("view", "user");
+    if (isUserView) params.set("view", "user");
     params.set("_t", String(Date.now()));
-    const url = `/bot/${code}?${params.toString()}`;
+    const url = `${reportPath || `/bot/${code}`}?${params.toString()}`;
     fetch(url, { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Bot report not found`);
@@ -130,7 +146,7 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
 
   useEffect(() => {
     loadReport(false);
-  }, [code]);
+  }, [code, reportPath]);
 
   useEffect(() => {
     if (!containerRef.current || !htmlContent) return;
@@ -259,6 +275,37 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
       link.onclick = (e) => {
         e.preventDefault();
         if (onBack) onBack();
+      };
+    });
+
+    // Monte Carlo view tabs switcher (3 tabs: Distribution, Probability Band, Median Line)
+    const mcTabBtns = root.querySelectorAll(".mc-view-tab-btn");
+    const mcTabLabels = {
+      dist: "📊 Distribution",
+      fan: "📈 Probability Band",
+      median: "📉 Median Line",
+    };
+    mcTabBtns.forEach((btn) => {
+      const tab = btn.getAttribute("data-tab");
+      if (mcTabLabels[tab]) {
+        btn.innerHTML = `<span class="mc-tab-icon">${mcTabLabels[tab].slice(0, 2)}</span> ${mcTabLabels[tab].slice(3)}`;
+      }
+      btn.onclick = (e) => {
+        e.preventDefault();
+        const tabId = btn.getAttribute("data-tab");
+        const panel = btn.closest(".mc-unified-panel");
+        if (!panel) return;
+        panel.querySelectorAll(".mc-view-tab-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        panel.querySelectorAll(".mc-view-panel").forEach((v) => {
+          if (v.getAttribute("data-view") === tabId) {
+            v.style.display = "block";
+            v.classList.add("active");
+          } else {
+            v.style.display = "none";
+            v.classList.remove("active");
+          }
+        });
       };
     });
 
@@ -586,6 +633,195 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
       }
     };
 
+    // Setup Nora AI Chat Widget in SPA
+    const chatFab = root.querySelector("#nora-chat-fab");
+    const chatWidget = root.querySelector("#nora-chat-widget");
+    const chatClose = root.querySelector("#nora-chat-close");
+    const chatForm = root.querySelector("#nora-chat-form");
+    const chatInput = root.querySelector("#nora-chat-input");
+    const chatLog = root.querySelector("#nora-chat-log");
+    const chatChips = root.querySelector("#nora-chat-chips");
+    const chatStatus = root.querySelector("#nora-chat-status");
+
+    if (chatFab && chatWidget) {
+      const botCode = chatWidget.getAttribute("data-bot-code") || code;
+      const history = [];
+      let isBusy = false;
+
+      // Thoát HTML bằng chính DOM (gán rồi đọc lại `innerHTML`) -- không tự
+      // viết regex thoát tay, để trình duyệt lo đúng MỌI ký tự đặc biệt.
+      // Câu trả lời của model đi qua đây TRƯỚC khi tô đậm số liệu hay tách
+      // câu, nên hai bước sau không thể mở lại một lỗ XSS nào.
+      const escapeHtml = (text) => {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      };
+
+      // Tô đậm số liệu -- chỉ số có "%", hậu tố nhân "x", hoặc có dấu thập
+      // phân mới được tô (một số nguyên trần như "212 closed trades" thì
+      // không), để không tô lem nhem mọi con số trong câu.
+      const METRIC_RE = /(\b\d{1,3}(?:,\d{3})*(?:\.\d+)?%|\b\d+(?:\.\d+)?x\b|\b\d+\.\d+\b)/g;
+      const highlightMetrics = (html) =>
+        html.replace(METRIC_RE, '<strong class="nora-chat-metric">$1</strong>');
+
+      // Tách câu để xuống dòng cho dễ đọc trong khung chat hẹp -- model trả
+      // lời 2-6 câu liền một mạch (xem STYLE trong chat.py), dồn hết vào một
+      // đoạn văn trông rất bí. Tách theo ranh giới câu: dấu kết câu + khoảng
+      // trắng + MỘT CHỮ HOA ngay sau -- điều kiện "chữ hoa ngay sau" cố ý để
+      // KHÔNG cắt nhầm vào số thập phân kiểu "57.08%" (sau dấu "." ở đó là
+      // chữ số "08", không phải chữ hoa, nên không khớp).
+      const SENTENCE_SPLIT_RE = /(?<=[.!?])\s+(?=[A-Z])/;
+      const formatAnswer = (text) => {
+        const sentences = text
+          .split(SENTENCE_SPLIT_RE)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        return sentences.map((s) => highlightMetrics(escapeHtml(s))).join("<br><br>");
+      };
+
+      const addMsg = (role, text) => {
+        if (!chatLog) return;
+        const row = document.createElement("div");
+        row.className = `nora-chat-msg-row msg-${role}`;
+        if (role === "assistant") {
+          const av = document.createElement("div");
+          av.className = "nora-chat-avatar";
+          row.appendChild(av);
+        }
+        const bubble = document.createElement("div");
+        bubble.className = `nora-chat-bubble role-${role}`;
+        if (role === "assistant") {
+          // CHỈ vai assistant được định dạng -- câu hỏi của người dùng và
+          // câu lỗi giữ `textContent` thuần, không cần tô/tách câu.
+          bubble.innerHTML = formatAnswer(text);
+        } else {
+          bubble.textContent = text;
+        }
+        row.appendChild(bubble);
+        chatLog.appendChild(row);
+        chatLog.scrollTop = chatLog.scrollHeight;
+      };
+
+      const setChips = (questions) => {
+        if (!chatChips) return;
+        chatChips.innerHTML = "";
+        (questions || []).forEach((q) => {
+          if (!q) return;
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "nora-chat-chip";
+          chip.textContent = q;
+          chip.onclick = () => askQuestion(q);
+          chatChips.appendChild(chip);
+        });
+      };
+
+      const setBusy = (busy) => {
+        isBusy = busy;
+        if (chatInput) chatInput.disabled = busy;
+        const sendBtn = root.querySelector("#nora-chat-send");
+        if (sendBtn) sendBtn.disabled = busy;
+        if (chatStatus) {
+          chatStatus.innerHTML = busy
+            ? '<div class="nora-chat-typing"><span class="tdot"></span><span class="tdot"></span><span class="tdot"></span><span style="margin-left:6px;font-size:11.5px;color:var(--ink-3);">Nora AI is thinking...</span></div>'
+            : '';
+        }
+        if (chatLog) chatLog.scrollTop = chatLog.scrollHeight;
+      };
+
+      const askQuestion = async (q) => {
+        q = (q || "").trim();
+        if (!q || isBusy) return;
+        addMsg("user", q);
+        history.push({ role: "user", text: q });
+        if (history.length > 6) history.splice(0, history.length - 6);
+        if (chatInput) chatInput.value = "";
+        setChips([]);
+        setBusy(true);
+
+        try {
+          const resp = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: botCode, question: q, history }),
+          });
+          const data = await resp.json();
+          setBusy(false);
+          if (resp.ok && data && typeof data.answer === "string") {
+            addMsg("assistant", data.answer);
+            history.push({ role: "assistant", text: data.answer });
+            if (history.length > 6) history.splice(0, history.length - 6);
+            // CỐ TÌNH không gọi lại `setChips(data.suggested_questions)`
+            // nữa: gợi ý chỉ hiện MỘT LẦN lúc mở panel (trong `openChat`),
+            // trước khi có tin nhắn nào -- gọi lại ở đây từng khiến gợi ý
+            // biến mất lúc đang chờ (`setChips([])` trong `askQuestion`)
+            // rồi HIỆN LẠI ngay khi có câu trả lời, đúng lỗi đã báo (23/09).
+            // `data.suggested_questions` vẫn về từ server như cũ -- chỉ
+            // phía hiển thị này không dùng tới sau lượt hỏi đầu tiên.
+          } else {
+            addMsg("error", (data && data.message) || "Something went wrong. Please try again.");
+          }
+        } catch (err) {
+          setBusy(false);
+          addMsg("error", "Could not reach server. Please try again.");
+        }
+      };
+
+      const openChat = () => {
+        chatWidget.hidden = false;
+        chatWidget.removeAttribute("hidden");
+        chatWidget.style.display = "flex";
+        chatWidget.setAttribute("aria-hidden", "false");
+        chatFab.setAttribute("aria-expanded", "true");
+        if (chatLog && !chatLog.childElementCount) {
+          addMsg(
+            "assistant",
+            "Hello! I am Nora AI risk assistant. Ask me anything about this bot's risk rating, Monte Carlo stress tests, drawdowns, or classification verdict."
+          );
+          setChips([
+            "What does the Risk Score measure?",
+            "Why did this bot get warned or vetoed?",
+            "Explain the verdict and Monte Carlo tests",
+            "Is this bot vulnerable to slippage or illiquidity?"
+          ]);
+        }
+        if (chatInput) chatInput.focus();
+      };
+
+      const closeChat = () => {
+        chatWidget.hidden = true;
+        chatWidget.setAttribute("hidden", "");
+        chatWidget.style.display = "none";
+        chatWidget.setAttribute("aria-hidden", "true");
+        chatFab.setAttribute("aria-expanded", "false");
+        chatFab.focus();
+      };
+
+      chatFab.onclick = (e) => {
+        e.preventDefault();
+        if (chatWidget.hidden || chatWidget.style.display === "none") {
+          openChat();
+        } else {
+          closeChat();
+        }
+      };
+
+      if (chatClose) {
+        chatClose.onclick = (e) => {
+          e.preventDefault();
+          closeChat();
+        };
+      }
+
+      if (chatForm) {
+        chatForm.onsubmit = (e) => {
+          e.preventDefault();
+          askQuestion(chatInput ? chatInput.value : "");
+        };
+      }
+    }
+
     root.addEventListener("mouseover", handleMouseOver);
     root.addEventListener("mousemove", handleMouseMove);
     root.addEventListener("mouseout", handleMouseOut);
@@ -622,9 +858,11 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
           <button type="button" className="btn pri" onClick={() => loadReport(false)}>
             🔄 Retry loading report
           </button>
-          <button type="button" className="btn" onClick={onBack}>
-            ← Back to bot list
-          </button>
+          {onBack && (
+            <button type="button" className="btn" onClick={onBack}>
+              ← {isUserView ? "Look up a different bot" : "Back to bot list"}
+            </button>
+          )}
         </div>
       </div>
     );
@@ -637,10 +875,21 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
         <div className="head report-unified-head">
           <div className="crumb">MONITORING SYSTEM · DETAILED QUANTITATIVE PROFILE</div>
           <div className="head-row report-head-row">
-            {botMeta.hasRefresh && (
+            {(onBack || (!isUserView && botMeta.hasRefresh)) && (
               <>
                 <div className="head-actions report-head-actions-left">
-                  <div className="reanalyze-wrapper" style={{ position: "relative" }}>
+                  {onBack && (
+                    <button
+                      type="button"
+                      className="btn btn-subnav-back"
+                      onClick={onBack}
+                      title={isUserView ? "Look up another bot" : "Back to bot list"}
+                    >
+                      ← {isUserView ? "Look up another bot" : "Back to list"}
+                    </button>
+                  )}
+                  {!isUserView && botMeta.hasRefresh && (
+                    <div className="reanalyze-wrapper" style={{ position: "relative" }}>
                     <button
                       ref={reAnalyzeBtnRef}
                       type="button"
@@ -689,6 +938,7 @@ export default function BotDetailView({ code, onBack, isUser = false }) {
                       </>
                     )}
                   </div>
+                  )}
                 </div>
                 <div className="report-head-divider" />
               </>

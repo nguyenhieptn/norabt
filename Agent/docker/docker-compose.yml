@@ -104,72 +104,63 @@ services:
       - ../frontend/dist:/app/Agent/frontend/dist:ro
       - ../frontend/tokens.css:/app/Agent/frontend/tokens.css:ro
       # Ngoại lệ duy nhất: cache nến 1H đã đóng, đường dẫn mặc định của
-      # CandleCache (xem Agent/backend/sources/market_source.py --
-      # Path(config.DATA_DIR)/"cache"/"candles"). LiveMarketDataSource tự ghi
-      # thêm vào cache này mỗi khi POST /api/analyze cần nến của một mã mới,
-      # nên riêng nhánh con này phải cho ghi -- mount SAU dòng data:ro ở trên
-      # để nó override đúng một nhánh con thành rw, phần còn lại của data/
-      # vẫn chỉ-đọc (hai mount trỏ tới hai target khác nhau trong container
-      # nên thứ tự liệt kê ở đây không ảnh hưởng tới kết quả, chỉ giữ để dễ
-      # đọc: cha trước, con sau).
-      - ../data/cache/candles:/app/Agent/data/cache/candles:rw
+      # CandleCache (xem Agent/backend/external/sources/market_source.py --
+      # Path(config.DATA_DIR)/"market"/"cache"/"candles" -- đường dẫn đã đổi
+      # theo Kiến trúc dữ liệu hợp nhất 2026-09, xem comment ở dòng report/
+      # bên dưới). LiveMarketDataSource tự ghi thêm vào cache này mỗi khi
+      # POST /api/analyze cần nến của một mã mới, nên riêng nhánh con này
+      # phải cho ghi -- mount SAU dòng data:ro ở trên để nó override đúng
+      # một nhánh con thành rw, phần còn lại của data/ vẫn chỉ-đọc (hai
+      # mount trỏ tới hai target khác nhau trong container nên thứ tự liệt
+      # kê ở đây không ảnh hưởng tới kết quả, chỉ giữ để dễ đọc: cha trước,
+      # con sau).
+      - ../data/market/cache/candles:/app/Agent/data/market/cache/candles:rw
 
-      # Nhánh con ghi-được thứ hai, CÙNG KHUÔN với candles ở trên: wallet-
-      # address identity (Agent/backend/web/identity.py) tạo/cập nhật hồ sơ
-      # người dùng tại data/users/<user_ref>/profile.json ngay TRONG
-      # container này mỗi khi có người khai địa chỉ ví qua POST /api/session
-      # hoặc chấm điểm một bot lúc đã đăng nhập (POST /api/analyze gọi
-      # identity.record_analysis) -- khác hẳn candles/cache (agent-web tự
-      # ghi cache nến của chính nó) và khác hẳn phần còn lại của data/ (bot/
-      # đánh giá do run_report.py/crawler ghi từ NGOÀI container, xem comment
-      # data:ro ở trên) -- đây là dữ liệu do CHÍNH tiến trình bên trong
-      # container này sinh ra, nên nhánh này PHẢI ghi được, còn mọi nhánh con
-      # khác của data/ (assessment, analysis, universe, ...) vẫn giữ nguyên
-      # chỉ-đọc như trước: agent-web không có lý do gì để tự ghi vào đó.
-      # Mount SAU dòng data:ro ở trên để override đúng một nhánh con thành
-      # rw, giống hệt cơ chế candles (hai mount trỏ tới hai target khác nhau
-      # trong container nên thứ tự liệt kê ở đây không ảnh hưởng tới kết
-      # quả, chỉ giữ để dễ đọc: cha trước, con sau).
+      # Nhánh con ghi-được thứ hai: toàn bộ data/report/, mount SAU dòng
+      # data:ro ở trên để override thành rw, giống hệt cơ chế candles (hai
+      # mount trỏ tới hai target khác nhau trong container nên thứ tự liệt
+      # kê ở đây không ảnh hưởng tới kết quả, chỉ giữ để dễ đọc: cha trước,
+      # con sau).
       #
       # BẮT BUỘC trước lần "docker compose up" đầu tiên: thư mục
-      # Agent/data/users/ trên HOST phải đã tồn tại VÀ thuộc quyền uid 1000
+      # Agent/data/report/ trên HOST phải đã tồn tại VÀ thuộc quyền uid 1000
       # (host user chạy compose) trước khi container khởi động -- nếu chưa
       # có, Docker tự tạo nó lúc mount và gán quyền root, và container này
       # (chạy `user: "1000:1000"`, xem trên) vẫn không ghi được vào một thư
       # mục do root tạo, tái diễn ĐÚNG lỗi mount chỉ-đọc mà nhánh mount này
       # định sửa. Xem README bước tạo thư mục kèm .gitkeep.
-      # Ngoại lệ ghi-được: thư mục kết quả chấm điểm. Nút "Phân tích lại"
-      # (`/bot/<code>?refresh=1`) chạy lại bot rồi GHI ĐÈ `assessment.json`
-      # của nó ở luồng nền -- không ghi được thì lượt chạy lại chỉ sống
-      # trong snapshot Redis 24 giờ, hết hạn là hệ thống đọc lại bản cũ và
-      # công của người dùng bị vứt đi.
       #
-      # ĐÃ CẮN THẬT: tính năng này được viết và nối đúng, nhưng trong
-      # container nó chết ở `OSError: [Errno 30] Read-only file system`
-      # sau khi đã tốn 85 giây gọi mô hình. Lỗi xảy ra trong luồng nền và
-      # chỉ vào log, nên từ phía người dùng trang vẫn trả 200 như thường --
-      # không có dấu hiệu nào cho thấy kết quả không được lưu.
+      # Kiến trúc dữ liệu hợp nhất (2026-09): folder này giờ gộp CẢ BA nhánh
+      # từng mount rời trước đây --
+      #   - assessment_store.persist ghi kết quả chấm điểm vào
+      #     data/report/single/<bot_id>/latest.json (trước là
+      #     data/assessment/<venue>/<asset>/bot/...);
+      #   - identity.py (Agent/backend/web/identity.py) ghi hồ sơ người dùng
+      #     vào data/report/single/users/<user_ref>/profile.json khi có người
+      #     khai địa chỉ ví qua POST /api/session hoặc chấm điểm bot lúc đã
+      #     đăng nhập (trước là data/users/...);
+      #   - usage_ref.py (Agent/backend/web/usage_ref.py, Việc 2) đúc mã
+      #     lượt-dùng ẩn danh vào data/report/single/usage_refs/<ref>.json cho
+      #     MỖI lượt phân tích thành công của caller KHÔNG đăng nhập (chính
+      #     là luồng OKX), để link chi tiết trả về không mang mã bot đoán-được
+      #     và không trộn vào hồ sơ người dùng thật (trước là
+      #     data/usage_refs/...).
+      # Vì cả ba đều nằm dưới data/report/ trong kiến trúc mới nên MỘT mount
+      # rw ở gốc report/ là đủ -- không cần ba dòng mount rời như trước.
       #
-      # Kiến trúc dữ liệu hợp nhất (2026-09): `assessment_store.persist` giờ
-      # ghi vào `data/report/<bot_id>/latest.json` (không còn
-      # `data/assessment/<venue>/<asset>/bot/...`), nên nhánh ghi-được đổi
-      # theo. Phạm vi hẹp nhất có thể: chỉ `data/report`, phần còn lại của
-      # `data/` vẫn chỉ-đọc.
+      # single/ vs multi/ (2026-09): report/ chỉ có ĐÚNG HAI nhánh con --
+      # report/single/ (mọi thứ về MỘT bot: chấm điểm, hồ sơ người dùng, mã
+      # lượt-dùng ẩn danh -- users/ và usage_refs/ nằm trong single/ vì cả
+      # hai hiện chỉ phục vụ luồng phân tích một-bot, chưa có gì tương đương
+      # cho portfolio) và report/multi/ (đánh giá multi-bot correlation, xem
+      # Agent/backend/pipeline_portfolio.py và
+      # Agent/backend/report/qc/history/portfolio_store.py). Đừng thêm thư
+      # mục thứ ba ngang hàng ở đây -- bất cứ dữ liệu mới nào cũng phải xếp
+      # vào một trong hai nhánh này.
+      # ĐÃ CẮN THẬT (khi còn ba dòng rời): quên đồng bộ đường dẫn HOST sau
+      # khi đổi kiến trúc data/ khiến Docker tự tạo lại thư mục cũ thuộc
+      # quyền root lúc container khởi động -- xem README/lịch sử fix.
       - ../data/report:/app/Agent/data/report:rw
-      - ../data/users:/app/Agent/data/users:rw
-
-      # Nhánh con ghi-được thứ ba, CÙNG KHUÔN với users/ ở trên: kho mã
-      # lượt-dùng ẩn danh (Agent/backend/web/usage_ref.py, Việc 2) --
-      # POST/GET /api/analyze tự đúc một file mới ở đây (data/usage_refs/
-      # <ref>.json) cho MỖI lượt phân tích thành công của một caller KHÔNG
-      # đăng nhập (chính là luồng OKX), để link chi tiết trả về không mang
-      # theo mã bot đoán-được (`/bot/<code>`) và cũng không trộn vào hồ sơ
-      # người dùng thật ở data/users/ -- xem usage_ref.py's own module
-      # docstring cho đầy đủ lý do tách kho. Cùng lý do BẮT BUỘC tạo trước
-      # + chown uid 1000 như data/users/ ở trên (xem README bước tạo thư
-      # mục): nếu chưa có, Docker tự tạo nó thuộc quyền root lúc mount và
-      # container (chạy user 1000:1000) không ghi được vào đó.
-      - ../data/usage_refs:/app/Agent/data/usage_refs:rw
 
       # --- Nhận định chuyên môn (narrative) do Claude viết -- xem README
       # bước 12 và Agent/backend/qc/reporting/narrative.py's module

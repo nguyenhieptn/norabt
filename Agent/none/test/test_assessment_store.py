@@ -168,14 +168,14 @@ def test_persist_mirrors_the_step_2_layout_and_reads_back(tmp_path):
     )()
     written = persist(report, tmp_path)
 
-    expected = tmp_path / "report" / "53AEED5A8E4EBBB2" / "latest.json"
+    expected = tmp_path / "report" / "single" / "53AEED5A8E4EBBB2" / "latest.json"
     assert str(expected) in written
     assert expected.exists()
 
     loaded = load_bot(tmp_path, "CEX", "ETH", "53AEED5A8E4EBBB2")
     assert loaded["recommendation"]["verdict"] == "DRAWDOWN: HIGH · QUALITY: WEAK"
 
-    index = json.loads((tmp_path / "report" / "index.json").read_text("utf-8"))
+    index = json.loads((tmp_path / "report" / "single" / "index.json").read_text("utf-8"))
     assert index["bots_assessed"] == 1
     assert index["bots"][0]["unique_code"] == "53AEED5A8E4EBBB2"
 
@@ -185,7 +185,7 @@ def test_rows_without_a_verdict_are_not_written_as_assessments(tmp_path):
     report = type("Report", (), {"generated_at_ms": 1, "rows": [broken]})()
     written = persist(report, tmp_path)
 
-    assert written == [str(tmp_path / "report" / "index.json")]
+    assert written == [str(tmp_path / "report" / "single" / "index.json")]
     assert load_bot(tmp_path, "CEX", "ETH", "53AEED5A8E4EBBB2") is None
 
 
@@ -410,10 +410,10 @@ def test_persist_write_false_builds_payloads_without_touching_disk(tmp_path):
     }
     written = persist(report, tmp_path, extra_by_code=extra_by_code, write=False)
 
-    expected = tmp_path / "report" / "53AEED5A8E4EBBB2" / "latest.json"
+    expected = tmp_path / "report" / "single" / "53AEED5A8E4EBBB2" / "latest.json"
     assert str(expected) in written
     assert not expected.exists()
-    assert not (tmp_path / "report" / "index.json").exists()
+    assert not (tmp_path / "report" / "single" / "index.json").exists()
 
     # The narrative built for this exact run is still recoverable via
     # build_assessments, without any file having been written.
@@ -432,7 +432,7 @@ def test_persist_write_true_is_unaffected_by_the_new_optional_parameters(tmp_pat
     """
     report = type("Report", (), {"generated_at_ms": 1, "rows": [_row()]})()
     written = persist(report, tmp_path)
-    expected = tmp_path / "report" / "53AEED5A8E4EBBB2" / "latest.json"
+    expected = tmp_path / "report" / "single" / "53AEED5A8E4EBBB2" / "latest.json"
     assert expected.exists()
     assert str(expected) in written
 
@@ -667,14 +667,14 @@ def test_persisting_one_bot_does_not_drop_the_other_bots_from_the_index(tmp_path
         "Report", (), {"generated_at_ms": 1, "rows": [_row(), _row_other()]}
     )()
     persist(first, tmp_path)
-    index = json.loads((tmp_path / "report" / "index.json").read_text("utf-8"))
+    index = json.loads((tmp_path / "report" / "single" / "index.json").read_text("utf-8"))
     assert index["bots_assessed"] == 2
 
     # Đúng hình dạng lượt chạy lại lẻ: report chỉ mang MỘT bot.
     again = type("Report", (), {"generated_at_ms": 2, "rows": [_row()]})()
     persist(again, tmp_path)
 
-    index = json.loads((tmp_path / "report" / "index.json").read_text("utf-8"))
+    index = json.loads((tmp_path / "report" / "single" / "index.json").read_text("utf-8"))
     assert index["bots_assessed"] == 2, "bot không nằm trong lượt chạy đã bị cắt"
     assert index["bots_this_run"] == 1
     assert {row["unique_code"] for row in index["bots"]} == {
@@ -689,7 +689,7 @@ def test_the_index_drops_a_row_whose_file_no_longer_exists(tmp_path):
         "Report", (), {"generated_at_ms": 1, "rows": [_row(), _row_other()]}
     )()
     persist(report, tmp_path)
-    gone = json.loads((tmp_path / "report" / "index.json").read_text("utf-8"))
+    gone = json.loads((tmp_path / "report" / "single" / "index.json").read_text("utf-8"))
     removed = next(
         row for row in gone["bots"] if row["unique_code"] == "0EAF7292CE2FAAC2"
     )
@@ -701,7 +701,7 @@ def test_the_index_drops_a_row_whose_file_no_longer_exists(tmp_path):
     removed_path.unlink()
 
     persist(type("Report", (), {"generated_at_ms": 2, "rows": [_row()]})(), tmp_path)
-    index = json.loads((tmp_path / "report" / "index.json").read_text("utf-8"))
+    index = json.loads((tmp_path / "report" / "single" / "index.json").read_text("utf-8"))
     assert [row["unique_code"] for row in index["bots"]] == ["53AEED5A8E4EBBB2"]
 
 
@@ -712,7 +712,7 @@ def test_rebuild_index_restores_every_bot_from_the_files_themselves(tmp_path):
     persist(report, tmp_path)
 
     # Cắt index bằng tay, đúng trạng thái lỗi đã tìm thấy trên máy thật.
-    index_path = tmp_path / "report" / "index.json"
+    index_path = tmp_path / "report" / "single" / "index.json"
     broken = json.loads(index_path.read_text("utf-8"))
     broken["bots"] = broken["bots"][:1]
     broken["bots_assessed"] = 1
@@ -779,7 +779,7 @@ def test_renumber_ranks_orders_by_tier_then_risk_score(tmp_path):
 
 def _ranks_on_disk(tmp_path) -> dict:
     out = {}
-    for path in (tmp_path / "report").glob("*/latest.json"):
+    for path in (tmp_path / "report" / "single").glob("*/latest.json"):
         doc = json.loads(path.read_text("utf-8"))
         out[doc["bot"]["unique_code"]] = doc["bot"]["rank_in_cohort"]
     return out

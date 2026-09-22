@@ -285,11 +285,11 @@ def _read_json_or_none(path: Path) -> Optional[Dict[str, Any]]:
 
 
 def _assessment_index() -> Dict[str, Any]:
-    index_path = DATA_DIR / "report" / "index.json"
+    index_path = DATA_DIR / "report" / "single" / "index.json"
     index = _read_json_or_none(index_path)
     if index is None:
         raise ToolError(
-            "data/report/index.json does not exist yet -- step 3 (QC "
+            "data/report/single/index.json does not exist yet -- step 3 (QC "
             "scoring) has never run; run the scoring pipeline before "
             "looking anything up."
         )
@@ -415,7 +415,7 @@ def get_assessment(unique_code: str, ctx: Context) -> Dict[str, Any]:
     if entry is None:
         raise ToolError(
             f"No bot found with unique_code={clean_code!r} in "
-            f"data/report/index.json; this bot has not been QC-scored yet."
+            f"data/report/single/index.json; this bot has not been QC-scored yet."
         )
     venue, _, symbol = str(entry.get("slot", "")).partition("/")
     payload = (

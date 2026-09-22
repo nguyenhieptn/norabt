@@ -63,14 +63,14 @@ def test_an_asset_gets_a_market_folder_and_one_folder_per_bot(tmp_path):
     persist(_report([_bot("AAA", "HaveARestin"), _bot("BBB", "Milies L")]), tmp_path)
 
     assert (tmp_path / "market" / "cex" / "XRP" / "market.json").exists()
-    assert (tmp_path / "report" / "AAA" / "performance.json").exists()
-    assert (tmp_path / "report" / "BBB" / "performance.json").exists()
+    assert (tmp_path / "report" / "single" / "AAA" / "performance.json").exists()
+    assert (tmp_path / "report" / "single" / "BBB" / "performance.json").exists()
 
 
 def test_each_bot_folder_holds_performance_and_monte_carlo_separately(tmp_path):
     """Two questions, two files: what it did, and what could happen next."""
     persist(_report([_bot("AAA", "HaveARestin")]), tmp_path)
-    bot_dir = tmp_path / "report" / "AAA"
+    bot_dir = tmp_path / "report" / "single" / "AAA"
 
     performance = json.loads((bot_dir / "performance.json").read_text())
     simulation = json.loads((bot_dir / "monte_carlo.json").read_text())
@@ -99,7 +99,7 @@ def test_a_bot_is_found_by_code_even_though_the_folder_carries_its_name(tmp_path
 def test_a_bot_that_failed_analysis_is_not_written_as_if_it_had_data(tmp_path):
     persist(_report([_bot("AAA", "Broken", error="chưa crawl")]), tmp_path)
 
-    assert not (tmp_path / "report" / "AAA").exists()
+    assert not (tmp_path / "report" / "single" / "AAA").exists()
     assert load_bot(tmp_path, "CEX", "XRP", "AAA") is None
 
 

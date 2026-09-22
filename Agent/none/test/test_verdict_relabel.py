@@ -68,7 +68,7 @@ RETIRED_LABELS = {"NGUY HIỂM", "TIỀM ẨN", "TIỀM NĂNG", "AN TOÀN"}
 
 
 def _real_assessment_files() -> List[Path]:
-    return sorted((DATA_DIR / "report").glob("*/latest.json"))
+    return sorted((DATA_DIR / "report" / "single").glob("*/latest.json"))
 
 
 def test_real_assessment_files_exist_for_this_sweep_to_mean_anything():
@@ -494,10 +494,9 @@ def _ascii_word_runs(text: str, min_words: int = 4) -> List[str]:
 
 def test_real_bot_page_keeps_seven_svg_and_eleven_details(full_result):
     html = render_bot_report_html(full_result)
-    # 8 -> 6: gộp 3 biểu đồ Monte Carlo rời rạc (fan percentiles, drawdown,
-    # horizon bars) thành 1 biểu đồ duy nhất đa chiều (unified chart) theo
-    # yêu cầu thiết kế mới.
-    assert html.count("<svg") == html.count("</svg>") == 6
+    # 6 -> 8: Khối Monte Carlo nay cung cấp 3 góc nhìn chọn qua tab (Distribution,
+    # Probability Cone, Median Trajectory), mỗi tab 1 SVG riêng biệt (tổng 8 SVGs).
+    assert html.count("<svg") == html.count("</svg>") == 8
     # 11 -> 12: the strategy-narrative task added section ① ("Cách bot này
     # chơi", right after the conclusion), which always carries its own
     # "Đọc thế nào & dựa trên đâu" <details> -- see report_page.py's

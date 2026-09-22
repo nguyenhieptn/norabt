@@ -143,12 +143,12 @@ def persist(report: Any, data_dir: Path) -> List[str]:
     asset (`data/market/<venue>/<asset>/market.json`, see
     `Agent.backend.external.sources.market_source.FileMarketDataSource._market_dir`);
     performance.json/monte_carlo.json land beside step 3's own `latest.json`
-    for the same bot (`data/report/<bot_id>/`, see
+    for the same bot (`data/report/single/<bot_id>/`, see
     `Agent.backend.report.qc.reporting.assessment_store`) -- one bot, one folder,
     across both steps.
     """
     market_root = Path(data_dir) / "market"
-    report_root = Path(data_dir) / "report"
+    report_root = Path(data_dir) / "report" / "single"
     written: List[str] = []
 
     for block in report.blocks:
@@ -212,7 +212,7 @@ def persist(report: Any, data_dir: Path) -> List[str]:
         ),
         "files": written,
     }
-    # Own run manifest, not `data/report/index.json` (assessment_store.py owns
+    # Own run manifest, not `data/report/single/index.json` (assessment_store.py owns
     # that name) -- nothing reads this one back (verified: no consumer
     # anywhere under Agent/ greps for "analysis_run_index" or the old
     # `analysis/index.json`), it exists purely as a per-run audit trail.
@@ -231,7 +231,7 @@ def load_bot(
     callers but no longer part of the lookup path -- see
     `Agent.backend.report.qc.reporting.assessment_store.load_bot`'s matching change.
     """
-    bot_dir = Path(data_dir) / "report" / unique_code
+    bot_dir = Path(data_dir) / "report" / "single" / unique_code
     performance = bot_dir / "performance.json"
     simulation = bot_dir / "monte_carlo.json"
     if not performance.exists() or not simulation.exists():

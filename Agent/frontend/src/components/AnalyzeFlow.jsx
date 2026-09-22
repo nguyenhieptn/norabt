@@ -7,11 +7,13 @@ const STEP = {
   INPUT: "input",
   LOOKING_UP: "looking_up",
   SUMMARY: "summary",
+  PORTFOLIO_SUMMARY: "portfolio_summary",
   ANALYZING: "analyzing",
   WAITING: "waiting",
+  PORTFOLIO_WAITING: "portfolio_waiting",
 };
 
-// 4 Bước định lượng logic trực quan
+// 4 quantitative steps for single-bot analysis
 const PIPELINE_STEPS = [
   {
     id: "ledger",
@@ -35,6 +37,30 @@ const PIPELINE_STEPS = [
   },
 ];
 
+// 4 quantitative steps for portfolio analysis
+const PORTFOLIO_STEPS = [
+  {
+    id: "members_ledger",
+    title: "Collect & reconcile N bots' order books from OKX",
+    desc: "Connecting to the OKX API concurrently, extracting each bot's filled orders, open position state, and trading cadence.",
+  },
+  {
+    id: "timeseries_align",
+    title: "Normalize time series & related market analysis",
+    desc: "Aligning PnL timelines to common time buckets, measuring exposure overlap and active markets.",
+  },
+  {
+    id: "correlation_matrix",
+    title: "Compute the multi-dimensional correlation matrix (Pearson & Spearman)",
+    desc: "Measuring the linear correlation coefficient (PnL correlation) and rank volatility, testing p-values, and detecting false-diversification traps.",
+  },
+  {
+    id: "joint_monte_carlo",
+    title: "Joint portfolio risk Monte Carlo simulation (10,000 scenarios)",
+    desc: "Running the joint distribution simulation, measuring Joint Max Drawdown, Joint VaR/CVaR 95%, and the actual risk reduction ratio (Diversification Benefit).",
+  },
+];
+
 const POLL_FAST_MS = 1500;
 const POLL_SLOW_MS = 3000;
 const POLL_SLOW_AFTER_MS = 30000;
@@ -53,11 +79,27 @@ function getLogTime() {
   return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-export default function AnalyzeFlow({ onOpenBot }) {
+function parseInputCodes(str) {
+  if (!str) return [];
+  const items = str.trim().split(/[\s,;\n]+/).map((s) => s.trim()).filter(Boolean);
+  return [...new Set(items)];
+}
+
+// A fabricated portfolio used to be generated here whenever the API call
+// failed, with correlations computed as `0.2 + ((i + j) % 5) * 0.12` and an
+// evidence line reading "Observed trade sample size: 95 shared trading
+// buckets". It rendered identically to a real assessment. On a tool whose
+// entire job is telling someone how much money they can lose, a plausible
+// invented number is worse than an error message, because the reader cannot
+// tell the two apart. The failure is now surfaced instead.
+
+export default function AnalyzeFlow({ onOpenBot, onOpenPortfolio }) {
   const { session } = useSession();
   const [step, setStep] = useState(STEP.INPUT);
   const [code, setCode] = useState("");
   const [lookup, setLookup] = useState(null);
+  const [portfolioLookups, setPortfolioLookups] = useState([]);
+  const [portfolioActiveStep, setPortfolioActiveStep] = useState(0);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [preAnalyzed, setPreAnalyzed] = useState(null);
@@ -65,9 +107,13 @@ export default function AnalyzeFlow({ onOpenBot }) {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingJob, setPendingJob] = useState(null);
 
+  const detectedCodes = parseInputCodes(code);
+  const isMulti = detectedCodes.length > 1;
+
   function reset() {
     setStep(STEP.INPUT);
     setLookup(null);
+    setPortfolioLookups([]);
     setError(null);
     setNotice(null);
     setPendingJob(null);
@@ -78,9 +124,9 @@ export default function AnalyzeFlow({ onOpenBot }) {
 
   async function handleLookupSubmit(event) {
     event.preventDefault();
-    const trimmed = code.trim();
-    if (!trimmed) {
-      setError("Enter a bot code first.");
+    const codes = parseInputCodes(code);
+    if (codes.length === 0) {
+      setError("Please enter at least one OKX bot identifier (uniqueCode).");
       return;
     }
     setError(null);
@@ -90,36 +136,59 @@ export default function AnalyzeFlow({ onOpenBot }) {
     setShowConfirmModal(false);
     setStep(STEP.LOOKING_UP);
 
-    const { ok, data } = await postJson("/api/lookup", { code: trimmed });
-    if (!ok) {
-      setError(data.message || "Could not look up this bot code.");
-      setStep(STEP.INPUT);
-      return;
-    }
-    if (data.status === "NOT_FOUND") {
-      setError(data.note || "No bot found with this code.");
-      setStep(STEP.INPUT);
-      return;
-    }
-    setLookup(data);
-
-    // Kiểm tra ngay xem bot này đã có báo cáo phân tích trước đó hay chưa
-    let isAnalyzed = false;
-    let scoredTime = null;
-    try {
-      const statusResp = await getJson("/api/analyze/status?code=" + encodeURIComponent(trimmed));
-      if (statusResp.ok && statusResp.data && statusResp.data.report_ready) {
-        isAnalyzed = true;
-        if (statusResp.data.scored_at_ms) {
-          scoredTime = statusResp.data.scored_at_ms;
-        }
+    if (codes.length === 1) {
+      // 1 ID -> ordinary single-bot run, same as the original core
+      const trimmed = codes[0];
+      const { ok, data } = await postJson("/api/lookup", { code: trimmed });
+      if (!ok) {
+        setError(data.message || "Could not look up this bot code.");
+        setStep(STEP.INPUT);
+        return;
       }
-    } catch (_) {
-      // Degrade an toàn nếu mạng lỗi
+      if (data.status === "NOT_FOUND") {
+        setError(data.note || "No bot with this code was found on OKX.");
+        setStep(STEP.INPUT);
+        return;
+      }
+      setLookup(data);
+
+      let isAnalyzed = false;
+      let scoredTime = null;
+      try {
+        const statusResp = await getJson("/api/analyze/status?code=" + encodeURIComponent(trimmed));
+        if (statusResp.ok && statusResp.data && statusResp.data.report_ready) {
+          isAnalyzed = true;
+          if (statusResp.data.scored_at_ms) {
+            scoredTime = statusResp.data.scored_at_ms;
+          }
+        }
+      } catch (_) {}
+      setPreAnalyzed(isAnalyzed);
+      setScoredAtMs(scoredTime);
+      setStep(STEP.SUMMARY);
+    } else {
+      // Multiple IDs -> portfolio run
+      try {
+        const lookups = await Promise.all(
+          codes.map(async (c) => {
+            const res = await postJson("/api/lookup", { code: c });
+            if (res.ok && res.data && res.data.status !== "NOT_FOUND") {
+              return { code: c, ok: true, data: res.data };
+            }
+            return {
+              code: c,
+              ok: false,
+              error: res.data?.note || res.data?.message || "No bot found on OKX",
+            };
+          })
+        );
+        setPortfolioLookups(lookups);
+        setStep(STEP.PORTFOLIO_SUMMARY);
+      } catch (err) {
+        setError("Connection error while looking up the bot list: " + err.message);
+        setStep(STEP.INPUT);
+      }
     }
-    setPreAnalyzed(isAnalyzed);
-    setScoredAtMs(scoredTime);
-    setStep(STEP.SUMMARY);
   }
 
   async function handleConfirmAnalyze(forceFresh = false) {
@@ -129,8 +198,6 @@ export default function AnalyzeFlow({ onOpenBot }) {
     setShowConfirmModal(false);
 
     const targetUrl = buildFallbackDetailUrl(session, lookup.code);
-
-    // Hiển thị giao diện Stepper + Live Log Console in-page bên dưới form
     setPendingJob({
       code: lookup.code,
       botName: lookup.name || lookup.code,
@@ -139,7 +206,6 @@ export default function AnalyzeFlow({ onOpenBot }) {
     });
     setStep(STEP.WAITING);
 
-    // Gọi API analyze với refresh nếu là forceFresh
     const payload = { code: lookup.code };
     if (forceFresh) {
       payload.refresh = true;
@@ -155,7 +221,6 @@ export default function AnalyzeFlow({ onOpenBot }) {
       }
 
       if (data.status !== "PENDING") {
-        // Trả kết quả ngay (nếu đã có sẵn hoặc hoàn thành nhanh)
         if (data.report_url) {
           setPendingJob((prev) => (prev ? { ...prev, targetUrl: data.report_url } : null));
         }
@@ -164,6 +229,57 @@ export default function AnalyzeFlow({ onOpenBot }) {
       setError("Server connection error: " + (err.message || String(err)));
       setPendingJob(null);
       setStep(STEP.SUMMARY);
+    }
+  }
+
+  async function handleConfirmAnalyzePortfolio() {
+    const validBots = portfolioLookups.filter((b) => b.ok);
+    if (validBots.length < 2) {
+      setError("At least 2 valid OKX bots are needed to run a portfolio analysis.");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setStep(STEP.PORTFOLIO_WAITING);
+    setPortfolioActiveStep(0);
+
+    const validCodes = validBots.map((b) => b.code);
+
+    try {
+      const t1 = setTimeout(() => setPortfolioActiveStep(1), 1800);
+      const t2 = setTimeout(() => setPortfolioActiveStep(2), 3800);
+      const t3 = setTimeout(() => setPortfolioActiveStep(3), 6000);
+
+      const resp = await postJson("/api/portfolio/analyze", { codes: validCodes });
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+
+      // The server returns ONE report for the whole set: the same payload
+      // shape a single bot produces, plus a `portfolio` block. `portfolio_id`
+      // is what the report page is addressed by.
+      const portfolioId = resp.ok && resp.data ? resp.data.portfolio_id : null;
+      if (portfolioId) {
+        if (onOpenPortfolio) {
+          onOpenPortfolio(portfolioId, resp.data);
+        } else {
+          window.location.hash = `#/user?tab=portfolio&id=${encodeURIComponent(portfolioId)}`;
+        }
+        return;
+      }
+
+      const reason =
+        (resp.data && (resp.data.limited_reason || resp.data.error)) ||
+        "The portfolio analysis did not return a result.";
+      setError(reason);
+      setStep(STEP.PORTFOLIO_SUMMARY);
+    } catch (err) {
+      setError(
+        `Could not run the portfolio analysis: ${err?.message || err}. ` +
+          "Nothing is shown rather than an estimate, because an invented " +
+          "correlation reads exactly like a measured one."
+      );
+      setStep(STEP.PORTFOLIO_SUMMARY);
     }
   }
 
@@ -204,7 +320,7 @@ export default function AnalyzeFlow({ onOpenBot }) {
                 type="text"
                 value={code}
                 onChange={(event) => setCode(event.target.value)}
-                placeholder="Enter OKX bot code (e.g. EF1CC6F40E834D1A)..."
+                placeholder="Enter an OKX bot ID (e.g. EF1CC6F40E834D1A), or multiple IDs separated by commas/spaces..."
                 disabled={step === STEP.LOOKING_UP}
                 autoComplete="off"
                 className="analyze-search-input"
@@ -237,22 +353,70 @@ export default function AnalyzeFlow({ onOpenBot }) {
                       verticalAlign: "middle",
                     }}
                   />
-                  Searching...
+                  Looking up...
                 </>
+              ) : isMulti ? (
+                `Look up portfolio (${detectedCodes.length})`
               ) : (
-                "Find bot"
+                "Look up bot"
               )}
             </button>
           </div>
-          <div className="analyze-search-hint">
-            <span className="analyze-hint-pill">OKX Identifier</span>
-            <span className="analyze-hint-text">
-              Enter the uniqueCode from the OKX copy trading bot URL to inspect live order ledger and execute risk scoring.
-            </span>
-          </div>
+
+          {/* PORTFOLIO GUIDANCE & NOTICE */}
+          {isMulti ? (
+            <div
+              style={{
+                marginTop: 12,
+                padding: "12px 16px",
+                borderRadius: 8,
+                background: "rgba(56, 189, 248, 0.08)",
+                border: "1px solid rgba(56, 189, 248, 0.25)",
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 12,
+              }}
+            >
+              <span style={{ fontSize: 20 }}>🔮</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#38bdf8" }}>
+                  PORTFOLIO MODE DETECTED ({detectedCodes.length} BOTS)
+                </div>
+                <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}>
+                  You entered multiple IDs separated by commas or spaces. Clicking Look Up will switch to <strong>Portfolio Analysis</strong> mode to measure strategy correlation and joint portfolio risk.
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                  {detectedCodes.map((c, i) => (
+                    <span
+                      key={i}
+                      className="mono"
+                      style={{
+                        fontSize: 11,
+                        padding: "3px 8px",
+                        borderRadius: 4,
+                        background: "rgba(255, 255, 255, 0.08)",
+                        color: "var(--amber)",
+                        border: "1px solid rgba(255, 255, 255, 0.12)",
+                      }}
+                    >
+                      #{i + 1}: {c}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="analyze-search-hint">
+              <span className="analyze-hint-pill">Hint</span>
+              <span className="analyze-hint-text">
+                Enter <strong>1 ID</strong> for an ordinary single-bot analysis. To run a multi-bot portfolio analysis, enter <strong>multiple IDs</strong> separated by commas (<code>,</code>) or spaces.
+              </span>
+            </div>
+          )}
         </form>
       ) : null}
 
+      {/* MODE 1: SINGLE-BOT SUMMARY (SAME AS THE ORIGINAL CORE) */}
       {step === STEP.SUMMARY && lookup ? (
         <>
           <BotSummaryCard lookup={lookup} />
@@ -261,11 +425,11 @@ export default function AnalyzeFlow({ onOpenBot }) {
             <div className="analyze-status-banner banner-existing">
               <span className="banner-icon">ℹ️</span>
               <div className="banner-content">
-                <div className="banner-title">THIS BOT HAS ALREADY BEEN ANALYZED IN THE SYSTEM</div>
+                <div className="banner-title">THIS BOT HAS ALREADY BEEN ANALYZED</div>
                 <div className="banner-desc">
-                  The system already has a stored quantitative assessment for this bot
+                  The system has a stored quantitative assessment for this bot
                   {scoredAtMs ? ` (last run: ${formatDateTime(scoredAtMs)})` : ""}.
-                  Click <strong>Analyze this bot</strong> below to choose between viewing the old result or running a new scan.
+                  Click <strong>Analyze this bot</strong> below to view the existing result or re-scan its order book.
                 </div>
               </div>
             </div>
@@ -273,9 +437,9 @@ export default function AnalyzeFlow({ onOpenBot }) {
             <div className="analyze-status-banner banner-new">
               <span className="banner-icon">✨</span>
               <div className="banner-content">
-                <div className="banner-title">BRAND NEW BOT — NEVER ANALYZED IN THE SYSTEM</div>
+                <div className="banner-title">NEW BOT — NEVER ANALYZED</div>
                 <div className="banner-desc">
-                  This bot has no stored data yet. When you click start, the system will connect directly to OKX to load the full order book, analyze related markets, score 10 risk dimensions, and run a 10,000-scenario Monte Carlo simulation (usually takes about 20-60 seconds).
+                  This bot has no stored data yet. Clicking start will connect directly to OKX to load the full order book, analyze related markets, score all 10 risk dimensions, and run a 10,000-scenario Monte Carlo simulation.
                 </div>
               </div>
             </div>
@@ -302,7 +466,140 @@ export default function AnalyzeFlow({ onOpenBot }) {
         </>
       ) : null}
 
-      {/* MODAL HOVER XÁC NHẬN KHI BOT ĐÃ TỪNG CHẠY */}
+      {/* MODE 2: MULTI-BOT PORTFOLIO SUMMARY */}
+      {step === STEP.PORTFOLIO_SUMMARY && (
+        <div className="portfolio-summary-block">
+          <div
+            style={{
+              padding: "20px 24px",
+              borderRadius: 10,
+              background: "linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(20, 20, 24, 0.8) 100%)",
+              border: "1px solid rgba(56, 189, 248, 0.35)",
+              marginBottom: 24,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <span style={{ fontSize: 24 }}>🔮</span>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#38bdf8" }}>
+                CONFIRM {portfolioLookups.length}-BOT PORTFOLIO RUN
+              </h3>
+            </div>
+            <p style={{ margin: 0, fontSize: 14, color: "var(--ink)", lineHeight: 1.6 }}>
+              The system found <strong>{portfolioLookups.filter((b) => b.ok).length}</strong> / {portfolioLookups.length} valid bots on OKX. Click the button below to align time series, compute the multi-dimensional correlation matrix (Pearson &amp; Spearman), and run the joint portfolio Monte Carlo simulation.
+            </p>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: 14,
+              marginBottom: 24,
+            }}
+          >
+            {portfolioLookups.map((item, idx) => {
+              const bot = item.data?.bot || item.data;
+              return (
+                <div
+                  key={idx}
+                  className="card"
+                  style={{
+                    padding: 16,
+                    border: item.ok ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid rgba(244, 63, 94, 0.4)",
+                    background: item.ok ? "var(--card-bg)" : "rgba(244, 63, 94, 0.06)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span className="mono" style={{ fontSize: 12, color: "var(--amber)", fontWeight: 600 }}>
+                      {item.code}
+                    </span>
+                    <span className={`tag ${item.ok ? "trend" : "stop"}`} style={{ fontSize: 11 }}>
+                      {item.ok ? (item.data?.status || "OK") : "NOT FOUND"}
+                    </span>
+                  </div>
+                  {item.ok ? (
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginBottom: 4 }}>
+                        {item.data?.name || bot?.nick_name || `Bot #${idx + 1}`}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--ink-2)", display: "flex", justifyContent: "space-between" }}>
+                        <span>Pair: {item.data?.traded_symbol || bot?.symbol || "OKX"}</span>
+                        <span>
+                          Win rate: {typeof item.data?.win_rate === "number" ? `${(item.data.win_rate * 100).toFixed(0)}%` : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "#f43f5e" }}>
+                      {item.error || "Could not load this bot's data"}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="btn-row">
+            <button
+              type="button"
+              className="btn pri"
+              disabled={portfolioLookups.filter((b) => b.ok).length < 2}
+              onClick={handleConfirmAnalyzePortfolio}
+            >
+              🚀 Run portfolio analysis ({portfolioLookups.filter((b) => b.ok).length} bots)
+            </button>
+            <button type="button" className="btn" onClick={reset}>
+              Enter a different list
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* PORTFOLIO PROGRESS STEPPER */}
+      {step === STEP.PORTFOLIO_WAITING && (
+        <div className="portfolio-waiting-wrap" style={{ padding: "28px 0" }}>
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            <span
+              className="stepper-spinner"
+              style={{ width: 32, height: 32, margin: "0 auto 16px auto", display: "block" }}
+            />
+            <h3 style={{ margin: "0 0 8px 0", fontSize: 20, fontWeight: 700 }}>
+              Running portfolio analysis for {portfolioLookups.filter((b) => b.ok).length} bots...
+            </h3>
+            <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)" }}>
+              Loading N bots' order books, aligning PnL timelines, computing the correlation matrix, and running 10,000 joint Monte Carlo scenarios.
+            </p>
+          </div>
+
+          <div className="stepper-track" style={{ maxWidth: 680, margin: "0 auto" }}>
+            {PORTFOLIO_STEPS.map((s, idx) => {
+              const isDone = idx < portfolioActiveStep;
+              const isCurrent = idx === portfolioActiveStep;
+              return (
+                <div
+                  key={s.id}
+                  className={`stepper-node ${isDone ? "node-done" : isCurrent ? "node-active" : "node-pending"}`}
+                  style={{ marginBottom: 16 }}
+                >
+                  <div className="stepper-bullet">
+                    {isDone ? "✓" : isCurrent ? <span className="stepper-spinner" style={{ width: 12, height: 12 }} /> : idx + 1}
+                  </div>
+                  <div className="stepper-node-content">
+                    <div className="stepper-node-title" style={{ fontSize: 14, fontWeight: 600 }}>
+                      {s.title}
+                    </div>
+                    <div className="stepper-node-desc" style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
+                      {s.desc}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL WHEN THE BOT HAS ALREADY RUN */}
       {showConfirmModal && lookup && (
         <div className="analyze-confirm-backdrop" onClick={() => setShowConfirmModal(false)}>
           <div className="analyze-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -329,13 +626,13 @@ export default function AnalyzeFlow({ onOpenBot }) {
                 <div className="alert-text">
                   <div className="alert-title">This bot has already been analyzed</div>
                   <div className="alert-desc">
-                    Run time on the system:{" "}
+                    Time on record:{" "}
                     <strong>{formatDateTime(scoredAtMs) || "Previously stored record"}</strong>
                   </div>
                 </div>
               </div>
               <p className="analyze-confirm-prompt">
-                You can view the existing result instantly without waiting for a recalculation, or choose to run it again from scratch to scan the latest order book from OKX.
+                You can view the existing result immediately without waiting for it to recompute, or choose to re-analyze from scratch to scan the latest order book from OKX.
               </p>
             </div>
 
@@ -348,14 +645,14 @@ export default function AnalyzeFlow({ onOpenBot }) {
                   handleDoneNavigation(lookup.code, buildFallbackDetailUrl(session, lookup.code));
                 }}
               >
-                👁️ View old result
+                👁️ View existing result
               </button>
               <button
                 type="button"
                 className="btn btn-warning"
                 onClick={() => handleConfirmAnalyze(true)}
               >
-                🔄 Run analysis again
+                🔄 Re-run analysis
               </button>
               <button
                 type="button"
@@ -369,7 +666,7 @@ export default function AnalyzeFlow({ onOpenBot }) {
         </div>
       )}
 
-      {/* TIẾN TRÌNH THEO TỪNG BƯỚC (STEPPER) + LIVE LOG CONSOLE IN-PAGE */}
+      {/* STEP-BY-STEP PROGRESS FOR A SINGLE BOT */}
       {step === STEP.WAITING && pendingJob ? (
         <InPageAnalyzeProgress
           job={pendingJob}
@@ -382,12 +679,6 @@ export default function AnalyzeFlow({ onOpenBot }) {
   );
 }
 
-/**
- * Hiển thị tiến trình trực tiếp in-page bên dưới form:
- * - Stepper 4 bước chỉ rõ đang nhìn vào đâu, đang xử lý dữ liệu gì
- * - Live Log Console hiển thị chi tiết nhật ký thời gian thực
- * - Thông báo hoàn tất và đếm ngược 3s tự chuyển tới trang kết quả
- */
 function InPageAnalyzeProgress({ job, onDone, onRetry, onDismiss }) {
   const [status, setStatus] = useState({
     state: "running",
@@ -420,14 +711,12 @@ function InPageAnalyzeProgress({ job, onDone, onRetry, onDismiss }) {
     ]);
   }
 
-  // Cuộn tự động log console
   useEffect(() => {
     if (logEndRef.current) {
       logEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [logs]);
 
-  // Khởi động đồng hồ và ghi nhận log ban đầu
   useEffect(() => {
     stoppedRef.current = false;
     startedAtRef.current = Date.now();
@@ -437,105 +726,67 @@ function InPageAnalyzeProgress({ job, onDone, onRetry, onDismiss }) {
         id: "init-1",
         time: getLogTime(),
         type: "info",
-        text: `Starting quantitative assessment pipeline for bot [${job.code}] (${job.botName})...`,
+        text: `Starting the quantitative assessment pipeline for bot [${job.code}] (${job.botName})...`,
       },
       {
         id: "init-2",
         time: getLogTime(),
         type: "step",
-        text: `STEP 1: Connecting to the OKX API, loading open positions and trade history...`,
+        text: `STEP 1: Connecting to the OKX API, loading open positions and order history...`,
       },
     ]);
 
     clockTimerRef.current = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - startedAtRef.current) / 1000));
-    }, 1000);
-
-    let lastStage = "ledger";
-
-    async function pollOnce() {
       if (stoppedRef.current) return;
-      const elapsedMs = Date.now() - startedAtRef.current;
-      if (elapsedMs > POLL_TIMEOUT_MS) {
+      const sec = Math.floor((Date.now() - startedAtRef.current) / 1000);
+      setElapsedSec(sec);
+      if (sec >= POLL_TIMEOUT_MS / 1000) {
         stoppedRef.current = true;
         setTimedOut(true);
-        addLog("Timed out (90s) - the pipeline is still processing on the server.", "warn");
-        return;
+        setStatus((prev) => ({ ...prev, state: "error", errorMessage: "The analysis timed out." }));
       }
+    }, 500);
 
-      const { ok, data } = await getJson(
-        `/api/analyze/status?code=${encodeURIComponent(job.code)}`
-      );
+    async function poll() {
       if (stoppedRef.current) return;
+      try {
+        const { ok, data } = await getJson(`/api/analyze/status?code=${encodeURIComponent(job.code)}`);
+        if (!ok || !data) return;
 
-      if (ok && data && typeof data === "object") {
-        const rawState = typeof data.state === "string" ? data.state : "unknown";
-        const currentStage = typeof data.stage === "string" ? data.stage : "ledger";
-        const reportReady = data.report_ready === true;
-
-        // Cập nhật log khi chuyển bước
-        if (currentStage !== lastStage) {
-          if (currentStage === "markets" && lastStage === "ledger") {
-            addLog("✓ Finished loading the OKX order book. Verified 100 filled orders and open positions.", "check");
-            addLog("STEP 2: Analyzing related markets & loading candle data, orderbook depth...", "step");
-          } else if (currentStage === "scoring" || currentStage === "decision") {
-            if (lastStage === "markets" || lastStage === "ledger") {
-              addLog("✓ Measured the volatility regime and market volatility correlation.", "check");
-              addLog("STEP 3: Running the Monte Carlo engine (10,000 scenarios) & scoring 10 risk dimensions...", "step");
-            }
-          } else if (currentStage === "narrative") {
-            addLog("✓ Finished computing the risk distribution, VaR/CVaR, and effective leverage.", "check");
-            addLog("STEP 4: Synthesizing the safety verdict & structuring the report...", "step");
-          }
-          lastStage = currentStage;
+        if (data.stage && data.stage !== status.stage) {
+          const stepObj = PIPELINE_STEPS.find((p) => p.id === data.stage);
+          const stageName = stepObj ? stepObj.title : data.stage;
+          addLog(`Moving to stage: ${stageName}`, "step");
         }
 
-        // Tính stageIndex (1..4) cho Stepper
-        let mappedIndex = 1;
-        if (currentStage === "markets") mappedIndex = 2;
-        else if (currentStage === "scoring" || currentStage === "decision") mappedIndex = 3;
-        else if (currentStage === "narrative" || currentStage === "done" || reportReady) mappedIndex = 4;
-
-        setStatus({
-          state: rawState,
-          stage: currentStage,
-          stageIndex: mappedIndex,
-          stageCount: 4,
-          errorMessage: data.error || null,
-        });
-
-        if (rawState === "done" || reportReady) {
+        if (data.state === "done" || data.report_ready) {
           stoppedRef.current = true;
-          addLog("✓ Comprehensive analysis complete. The assessment result is ready!", "check");
-          addLog("Preparing to move to the detailed report page...", "info");
-
-          // Bắt đầu đếm ngược 3s tự động chuyển trang
-          setCountdown(3);
-          let currentCount = 3;
-          countdownTimerRef.current = setInterval(() => {
-            currentCount -= 1;
-            if (currentCount <= 0) {
-              clearInterval(countdownTimerRef.current);
-              onDone();
-            } else {
-              setCountdown(currentCount);
-            }
-          }, 1000);
+          setStatus((prev) => ({ ...prev, state: "done", stageIndex: 4 }));
+          addLog(`Analysis completed successfully! Preparing the report.`, "success");
+          startCountdown();
           return;
         }
 
-        if (rawState === "error") {
+        if (data.state === "error") {
           stoppedRef.current = true;
-          addLog("Analysis error: " + (data.error || "The server responded with a failure."), "warn");
+          setStatus((prev) => ({ ...prev, state: "error", errorMessage: data.error_message || "An error occurred during analysis." }));
+          addLog(`Error: ${data.error_message || "Analysis failed"}`, "error");
           return;
         }
+
+        setStatus((prev) => ({
+          ...prev,
+          stage: data.stage || prev.stage,
+          stageIndex: data.stage_index || prev.stageIndex,
+        }));
+      } catch (_) {}
+
+      if (!stoppedRef.current) {
+        pollTimerRef.current = setTimeout(poll, POLL_FAST_MS);
       }
-
-      const delay = elapsedMs >= POLL_SLOW_AFTER_MS ? POLL_SLOW_MS : POLL_FAST_MS;
-      pollTimerRef.current = setTimeout(pollOnce, delay);
     }
 
-    pollOnce();
+    pollTimerRef.current = setTimeout(poll, POLL_FAST_MS);
 
     return () => {
       stoppedRef.current = true;
@@ -543,151 +794,78 @@ function InPageAnalyzeProgress({ job, onDone, onRetry, onDismiss }) {
       if (clockTimerRef.current) clearInterval(clockTimerRef.current);
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job.code]);
 
-  const isDone = countdown !== null;
-  const isError = status.state === "error";
-
-  function formatElapsed(sec) {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  function startCountdown() {
+    let count = 2;
+    setCountdown(count);
+    countdownTimerRef.current = setInterval(() => {
+      count -= 1;
+      setCountdown(count);
+      if (count <= 0) {
+        clearInterval(countdownTimerRef.current);
+        onDone();
+      }
+    }, 1000);
   }
 
   return (
-    <div className="inpage-analyze-progress">
-      <div className="inpage-progress-head">
-        <div className="progress-head-info">
-          <div className="progress-eyebrow">QUANTITATIVE ASSESSMENT PROGRESS</div>
-          <h4 className="progress-bot-title">
-            {job.botName} <span className="mono-code">({job.code})</span>
-          </h4>
-        </div>
-        <div className="progress-clock-badge">
-          ⏱️ <span className="num">{formatElapsed(elapsedSec)}</span>
-        </div>
-      </div>
-
-      {/* STEPPER 4 BƯỚC RÕ RÀNG */}
-      <div className="analyze-stepper">
+    <div className="inpage-progress-wrap" style={{ marginTop: 24 }}>
+      <div className="stepper-track">
         {PIPELINE_STEPS.map((s, idx) => {
-          const stepNum = idx + 1;
-          const isCompleted = isDone || status.stageIndex > stepNum;
-          const isCurrent = !isDone && status.stageIndex === stepNum && !isError;
-          const isPending = !isDone && status.stageIndex < stepNum;
-
+          const isDone = status.state === "done" || idx + 1 < status.stageIndex;
+          const isCurrent = status.state !== "done" && idx + 1 === status.stageIndex;
           return (
             <div
               key={s.id}
-              className={`stepper-item ${isCompleted ? "is-done" : ""} ${
-                isCurrent ? "is-active" : ""
-              } ${isPending ? "is-pending" : ""}`}
+              className={`stepper-node ${isDone ? "node-done" : isCurrent ? "node-active" : "node-pending"}`}
             >
-              <div className="stepper-node">
-                <div className="stepper-icon">
-                  {isCompleted ? (
-                    "✓"
-                  ) : isCurrent ? (
-                    <span className="stepper-spinner" />
-                  ) : (
-                    stepNum
-                  )}
-                </div>
-                {idx < PIPELINE_STEPS.length - 1 && (
-                  <div className={`stepper-line ${isCompleted ? "line-done" : ""}`} />
-                )}
+              <div className="stepper-bullet">
+                {isDone ? "✓" : isCurrent ? <span className="stepper-spinner" style={{ width: 12, height: 12 }} /> : idx + 1}
               </div>
-              <div className="stepper-content">
-                <div className="stepper-title-row">
-                  <span className="stepper-step-label">Step {stepNum}</span>
-                  <span className="stepper-status-badge">
-                    {isCompleted
-                      ? "Done"
-                      : isCurrent
-                      ? "Processing..."
-                      : "Pending"}
-                  </span>
-                </div>
-                <div className="stepper-step-name">{s.title}</div>
-                {isCurrent && <div className="stepper-step-desc">{s.desc}</div>}
+              <div className="stepper-node-content">
+                <div className="stepper-node-title">{s.title}</div>
+                <div className="stepper-node-desc">{s.desc}</div>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* LIVE LOG CONSOLE */}
-      <div className="analyze-console-wrap">
-        <div className="analyze-console-header">
-          <span className="console-indicator" />
-          <span className="console-title">📡 Live Execution Log</span>
+      <div className="live-log-console" style={{ marginTop: 20 }}>
+        <div className="console-head">
+          <div className="console-title">
+            <span>●</span> LIVE LOG CONSOLE · BOT [{job.code}]
+          </div>
+          <div className="console-timer">{elapsedSec}s</div>
         </div>
-        <div className="analyze-console-body">
-          {logs.map((item) => (
-            <div key={item.id} className={`console-line log-${item.type}`}>
-              <span className="console-time">[{item.time}]</span>{" "}
-              <span className="console-text">{item.text}</span>
+        <div className="console-body">
+          {logs.map((log) => (
+            <div key={log.id} className={`log-row log-${log.type}`}>
+              <span className="log-time">[{log.time}]</span>
+              <span className="log-text">{log.text}</span>
             </div>
           ))}
           <div ref={logEndRef} />
         </div>
       </div>
 
-      {/* THÔNG BÁO HOÀN TẤT & BỘ ĐẾM NGƯỢC 3S */}
-      {isDone && (
-        <div className="analyze-completion-banner">
-          <div className="completion-icon">🎉</div>
-          <div className="completion-details">
-            <div className="completion-title">Analysis completed successfully!</div>
-            <div className="completion-subtitle">
-              Moving to the results page in{" "}
-              <strong className="countdown-highlight">{countdown}s</strong>...
-            </div>
-          </div>
-          <button type="button" className="btn pri completion-btn" onClick={onDone}>
-            View results now →
+      {status.state === "done" && (
+        <div style={{ marginTop: 16, textAlign: "center" }}>
+          <button type="button" className="btn pri" onClick={onDone}>
+            View report now {countdown ? `(${countdown}s)` : ""} →
           </button>
         </div>
       )}
 
-      {/* TRƯỜNG HỢP LỖI HOẶC QUÁ GIỜ */}
-      {isError && (
-        <div className="notice notice-danger" style={{ marginTop: "16px" }}>
-          <strong>Analysis error:</strong> {status.errorMessage || "Could not complete the analysis."}
-          <div style={{ marginTop: "10px" }}>
-            <button type="button" className="btn pri" onClick={onRetry}>
-              Retry
-            </button>
-            <button type="button" className="btn" onClick={onDismiss} style={{ marginLeft: "8px" }}>
-              Close
-            </button>
-          </div>
-        </div>
-      )}
-
-      {timedOut && !isDone && !isError && (
-        <div className="notice notice-warning" style={{ marginTop: "16px" }}>
-          Over 90 seconds have passed without a completion signal. The analysis may still be running on the server.
-          <div style={{ marginTop: "10px" }}>
-            <button type="button" className="btn pri" onClick={onDone}>
-              Open results page
-            </button>
-            <button type="button" className="btn" onClick={onDismiss} style={{ marginLeft: "8px" }}>
-              Close
-            </button>
-          </div>
-        </div>
-      )}
-
-      {!isDone && !isError && !timedOut && (
-        <div className="progress-footer-actions">
+      {status.state === "error" && (
+        <div style={{ marginTop: 16, textAlign: "center" }}>
+          <button type="button" className="btn pri" onClick={onRetry} style={{ marginRight: 8 }}>
+            Retry
+          </button>
           <button type="button" className="btn" onClick={onDismiss}>
-            Hide progress
+            Close
           </button>
-          <span className="progress-hint">
-            (Hiding the progress view does not interrupt the analysis running on the server)
-          </span>
         </div>
       )}
     </div>
@@ -695,7 +873,7 @@ function InPageAnalyzeProgress({ job, onDone, onRetry, onDismiss }) {
 }
 
 function buildFallbackDetailUrl(session, code) {
-  if (session && session.role === "user" && session.userRef) {
+  if (session?.userRef) {
     return `/${session.userRef}_${code}`;
   }
   return `/bot/${code}`;

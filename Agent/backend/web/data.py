@@ -55,6 +55,11 @@ from Agent.backend.market.service import MarketDataUnavailableError, MarketServi
 from Agent.backend.bot.mcp.service import BotObservationService
 from Agent.backend.external.okx.client import OkxApiError, OkxClient, OkxError
 from Agent.backend.pipeline import RiskSupervisionPipeline
+from Agent.backend.pipeline_portfolio import (
+    PortfolioBotRequest,
+    PortfolioSupervisionPipeline,
+)
+from Agent.backend.report.qc.history.portfolio_store import PortfolioHistoryStore
 from Agent.backend.report.qc.evaluator.common import tier_for
 from Agent.backend.llm import narrative
 from Agent.backend.report.qc.scoring.verdict import VERDICT_BASIS_VI, label_from_scores
@@ -120,6 +125,12 @@ except ImportError:
 # what makes a path-traversal payload like "../../etc" fail here before it
 # can ever reach a path join (see WebDataService._analyze_full).
 _CODE_RE = re.compile(r"^[A-Za-z0-9]{1,64}$")
+# Two is the floor because correlation between fewer than two things is not a
+# quantity. The ceiling is a timeout budget, not a statistical one: every
+# member is a full OKX ledger fetch, and eight of those already sit close to
+# the gateway's own read timeout.
+PORTFOLIO_MIN_CODES = 2
+PORTFOLIO_MAX_CODES = 8
 
 
 class InvalidCodeError(ValueError):
@@ -139,6 +150,71 @@ def validate_unique_code(raw: Any) -> str:
             "block stray characters/path traversal"
         )
     return code
+
+
+def validate_portfolio_codes(raw: Any) -> List[str]:
+    """Parse the multi-code input into a de-duplicated, validated list.
+
+    Accepts a list, or one string with the separators a person actually types
+    (comma, whitespace, semicolon, newline) -- the single input box is the
+    whole point of the feature, so the parsing has to live somewhere the
+    server trusts rather than in the browser.
+
+    De-duplication keeps first-seen order. The same bot entered twice is one
+    position, and counting it twice would both double its weight in every
+    merged figure and manufacture a perfect correlation with itself.
+    """
+    if isinstance(raw, str):
+        parts = [part for part in re.split(r"[\s,;]+", raw) if part]
+    elif isinstance(raw, (list, tuple)):
+        parts = [str(part).strip() for part in raw if str(part).strip()]
+    else:
+        raise InvalidCodeError(
+            "Missing 'codes': send a list of bot codes, or one string with the "
+            "codes separated by commas or spaces"
+        )
+    seen: List[str] = []
+    for part in parts:
+        code = validate_unique_code(part)
+        if code not in seen:
+            seen.append(code)
+    if len(seen) < PORTFOLIO_MIN_CODES:
+        raise InvalidCodeError(
+            f"A portfolio needs at least {PORTFOLIO_MIN_CODES} distinct bot codes; "
+            f"got {len(seen)}. Use /api/analyze for a single bot."
+        )
+    if len(seen) > PORTFOLIO_MAX_CODES:
+        raise InvalidCodeError(
+            f"At most {PORTFOLIO_MAX_CODES} bots per portfolio run; got {len(seen)}. "
+            "Each member is a full OKX ledger fetch, and the request would not "
+            "finish inside the gateway timeout."
+        )
+    return seen
+
+
+def _portfolio_unavailable(
+    codes: Sequence[str],
+    reason: str,
+    failures: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Fail closed as JSON, the same contract every other result here follows."""
+    return {
+        "status": "NOT_FOUND",
+        "code": "|".join(codes),
+        "portfolio_id": None,
+        "member_codes": list(codes),
+        "name": f"Portfolio of {len(codes)} bots",
+        "limited_reason": reason,
+        "unavailable": ["portfolio"],
+        "verdict": "INSUFFICIENT EVIDENCE",
+        "risk": None,
+        "quality": None,
+        "confidence": 0.0,
+        "evidence": {},
+        "portfolio": None,
+        "failures": failures or [],
+        "text": [reason],
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -384,7 +460,7 @@ def _read_json_documents(root: Path, pattern: str) -> List[Dict[str, Any]]:
 
 def list_scored_bots(data_dir: Path) -> List[Dict[str, Any]]:
     """The bots step 3 already scored: one latest.json per bot, read
-    straight off disk (data/report/<bot_id>/latest.json).
+    straight off disk (data/report/single/<bot_id>/latest.json).
 
     Raw documents, Vietnamese-keyed (`bot`, `khuyen_nghi`, `cham_diem`,
     `bang_chung`, ...) exactly as `run_report.py` wrote them -- NOT the
@@ -394,7 +470,7 @@ def list_scored_bots(data_dir: Path) -> List[Dict[str, Any]]:
     `WebDataService.list_bots`) never pays for normalization it does not
     need.
     """
-    return _read_json_documents(Path(data_dir) / "report", "*/latest.json")
+    return _read_json_documents(Path(data_dir) / "report" / "single", "*/latest.json")
 
 
 # --------------------------------------------------------------------------- #
@@ -662,11 +738,11 @@ def _find_bot_subpath(
     data_dir: Path, root_name: str, code: str, filename: str
 ) -> Optional[Path]:
     """One file for `code` under the unified `data_dir/<root_name>/<code>/<filename>`
-    layout -- the shared lookup both `report/<code>/latest.json` (the
-    canonical step-3 record) and `report/<code>/{performance,monte_carlo}.json`
+    layout -- the shared lookup both `report/single/<code>/latest.json` (the
+    canonical step-3 record) and `report/single/<code>/{performance,monte_carlo}.json`
     (the optional step-2 enrichment) use below. `root_name` is always
-    `"report"` today; kept as a parameter (not inlined) because both callers
-    already named their own root explicitly before the two trees were
+    `"report/single"` today; kept as a parameter (not inlined) because both
+    callers already named their own root explicitly before the two trees were
     unified, and a second root reappearing later (as it once did with
     `assessment`/`analysis`) should not require touching this helper again.
     """
@@ -691,7 +767,7 @@ def find_assessment_document(data_dir: Path, code: str) -> Optional[Dict[str, An
     "analyze live".
     """
     return _read_json_document(
-        _find_bot_subpath(data_dir, "report", code, "latest.json")
+        _find_bot_subpath(data_dir, "report/single", code, "latest.json")
     )
 
 
@@ -704,10 +780,10 @@ def sibling_analysis_documents(
     raises.
     """
     perf = _read_json_document(
-        _find_bot_subpath(data_dir, "report", code, "performance.json")
+        _find_bot_subpath(data_dir, "report/single", code, "performance.json")
     )
     mc = _read_json_document(
-        _find_bot_subpath(data_dir, "report", code, "monte_carlo.json")
+        _find_bot_subpath(data_dir, "report/single", code, "monte_carlo.json")
     )
     return perf, mc
 
@@ -725,7 +801,7 @@ def find_bot_market_document(
     `Agent.backend.report.qc.reporting.analysis_store.persist`).
     """
     perf_doc = _read_json_document(
-        _find_bot_subpath(data_dir, "report", code, "performance.json")
+        _find_bot_subpath(data_dir, "report/single", code, "performance.json")
     )
     slot = perf_doc.get("slot") if perf_doc else None
     if isinstance(slot, str) and "/" in slot:
@@ -3001,6 +3077,9 @@ def build_report_markdown(
 # the same button twice costs nothing, short enough that a bot's live state
 # (new trades, new positions) is never shown stale for long.
 DEFAULT_ANALYZE_CACHE_TTL_SECONDS = 180.0
+# A portfolio run costs N ledger fetches plus a merged 10k-run simulation, so
+# a repeat click inside the window must not pay for it twice.
+DEFAULT_PORTFOLIO_CACHE_TTL_SECONDS = 600.0
 DEFAULT_LEADERBOARD_CACHE_TTL_SECONDS = 180.0
 # Same "vài phút" reasoning as the two above, specifically so that typing a
 # uniqueCode into the search box and then clicking "Phân tích bot này?"
@@ -3109,6 +3188,7 @@ class WebDataService:
         ] = None,
         market_source_factory: Optional[Callable[[OkxClient], MarketDataSource]] = None,
         analyze_cache_ttl: float = DEFAULT_ANALYZE_CACHE_TTL_SECONDS,
+        portfolio_cache_ttl: float = DEFAULT_PORTFOLIO_CACHE_TTL_SECONDS,
         leaderboard_cache_ttl: float = DEFAULT_LEADERBOARD_CACHE_TTL_SECONDS,
         leaderboard_pages: int = DEFAULT_LEADERBOARD_PAGES,
         lookup_cache_ttl: float = DEFAULT_LOOKUP_CACHE_TTL_SECONDS,
@@ -3162,6 +3242,24 @@ class WebDataService:
         self._market_source = market_source_factory(self._client)
         self._narrative_backend = narrative_backend
         self._analyze_cache = _TTLCache(analyze_cache_ttl, clock=clock)
+        # `BotResult` objects keyed by uniqueCode, shared by BOTH the
+        # single-bot path and the portfolio path. It is the only cache here
+        # whose entries are models rather than payloads, and that is the
+        # point: a portfolio merges the members' LEDGERS, so it needs the
+        # object, not the rendered result. One TTL, one freshness rule, both
+        # directions -- a bot looked at on its own is free to a portfolio a
+        # minute later, and a bot first seen inside a portfolio is free to
+        # open on its own. Shares `analyze_cache_ttl` deliberately: this holds
+        # a snapshot of OKX state, so it may not outlive the analysis built
+        # from it.
+        self._bot_result_cache = _TTLCache(analyze_cache_ttl, clock=clock)
+        # Keyed by the sorted code set, so the same three bots in any order
+        # hit the same entry.
+        self._portfolio_cache = _TTLCache(portfolio_cache_ttl, clock=clock)
+        # Keyed by portfolio id, so opening the report right after launching
+        # the run does not need the code list again.
+        self._portfolio_by_id = _TTLCache(portfolio_cache_ttl, clock=clock)
+        self.portfolio_history = PortfolioHistoryStore()
         self._leaderboard_cache = _TTLCache(leaderboard_cache_ttl, clock=clock)
         self._leaderboard_pages = leaderboard_pages
         self._lookup_cache = _TTLCache(lookup_cache_ttl, clock=clock)
@@ -3597,7 +3695,7 @@ class WebDataService:
             cached = self._analyze_cache.get(code)
             if cached is not None:
                 return cached
-        result = self._analyze_live(code, progress=progress)
+        result = self._analyze_live(code, progress=progress, force=force)
         # Added on top of every status (FULL/LIMITED/NOT_FOUND alike, and
         # regardless of whether Agent/backend/bot/analysis/limited.py produced
         # the LIMITED payload or the in-module fallback did) -- see
@@ -3637,10 +3735,14 @@ class WebDataService:
         return result
 
     def _analyze_live(
-        self, code: str, *, progress: Optional[Callable[[str], None]] = None
+        self,
+        code: str,
+        *,
+        progress: Optional[Callable[[str], None]] = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         try:
-            return self._analyze_full(code, progress=progress)
+            return self._analyze_full(code, progress=progress, force=force)
         except LedgerUnavailableError as exc:
             # OKX answered 60004 on the ledger endpoints -- LedgerUnavailableError
             # already classified this into LIMITED (a real, opaque bot) or
@@ -3667,8 +3769,234 @@ class WebDataService:
             # per the module's fail-closed-JSON contract, not dead code.
             return _not_found_result(code, str(exc))
 
+    # ------------------------------------------------------------------ #
+    # Portfolio: several codes -> ONE report
+    # ------------------------------------------------------------------ #
+
+    def analyze_portfolio(
+        self,
+        raw_codes: Any,
+        *,
+        force: bool = False,
+        progress: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        """Analyse several bots as one book and return ONE report payload.
+
+        The payload is the SAME shape `analyze()` returns for a single bot --
+        same keys, same evidence block, same everything -- because its subject
+        IS an ordinary `RiskSupervisionResult`, just one whose bot was merged
+        from several ledgers (see `bot.mcp.aggregate.PortfolioAggregator`).
+        That is what lets `/portfolio/<id>` hand it to the very same
+        `render_bot_report_html` the single-bot route uses and get a page in
+        the same style, rather than a second renderer that drifts.
+
+        The only addition is `payload["portfolio"]`: the diversification
+        section, which is the one thing a single-bot report cannot contain.
+        """
+        codes = validate_portfolio_codes(raw_codes)
+        cache_key = "|".join(sorted(codes))
+        if not force:
+            cached = self._portfolio_cache.get(cache_key)
+            if cached is not None:
+                # Say so. `member_sources` below describes the run that
+                # PRODUCED this payload, not this call, and without the flag a
+                # reader comparing two responses cannot tell a replay from a
+                # second measurement -- which is the whole question when the
+                # subject is "what does the market look like now".
+                return {**cached, "cached": True}
+        payload = self._analyze_portfolio_live(codes, progress=progress, force=force)
+        payload["cached"] = False
+        self._portfolio_cache.set(cache_key, payload)
+        if payload.get("status") == "FULL":
+            # Keyed by portfolio id too, so `/portfolio/<id>` can render a run
+            # the user just launched without asking for the code list again.
+            self._portfolio_by_id.set(str(payload.get("portfolio_id")), payload)
+        return payload
+
+    def portfolio_report(self, portfolio_id: str) -> Optional[Dict[str, Any]]:
+        """A payload for an id, from this process's cache or stored history.
+
+        Returns `None` rather than re-analysing: the codes behind an id are
+        not recoverable from the id alone (it is a digest), and a stored run
+        is a record of what was measured then, not a licence to fetch OKX now.
+        """
+        cached = self._portfolio_by_id.get(portfolio_id)
+        if cached is not None:
+            return cached
+        return None
+
+    def list_portfolio_runs(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Rows for the portfolio-history table, newest first."""
+        rows: List[Dict[str, Any]] = []
+        for entry in self.portfolio_history.list_latest()[: max(1, limit)]:
+            correlation = entry.correlation
+            rows.append(
+                {
+                    "portfolio_id": entry.portfolio_id,
+                    "assessment_id": entry.assessment_id,
+                    "timestamp": entry.timestamp,
+                    "as_of_ms": entry.as_of_ms,
+                    "member_codes": list(entry.member_codes),
+                    "member_count": len(entry.member_codes),
+                    "measurable_member_count": entry.measurable_member_count,
+                    "member_names": [member.label for member in entry.members],
+                    "symbols": sorted(
+                        {member.symbol for member in entry.members if member.symbol}
+                    ),
+                    "average_pearson": correlation.average_pearson,
+                    "max_pearson": correlation.max_pearson,
+                    "verdict": entry.verdict.value,
+                    "verdict_reason": entry.verdict_reason,
+                    "style_verdict": entry.style_verdict.value,
+                    "style_vs_pnl_conflict": entry.style_vs_pnl_conflict,
+                    # The ONE risk score, mirrored from the combined
+                    # assessment -- this table never computes its own.
+                    "risk": entry.combined_risk_score,
+                    "quality": entry.combined_quality_score,
+                    "risk_tier": entry.combined_risk_tier,
+                    "combined_verdict": entry.combined_verdict,
+                    "joint_var_95_pct": (
+                        entry.joint_simulation.var_95_pct
+                        if entry.joint_simulation
+                        else None
+                    ),
+                    "diversification_ratio": (
+                        entry.joint_simulation.diversification_ratio
+                        if entry.joint_simulation
+                        else None
+                    ),
+                }
+            )
+        return rows
+
+    def _analyze_portfolio_live(
+        self,
+        codes: Sequence[str],
+        *,
+        progress: Optional[Callable[[str], None]] = None,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        # Same scratch-directory trick as `_analyze_full`, once per member:
+        # `BotObservationService._find_bot_dir` insists a directory exist even
+        # for a live source that never reads it. See that method's docstring
+        # for the full reasoning; nothing here may point the bot side at the
+        # real dataset, and nothing here may point the reference candle
+        # lookup away from it.
+        for code in codes:
+            (self._scratch_dir / "trade" / f"bot_{code}").mkdir(
+                parents=True, exist_ok=True
+            )
+        bot_service = BotObservationService(
+            self._scratch_dir,
+            self.evaluation_mode,
+            bot_source=self._bot_source,
+            reference_data_dir=self.data_dir,
+        )
+        market_service = MarketService(
+            self.data_dir, self.evaluation_mode, market_source=self._market_source
+        )
+        inner = RiskSupervisionPipeline(
+            data_dir=self.data_dir,
+            market_service=market_service,
+            bot_service=bot_service,
+            evaluation_mode=self.evaluation_mode,
+            persist_history=False,
+        )
+        pipeline = PortfolioSupervisionPipeline(
+            data_dir=self.data_dir,
+            pipeline=inner,
+            portfolio_history=self.portfolio_history,
+            # A dashboard run of an arbitrary set is exploratory for the
+            # per-bot history, exactly as the single-bot path is. The
+            # portfolio's own history is a different store and IS written, so
+            # an operator can see which sets were examined and how their
+            # correlation drifted.
+            persist_history=False,
+        )
+        requests = [
+            PortfolioBotRequest(
+                asset=_SCRATCH_ASSET,
+                bot_folder_name=f"bot_{code}",
+                venue_type=_SCRATCH_VENUE,
+            )
+            for code in codes
+        ]
+
+        # Members this process already holds. Two bots looked at individually
+        # a minute ago cost nothing to put in a portfolio, and the same two in
+        # a second portfolio cost nothing again.
+        prefetched = {}
+        if not force:
+            for code in codes:
+                cached = self._bot_result_cache.get(code)
+                if cached is not None:
+                    prefetched[f"bot_{code}"] = cached
+
+        if progress is not None:
+            progress("ledger")
+        try:
+            members, failures = pipeline.fetch_members(
+                requests, prefetched=prefetched
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed as JSON, never 500
+            return _portfolio_unavailable(codes, str(exc))
+
+        # Anything newly read is offered back to both paths. A bot first seen
+        # inside a portfolio therefore opens instantly on its own afterwards,
+        # which is only sound because members are read at full simulation
+        # quality (see `PortfolioSupervisionPipeline.MEMBER_SIMULATION_
+        # ITERATIONS` for why that 0.66s per bot is not optional).
+        for member in members:
+            member_code = member.identity.unique_code
+            if f"bot_{member_code}" not in prefetched:
+                self._bot_result_cache.set(member_code, member)
+
+        outcome = pipeline.assemble(
+            members,
+            failures=failures,
+            nick_name=f"Portfolio of {len(members)} bots",
+            notify=progress,
+        )
+        if outcome.combined is None or outcome.portfolio is None:
+            return _portfolio_unavailable(
+                codes,
+                outcome.unavailable_reason
+                or "The bots could not be combined into one portfolio",
+                failures=[item.model_dump(mode="json") for item in outcome.failures],
+            )
+
+        portfolio = outcome.portfolio
+        if self.portfolio_history is not None:
+            self.portfolio_history.append(portfolio)
+        payload = _full_result(
+            portfolio.portfolio_id,
+            outcome.combined,
+            narrative_backend=self._narrative_backend,
+        )
+        payload["portfolio_id"] = portfolio.portfolio_id
+        payload["member_codes"] = list(codes)
+        payload["portfolio"] = portfolio.model_dump(mode="json")
+        payload["failures"] = [
+            item.model_dump(mode="json") for item in outcome.failures
+        ]
+        # Where each member came from. Stated rather than left implicit: a
+        # reader comparing two runs of the same portfolio needs to know
+        # whether the second one re-read OKX or replayed what was in hand,
+        # because only the first says anything about the market now.
+        payload["member_sources"] = {
+            code: ("reused" if f"bot_{code}" in prefetched else "fetched")
+            for code in codes
+        }
+        if progress is not None:
+            progress("done")
+        return payload
+
     def _analyze_full(
-        self, code: str, *, progress: Optional[Callable[[str], None]] = None
+        self,
+        code: str,
+        *,
+        progress: Optional[Callable[[str], None]] = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """Score a bot that may never have been crawled, by reusing the exact
         LiveBotDataSource + RiskSupervisionPipeline wiring
@@ -3750,12 +4078,29 @@ class WebDataService:
             # run (same reasoning as that tool's own persist_history=False).
             persist_history=False,
         )
-        result = pipeline.run(
-            _SCRATCH_ASSET,
-            f"bot_{code}",
-            venue_type=_SCRATCH_VENUE,
-            progress=progress,
-        )
+        # A `BotResult` this process already holds -- from an earlier view of
+        # this bot, or from a portfolio that happened to include it -- skips
+        # the OKX ledger fetch and the per-bot simulation, which together are
+        # ~90% of the wall clock here. Everything downstream still runs: the
+        # market coverage, all ten lenses and the control decision are
+        # recomputed from that object, so the report is the same report.
+        # `refresh=1` sets `force` and takes the long road, which is what that
+        # link is for.
+        cached_bot = None if force else self._bot_result_cache.get(code)
+        if cached_bot is not None:
+            # Keep the five progress stages in the order a client expects;
+            # `assess_prepared` starts at "markets".
+            if progress is not None:
+                progress("ledger")
+            result = pipeline.assess_prepared(cached_bot, notify=progress)
+        else:
+            result = pipeline.run(
+                _SCRATCH_ASSET,
+                f"bot_{code}",
+                venue_type=_SCRATCH_VENUE,
+                progress=progress,
+            )
+            self._bot_result_cache.set(code, result.bot_result)
         if progress is not None:
             progress("narrative")
         payload = _full_result(code, result, narrative_backend=self._narrative_backend)

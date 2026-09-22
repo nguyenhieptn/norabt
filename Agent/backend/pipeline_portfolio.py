@@ -1,29 +1,29 @@
-"""Orchestrate one portfolio run: N bots through the normal vertical, then the
-portfolio layer on top.
+"""One portfolio run -> ONE report, the same shape a single bot produces.
 
-WHY THIS IS A SEPARATE PIPELINE. `RiskSupervisionPipeline.run()` is one bot's
-whole vertical, and it already accepts `portfolio_bots` -- but that argument
-is a chicken and egg: it needs every OTHER bot's `BotResult`, which does not
-exist until each of them has been run. Doing this inside `run()` would mean
-one bot's call fetching the other bots, which is exactly the coupling the
-single-bot pipeline is kept free of.
+THE SHAPE, AND WHY IT IS THIS ONE. Analysing three bots does not mean three
+reports side by side. The owner of those three bots holds one account, and the
+questions they ask -- what is my drawdown, how fat is the loss tail, is the
+leverage sane, was the record earned in one regime -- are questions about that
+one account. So this pipeline merges the members' ledgers into a single
+synthetic bot (`bot.mcp.aggregate.PortfolioAggregator`), pushes it through the
+ordinary vertical (`RiskSupervisionPipeline.assess_prepared`), and returns an
+ordinary `RiskSupervisionResult`. Every existing reader of that type -- the
+three report tabs included -- renders a portfolio with no changes at all.
 
-So the order here is: run each member normally, THEN re-score each member's
-QC with the full member list in hand. The second pass is pure computation --
-`QCCoreService.assess_bot` reads only the `MarketResult` and `BotResult` this
-process already holds, with no network and no OKX call -- and only the
-`portfolio_risk` lens can change, because it is the only one that takes
-`portfolio_bots` at all. Everything else about each member's assessment is
-bit-identical to what the single-bot path produces.
+The one thing a single-bot report cannot contain is attached alongside it:
+whether the members move together, whether they trade the same way, and what
+their co-movement costs the combined loss tail. That is
+`PortfolioRiskAssessment`, and it deliberately carries no risk score of its
+own -- the score is the combined assessment's, produced by the same ten lenses
+as any bot's. Two scores for one portfolio would be two answers to one
+question.
 
-HISTORY. The inner pipeline is run with `persist_history=False` and this class
-appends the re-scored assessment instead. That is not an optimisation, it is
-required: `assessment_id` digests only the market and the bot (see
-`RiskFusionEngine.fuse`), so the first-pass and second-pass assessments share
-an id, and `AssessmentHistoryStore.append` deduplicates on exactly that id. If
-the first pass were allowed to write, the stored assessment would permanently
-be the one with the EMPTY portfolio context, and the re-scored one would be
-silently dropped.
+WHAT IS DELIBERATELY NOT PRODUCED. Per-member reports. The members' own
+`BotResult`s are fetched (they are the raw material) and their observational
+facts appear in the diversification section's member table, but no per-member
+market resolution, QC pass or control decision is run. That work would produce
+N reports nobody asked for, and would cost N market-coverage fan-outs against
+the OKX throttle to do it.
 """
 
 from __future__ import annotations
@@ -35,6 +35,9 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from pydantic import BaseModel, Field
 
+from Agent.backend.bot.mcp.aggregate import PortfolioAggregator
+from Agent.backend.bot.mcp.schemas.bot_result import BotResult
+from Agent.backend.bot.mcp.service import BotObservationService
 from Agent.backend.infra.config import config
 from Agent.backend.infra.quality import EvaluationMode
 from Agent.backend.pipeline import RiskSupervisionPipeline, RiskSupervisionResult
@@ -46,18 +49,17 @@ from Agent.backend.report.qc.portfolio.service import (
     PortfolioCandidate,
     PortfolioQCService,
 )
-from Agent.backend.report.qc.service import QCCoreService
+from Agent.backend.bot.mcp.analytics.strategy.profile import base_symbol
 
 logger = logging.getLogger(__name__)
 
 
 class PortfolioBotRequest(BaseModel):
-    """One member to analyse, addressed the same way `RiskSupervisionPipeline`
-    addresses a bot: by asset folder and bot folder, not by uniqueCode.
+    """One member, addressed the way `RiskSupervisionPipeline` addresses a bot.
 
-    Resolving a uniqueCode to this pair is the web layer's job (it already
-    does it for the single-bot path), which keeps this pipeline usable from
-    the CLI against on-disk fixtures with no lookup involved.
+    Resolving a uniqueCode to an (asset, folder) pair is the web layer's job,
+    which keeps this pipeline runnable from the CLI against on-disk fixtures
+    with no lookup involved.
     """
 
     asset: str
@@ -66,10 +68,10 @@ class PortfolioBotRequest(BaseModel):
 
 
 class PortfolioMemberFailure(BaseModel):
-    """A member that could not be analysed, kept rather than dropped.
+    """A member that could not be read, kept rather than dropped.
 
-    A portfolio silently analysed as two bots when the user asked for three is
-    a wrong answer, not a partial one.
+    A portfolio silently built from two bots when three were asked for is a
+    wrong answer, not a partial one.
     """
 
     asset: str
@@ -78,21 +80,39 @@ class PortfolioMemberFailure(BaseModel):
 
 
 class PortfolioSupervisionResult(BaseModel):
-    members: List[RiskSupervisionResult] = Field(default_factory=list)
+    # The report. An ordinary single-bot result whose subject is the merged
+    # book -- this is what the renderer and its three tabs consume.
+    combined: Optional[RiskSupervisionResult] = None
+    # The section only a set of bots can have. Attached to, never instead of,
+    # the report above.
+    portfolio: Optional[PortfolioRiskAssessment] = None
     failures: List[PortfolioMemberFailure] = Field(default_factory=list)
-    # `None` when fewer than two members survived: there is no portfolio to
-    # assess, and a one-member "portfolio" assessment would be a per-bot
-    # report wearing the wrong schema.
-    portfolio_assessment: Optional[PortfolioRiskAssessment] = None
-    portfolio_unavailable_reason: Optional[str] = None
+    # Set only when no report could be produced at all.
+    unavailable_reason: Optional[str] = None
 
 
 class PortfolioSupervisionPipeline:
-    # Members run concurrently because each one is dominated by OKX round
-    # trips. The bound is deliberate: `resolve_planned_markets` already fans
-    # out inside each member, so an unbounded pool here would multiply into
-    # the shared OKX throttle rather than going faster.
+    # Members are read concurrently because each is dominated by OKX round
+    # trips. Bounded on purpose: the combined bot's market coverage already
+    # fans out later, and an unbounded pool here would multiply into the
+    # shared OKX throttle rather than going faster.
     DEFAULT_MAX_WORKERS = 4
+    # Members are read at FULL simulation quality even though this pipeline
+    # never looks at their own `simulation_results` -- the portfolio's
+    # simulation runs over the MERGED ledger in `PortfolioAggregator`, and the
+    # cross-bot one over aligned buckets in `JointMonteCarloEngine`.
+    #
+    # Skipping it looked like the obvious saving and is not: measured on three
+    # real members with the phase cache warm, a full 10k-run bootstrap costs
+    # 3.68s per bot against 3.02s with the simulation stubbed out, because the
+    # ledger fetch and analysis dominate. What the 0.66s buys is that a member
+    # `BotResult` is INTERCHANGEABLE with one produced by the single-bot path,
+    # so one cache can serve both directions. A stubbed-out member cached and
+    # later served to a single-bot report would hand a reader a p_ruin and a
+    # VaR computed from one iteration, and nothing in the payload would say so
+    # -- a silent wrong number, bought for two thirds of a second.
+    MEMBER_SIMULATION_ITERATIONS = 10_000
+    MEMBER_SIMULATION_HORIZON = 500
 
     def __init__(
         self,
@@ -111,13 +131,105 @@ class PortfolioSupervisionPipeline:
             history=history,
             persist_history=False,
         )
-        # Enforced, not assumed, even on an injected pipeline -- see this
-        # module's docstring for why a first-pass write is not recoverable.
+        # This class owns the decision to persist, because it is the one that
+        # knows whether the assessment it is holding is the final one.
         self.pipeline.persist_history = False
         self.history = history or self.pipeline.history
         self.portfolio_history = portfolio_history or PortfolioHistoryStore()
         self.persist_history = persist_history
         self.max_workers = max_workers or self.DEFAULT_MAX_WORKERS
+
+    @property
+    def bot_service(self) -> BotObservationService:
+        return self.pipeline.bot_service
+
+    # ------------------------------------------------------------------ #
+
+    def fetch_members(
+        self,
+        requests: Sequence[PortfolioBotRequest],
+        seed: int = 42,
+        as_of_ms: Optional[int] = None,
+        simulation_iterations: Optional[int] = None,
+        prefetched: Optional[Dict[str, BotResult]] = None,
+    ) -> tuple[List[BotResult], List[PortfolioMemberFailure]]:
+        """Read every member's ledger. Nothing is scored at this stage.
+
+        `prefetched` maps `bot_folder_name` to a `BotResult` the caller
+        already holds -- typically because that bot was analysed on its own
+        minutes ago and the web layer still has it. A supplied member is used
+        as-is and never re-fetched, which is the difference between a
+        portfolio of already-seen bots costing one OKX round trip each and
+        costing none. The caller owns the freshness decision: this pipeline
+        cannot know how old the object it was handed is, so it does not
+        second-guess it.
+        """
+        iterations = (
+            simulation_iterations
+            if simulation_iterations is not None
+            else self.MEMBER_SIMULATION_ITERATIONS
+        )
+        supplied = prefetched or {}
+        results: List[Optional[BotResult]] = [None] * len(requests)
+        failures: List[PortfolioMemberFailure] = []
+
+        def _one(index: int) -> None:
+            request = requests[index]
+            reused = supplied.get(request.bot_folder_name)
+            if reused is not None:
+                results[index] = reused
+                return
+            try:
+                results[index] = self.bot_service.get_bot_result(
+                    request.asset,
+                    request.bot_folder_name,
+                    seed=seed,
+                    venue_type=request.venue_type,
+                    as_of_ms=as_of_ms,
+                    simulation_iterations=iterations,
+                    simulation_horizon=(
+                        1 if iterations <= 1 else self.MEMBER_SIMULATION_HORIZON
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                # One unreachable member must not take the others' work with
+                # it; the caller is told exactly which one failed and why.
+                logger.warning(
+                    "PortfolioSupervisionPipeline: member %s/%s failed: %s",
+                    request.asset,
+                    request.bot_folder_name,
+                    exc,
+                )
+                failures.append(
+                    PortfolioMemberFailure(
+                        asset=request.asset,
+                        bot_folder_name=request.bot_folder_name,
+                        error=str(exc),
+                    )
+                )
+
+        # Only the members that actually have to be read decide the pool size.
+        # Spinning up four threads to hand back four cached objects is pure
+        # overhead, and the common case after a few single-bot views is that
+        # every member is already in hand.
+        to_fetch = [
+            index
+            for index, request in enumerate(requests)
+            if request.bot_folder_name not in supplied
+        ]
+        for index, request in enumerate(requests):
+            if request.bot_folder_name in supplied:
+                _one(index)
+        workers = max(1, min(self.max_workers, len(to_fetch) or 1))
+        if workers == 1:
+            for index in to_fetch:
+                _one(index)
+        elif to_fetch:
+            with ThreadPoolExecutor(
+                max_workers=workers, thread_name_prefix="norabt-portfolio-member"
+            ) as pool:
+                list(pool.map(_one, to_fetch))
+        return [item for item in results if item is not None], failures
 
     # ------------------------------------------------------------------ #
 
@@ -127,8 +239,9 @@ class PortfolioSupervisionPipeline:
         seed: int = 42,
         as_of_ms: Optional[int] = None,
         simulation_iterations: int = 10_000,
-        simulation_horizon: int = 500,
+        simulation_horizon: Optional[int] = None,
         portfolio_iterations: int = JointMonteCarloEngine.DEFAULT_ITERATIONS,
+        nick_name: Optional[str] = None,
         progress: Optional[Callable[[str], None]] = None,
     ) -> PortfolioSupervisionResult:
         if len(requests) < 2:
@@ -149,130 +262,115 @@ class PortfolioSupervisionPipeline:
                     stage,
                 )
 
-        _notify("members")
-        results: List[Optional[RiskSupervisionResult]] = [None] * len(requests)
-        failures: List[PortfolioMemberFailure] = []
-
-        def _one(index: int) -> None:
-            request = requests[index]
-            try:
-                results[index] = self.pipeline.run(
-                    request.asset,
-                    request.bot_folder_name,
-                    venue_type=request.venue_type,
-                    seed=seed,
-                    as_of_ms=as_of_ms,
-                    simulation_iterations=simulation_iterations,
-                    simulation_horizon=simulation_horizon,
-                )
-            except Exception as exc:  # noqa: BLE001
-                # One unreachable bot must not take the other members' work
-                # with it; the caller is told exactly which one failed and why.
-                logger.warning(
-                    "PortfolioSupervisionPipeline: member %s/%s failed: %s",
-                    request.asset,
-                    request.bot_folder_name,
-                    exc,
-                )
-                failures.append(
-                    PortfolioMemberFailure(
-                        asset=request.asset,
-                        bot_folder_name=request.bot_folder_name,
-                        error=str(exc),
-                    )
-                )
-
-        workers = max(1, min(self.max_workers, len(requests)))
-        if workers == 1:
-            for index in range(len(requests)):
-                _one(index)
-        else:
-            with ThreadPoolExecutor(
-                max_workers=workers, thread_name_prefix="norabt-portfolio-member"
-            ) as pool:
-                list(pool.map(_one, range(len(requests))))
-
-        survivors = [result for result in results if result is not None]
+        _notify("ledger")
+        bots, failures = self.fetch_members(requests, seed=seed, as_of_ms=as_of_ms)
         return self.assemble(
-            survivors,
+            bots,
             failures=failures,
+            simulation_iterations=simulation_iterations,
+            simulation_horizon=simulation_horizon,
             portfolio_iterations=portfolio_iterations,
+            nick_name=nick_name,
             seed=seed,
             as_of_ms=as_of_ms,
-            progress=_notify,
+            notify=_notify,
         )
 
     # ------------------------------------------------------------------ #
 
     def assemble(
         self,
-        results: Sequence[RiskSupervisionResult],
+        bots: Sequence[BotResult],
         failures: Optional[Sequence[PortfolioMemberFailure]] = None,
+        simulation_iterations: int = 10_000,
+        simulation_horizon: Optional[int] = None,
         portfolio_iterations: int = JointMonteCarloEngine.DEFAULT_ITERATIONS,
-        seed: Optional[int] = 42,
+        nick_name: Optional[str] = None,
+        seed: int = 42,
         as_of_ms: Optional[int] = None,
-        progress: Optional[Callable[[str], None]] = None,
+        notify: Optional[Callable[[str], None]] = None,
     ) -> PortfolioSupervisionResult:
-        """Cross-score already-run members, then assess them as a portfolio.
+        """Merge, score once, and describe the diversification.
 
-        Split out from `run()` so the web layer can reuse it: that path builds
-        each `RiskSupervisionResult` through its own live wiring (a scratch
+        Split out of `run()` so the web layer can reuse it: that path builds
+        each member's `BotResult` through its own live wiring (a scratch
         data_dir per uniqueCode, see `web/data.py`) and has nothing to gain
-        from this class re-running them.
+        from this class re-reading them.
         """
         failures = list(failures or [])
 
         def _notify(stage: str) -> None:
-            if progress is not None:
-                progress(stage)
+            if notify is not None:
+                notify(stage)
 
         # De-duplicate by uniqueCode. The same bot reached through two folders
-        # is one position, and counting it twice would manufacture a perfect
-        # correlation that says nothing about the portfolio.
-        unique: Dict[str, RiskSupervisionResult] = {}
+        # is one position, and counting it twice would both double its weight
+        # in every merged figure and manufacture a perfect correlation.
+        unique: Dict[str, BotResult] = {}
         duplicates: List[str] = []
-        for result in results:
-            code = result.bot_result.identity.unique_code
+        for bot in bots:
+            code = bot.identity.unique_code
             if code in unique:
                 duplicates.append(code)
                 continue
-            unique[code] = result
+            unique[code] = bot
         members = list(unique.values())
 
         if len(members) < 2:
             return PortfolioSupervisionResult(
-                members=members,
                 failures=failures,
-                portfolio_unavailable_reason=(
+                unavailable_reason=(
                     f"Only {len(members)} of {len(members) + len(failures)} bots "
-                    "could be analysed; a portfolio needs at least two"
+                    "could be read; a portfolio needs at least two"
                 ),
             )
 
-        _notify("cross_scoring")
-        bots = [result.bot_result for result in members]
-        rescored: List[RiskSupervisionResult] = []
-        for result in members:
-            assessment = QCCoreService.assess_bot(
-                result.market_result,
-                result.bot_result,
-                previous_assessment=self.history.latest(
-                    result.bot_result.identity.bot_id
-                ),
-                portfolio_bots=bots,
+        _notify("merge")
+        timelines = self.bot_service.phase_timelines(
+            {
+                base_symbol(trade.symbol)
+                for bot in members
+                for trade in bot.trade_ledger_summary
+                if trade.symbol
+            }
+        )
+        try:
+            combined_bot = PortfolioAggregator.combine(
+                members,
+                timelines=timelines,
+                nick_name=nick_name,
+                simulation_iterations=simulation_iterations,
+                simulation_horizon=simulation_horizon,
+                seed=seed,
             )
-            if self.persist_history:
-                self.history.append(assessment)
-            rescored.append(result.model_copy(update={"risk_assessment": assessment}))
+        except ValueError as exc:
+            return PortfolioSupervisionResult(
+                failures=failures,
+                unavailable_reason=f"The members could not be merged: {exc}",
+            )
+
+        # From here the combined bot walks the ordinary vertical, so the
+        # portfolio is scored by exactly the rules a single bot is scored by.
+        _notify("markets")
+        combined = self.pipeline.assess_prepared(
+            combined_bot,
+            as_of_ms=as_of_ms,
+            previous_assessment=self.history.latest(combined_bot.identity.bot_id),
+            # The portfolio-risk lens asks how concentrated and how one-sided
+            # the book is ACROSS bots -- the one lens whose whole input is the
+            # member list. Withholding it here would leave the portfolio's own
+            # report with that dimension UNKNOWN, which is the one report where
+            # it is answerable.
+            portfolio_bots=members,
+            notify=_notify,
+        )
+        if self.persist_history:
+            self.history.append(combined.risk_assessment)
 
         _notify("correlation")
         portfolio = PortfolioQCService.assess_portfolio(
-            [
-                PortfolioCandidate(
-                    bot=result.bot_result, assessment=result.risk_assessment
-                )
-                for result in rescored
-            ],
+            [PortfolioCandidate(bot=bot) for bot in members],
+            combined=combined.risk_assessment,
             iterations=portfolio_iterations,
             seed=seed,
             as_of_ms=as_of_ms,
@@ -284,16 +382,14 @@ class PortfolioSupervisionPipeline:
             )
         for failure in failures:
             portfolio.warnings.append(
-                f"[{failure.bot_folder_name}] could not be analysed and is missing "
-                f"from every figure below: {failure.error}"
+                f"[{failure.bot_folder_name}] could not be read and is missing from "
+                f"every figure in this report: {failure.error}"
             )
-
         if self.persist_history:
             self.portfolio_history.append(portfolio)
 
-        _notify("decision")
         return PortfolioSupervisionResult(
-            members=rescored,
+            combined=combined,
+            portfolio=portfolio,
             failures=failures,
-            portfolio_assessment=portfolio,
         )

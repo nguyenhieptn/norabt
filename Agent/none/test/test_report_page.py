@@ -380,6 +380,12 @@ def test_limited_result_has_the_same_section_ids_as_a_full_result(
     # 17 -> 18 -> 17: "Market compatibility" was added to the market tab, and
     # the extra "essence" card was removed from the result tab, which is back
     # to its original five sections.
+    # "Ask Nora AI" was added OUTSIDE the three tab panels entirely (visible
+    # regardless of which tab is open, see `_render_chat_widget`'s call site
+    # in `render_bot_report_html`), so it carries no `<section class="card"
+    # id="...">` and does not change this count at all -- see
+    # `test_render_invariants.py::test_result_tab_stays_an_overview`, which
+    # protects the OTHER half of this same decision (tab 1 stays exactly 5).
     assert len(full_ids) == 17
 
 

@@ -12,6 +12,10 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Sequence
 
+from Agent.backend.bot.mcp.analytics.drawdown.underwater import (
+    DrawdownUnderwaterAnalyzer,
+)
+from Agent.backend.bot.mcp.analytics.strategy.exit_rule import ExitRuleAnalyzer
 from Agent.backend.bot.mcp.capital.equity_curve import CapitalModel
 from Agent.backend.bot.mcp.schemas.bot_result import (
     BehavioralObservations,
@@ -41,20 +45,36 @@ def make_trades(
     step_ms: int = DAY_MS,
     symbol: str = "BTC",
     prefix: str = "t",
+    hold_minutes: float = 60.0,
+    entry_price: float = 100.0,
+    pnl_to_move: float = 1.0,
 ) -> List[TradeLedgerItem]:
-    """One closed trade per step, so a bucket index maps to a list index."""
+    """One closed trade per step, so a bucket index maps to a list index.
+
+    Entry and exit prices are filled in because `ExitRuleAnalyzer` reads the
+    PRICE move, not the PnL, and skips any trade missing either side --
+    without them a factory-built bot is unfingerprintable and every
+    style-comparison test would pass vacuously. `pnl_to_move` scales PnL into
+    a percentage move so a caller can keep the two independent when a test
+    needs bots with matching behaviour and differing PnL.
+    """
     trades: List[TradeLedgerItem] = []
     for index, pnl in enumerate(pnls):
         close_time = start_ms + index * step_ms
+        move = float(pnl) * pnl_to_move
         trades.append(
             TradeLedgerItem(
                 trade_id=f"{prefix}{index}",
                 symbol=symbol,
                 side=PositionSide.LONG,
-                open_time=close_time - 3_600_000,
+                open_time=close_time - int(hold_minutes * 60_000),
                 close_time=close_time,
+                entry_price=entry_price,
+                exit_price=entry_price * (1.0 + move / 100.0),
+                notional=1_000.0,
+                leverage=5.0,
                 realized_pnl=float(pnl),
-                holding_time_minutes=60.0,
+                holding_time_minutes=hold_minutes,
             )
         )
     return trades
@@ -74,6 +94,7 @@ def make_bot(
     as_of_ms: int = BASE_MS,
 ) -> BotResult:
     total = sum(trade.realized_pnl for trade in trades)
+    capital = CapitalModel(basis="TEST", capital_at_risk=capital_at_risk)
     wins = sum(1 for trade in trades if trade.realized_pnl > 0)
     count = len(trades)
     return BotResult(
@@ -111,7 +132,11 @@ def make_bot(
         trade_ledger_summary=list(trades),
         behavioral_observations=BehavioralObservations(),
         strategy_observations=StrategyObservations(observed_profile="TEST"),
-        drawdown_analysis=DrawdownAnalysis(),
+        # Chạy đúng bộ phân tích thật: một `DrawdownAnalysis()` rỗng khiến
+        # mọi so sánh sụt giảm giữa thành viên và sổ gộp thành None vs None.
+        drawdown_analysis=DrawdownUnderwaterAnalyzer.analyze(
+            list(trades), capital
+        ),
         simulation_results=SimulationResults(
             simulation_method="TEST",
             iterations=0,
@@ -120,8 +145,11 @@ def make_bot(
             return_basis="ABSOLUTE_PNL",
             is_valid=False,
         ),
+        # Dựng như `BotObservationService` dựng: thiếu trường này thì mọi
+        # phép so sánh cách chơi lặng lẽ bỏ qua bot và test pass rỗng.
+        exit_rule=ExitRuleAnalyzer.analyze(list(trades)),
         reconciliation=LedgerReconciliation(status="OK", ledger_pnl=total),
-        capital=CapitalModel(basis="TEST", capital_at_risk=capital_at_risk),
+        capital=capital,
         data_quality=DataQualityAssessment(
             completeness_score=1.0,
             freshness_score=1.0,

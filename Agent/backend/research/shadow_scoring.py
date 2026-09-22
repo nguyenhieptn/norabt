@@ -209,7 +209,9 @@ def build_shadow_data_dir(
         if entry.name in ("cex", "dex", "state"):
             continue
         (shadow_root / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
-    (shadow_root / "report" / "state" / "assessments").mkdir(parents=True, exist_ok=True)
+    (shadow_root / "report" / "single" / "state" / "assessments").mkdir(
+        parents=True, exist_ok=True
+    )
 
 
 def score_in_sample(
@@ -249,7 +251,9 @@ def score_in_sample(
             truncated_ledger,
             truncated_overview,
         )
-        history = AssessmentHistoryStore(root=shadow_root / "report" / "state" / "assessments")
+        history = AssessmentHistoryStore(
+            root=shadow_root / "report" / "single" / "state" / "assessments"
+        )
         pipeline = RiskSupervisionPipeline(
             data_dir=shadow_root,
             history=history,

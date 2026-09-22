@@ -363,7 +363,7 @@ class CohortAssessmentService:
     ) -> None:
         self.data_dir = data_dir or Path(config.DATA_DIR)
         self.history = history or AssessmentHistoryStore(
-            self.data_dir / "report" / "state" / "assessments"
+            self.data_dir / "report" / "single" / "state" / "assessments"
         )
         self.persist_history = persist_history
         self.evaluation_mode = evaluation_mode

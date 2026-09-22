@@ -3,72 +3,121 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
   useNavigate,
   useSearchParams,
 } from "react-router-dom";
 import { SessionProvider, useSession } from "./context/SessionContext.jsx";
-import IdentityPage from "./pages/IdentityPage.jsx";
+import AdminLoginPage from "./pages/AdminLoginPage.jsx";
 import UserHome from "./pages/UserHome.jsx";
 import AdminHome from "./pages/AdminHome.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
 
-function RequireRole({ role, children }) {
-  const { session, adminOpenAccess } = useSession();
-  if (role === "admin" && adminOpenAccess) {
-    return children;
+function RequireAdmin({ children }) {
+  const [searchParams] = useSearchParams();
+  const { session } = useSession();
+  const botCode =
+    searchParams.get("code") ||
+    searchParams.get("bot_code") ||
+    searchParams.get("id_bot") ||
+    searchParams.get("botId");
+
+  if (!session || session.role !== "admin") {
+    // If visitor was given an old/direct link like /#/admin?tab=bot&code=...&contract=...
+    // seamlessly render UserHome view without blocking them with a login screen:
+    if (botCode) {
+      return <UserHome />;
+    }
+    return <Navigate to="/login" replace />;
   }
-  if (role === "user" && adminOpenAccess) {
-    return children;
-  }
-  if (!session || session.role !== role) {
-    return <Navigate to="/" replace />;
-  }
+
   return children;
+}
+
+function RootRoute() {
+  const [searchParams] = useSearchParams();
+  const { session } = useSession();
+  const botCode =
+    searchParams.get("code") ||
+    searchParams.get("bot_code") ||
+    searchParams.get("id_bot") ||
+    searchParams.get("botId");
+
+  if (botCode) {
+    return <UserHome />;
+  }
+
+  if (session && session.role === "admin") {
+    return <Navigate to="/admin" replace />;
+  }
+
+  return <Navigate to="/login" replace />;
 }
 
 function AppHeader() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const currentTab = searchParams.get("tab") || "overview";
-  const botCode = searchParams.get("code") || "";
-  const { session, logout, adminOpenAccess } = useSession();
+  const { session, logout } = useSession();
   const navigate = useNavigate();
 
-  // Viewing a bot report directly (endpoint + id bot + contract id):
-  const isDirectBotView = currentTab === "bot" || !!botCode;
+  const isLoginPage = location.pathname === "/login";
+  const isAdmin = session && session.role === "admin";
 
-  // Role is USER, ID = hợp đồng (contract id)
-  const contractId =
+  const botCode =
+    searchParams.get("code") ||
+    searchParams.get("bot_code") ||
+    searchParams.get("id_bot") ||
+    searchParams.get("botId");
+
+  // User view is active when not authenticated as admin, or explicit user paths:
+  const isUserView =
+    !isAdmin &&
+    (location.pathname === "/user" ||
+      location.pathname === "/bot" ||
+      location.pathname === "/view" ||
+      !!botCode ||
+      searchParams.has("contract") ||
+      searchParams.has("contract_id"));
+
+  // Contract ID display resolution:
+  const rawContract =
     searchParams.get("contract") ||
     searchParams.get("contract_id") ||
     searchParams.get("id") ||
-    searchParams.get("user_ref") ||
-    botCode;
+    searchParams.get("user_ref");
+
+  const contractDisplay = rawContract
+    ? rawContract
+    : botCode
+    ? botCode.length > 8
+      ? botCode.slice(-6).toUpperCase()
+      : botCode
+    : "CLIENT";
 
   React.useEffect(() => {
-    if (isDirectBotView) {
-      document.title = botCode ? `Nora - Risk Management · ${botCode}` : "Nora - Risk Management";
-    } else if (currentTab === "overview") {
-      document.title = "Nora - Risk Management";
-    } else if (currentTab === "bots") {
-      document.title = "Nora - Bot List";
-    } else if (currentTab === "analyze") {
-      document.title = "Nora - Analyze Bot";
+    if (isLoginPage) {
+      document.title = "Nora - Admin Login";
+    } else if (botCode) {
+      document.title = `Nora - Risk Management · ${botCode}`;
+    } else if (isAdmin) {
+      if (currentTab === "overview") {
+        document.title = "Nora - Risk Management · Overview";
+      } else if (currentTab === "bots" || currentTab === "portfolio") {
+        document.title = currentTab === "portfolio" ? "Nora - Portfolio Correlation" : "Nora - Bot List";
+      } else if (currentTab === "analyze") {
+        document.title = "Nora - Analyze Bot";
+      } else {
+        document.title = "Nora - Risk Management · Admin";
+      }
     } else {
       document.title = "Nora - Risk Management";
     }
-  }, [currentTab, botCode, isDirectBotView]);
-
-  const roleLabel = session
-    ? session.role === "admin"
-      ? "Admin"
-      : "User"
-    : adminOpenAccess
-      ? "Admin"
-      : "";
+  }, [isLoginPage, botCode, isAdmin, currentTab]);
 
   async function handleLogout() {
     await logout();
-    navigate("/", { replace: true });
+    navigate("/login", { replace: true });
   }
 
   function handleTabClick(tabKey) {
@@ -81,8 +130,9 @@ function AppHeader() {
         {/* Brand & Monogram Logo */}
         <div
           className="brand"
-          onClick={isDirectBotView ? undefined : () => handleTabClick("overview")}
-          style={{ cursor: isDirectBotView ? "default" : "pointer" }}
+          onClick={isAdmin ? () => handleTabClick("overview") : undefined}
+          style={{ cursor: isAdmin ? "pointer" : "default" }}
+          title={isAdmin ? "Back to Admin Overview" : "Nora Risk Engine"}
         >
           <div className="brand-logo-box">
             {/* OKX-inspired geometric matrix glyph */}
@@ -96,14 +146,16 @@ function AppHeader() {
           <div className="brand-title-wrap">
             <div className="brand-name-row">
               <span className="brand-name">NORABT</span>
-              <span className="brand-badge-fintech">AI ENGINE</span>
+              <span className="brand-badge-fintech">
+                {isLoginPage ? "ADMIN PORTAL" : "AI ENGINE"}
+              </span>
             </div>
             <span className="brand-sub">OKX QUANT RISK PROTOCOL</span>
           </div>
         </div>
 
-        {/* OKX-style Segmented Control Navigation Tabs - hidden in direct bot user view */}
-        {!isDirectBotView && (
+        {/* OKX-style Segmented Control Navigation Tabs - ONLY SHOWN FOR AUTHENTICATED ADMIN */}
+        {isAdmin && !isLoginPage && (
           <>
             <div className="header-divider" />
             <nav className="header-nav-tabs">
@@ -123,7 +175,7 @@ function AppHeader() {
 
               <button
                 type="button"
-                className={`header-tab ${currentTab === "bots" || currentTab === "bot" ? "on" : ""}`}
+                className={`header-tab ${currentTab === "bots" || currentTab === "bot" || currentTab === "portfolio" ? "on" : ""}`}
                 onClick={() => handleTabClick("bots")}
               >
                 <svg className="tab-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -155,36 +207,33 @@ function AppHeader() {
 
       {/* Header Right Actions */}
       <div className="header-actions">
-        {isDirectBotView ? (
+        {isLoginPage ? (
+          <div className="user-badge-capsule">
+            <span className="user-badge-pulse" style={{ background: "#38BDF8", boxShadow: "0 0 8px #38BDF8" }} />
+            <span className="user-badge-label">ADMIN PORTAL</span>
+          </div>
+        ) : isUserView ? (
           <div className="user-badge-capsule user-badge-client">
             <span className="user-badge-pulse" />
             <span className="user-badge-label">
-              USER · #{contractId}
+              USER · #{contractDisplay}
             </span>
           </div>
-        ) : (
-          roleLabel && (
-            <div className="user-badge-capsule">
-              <span className="user-badge-pulse" />
-              <span className="user-badge-label">
-                {session?.userRef
-                  ? session.userRef
-                  : adminOpenAccess && !session
-                    ? "ADMIN"
-                    : roleLabel.toUpperCase()}
-              </span>
-            </div>
-          )
-        )}
+        ) : isAdmin ? (
+          <div className="user-badge-capsule user-badge-admin">
+            <span className="user-badge-pulse" />
+            <span className="user-badge-label">ADMIN</span>
+          </div>
+        ) : null}
 
         <ThemeToggle />
 
-        {session && !isDirectBotView && (
+        {isAdmin && !isLoginPage && (
           <button
             type="button"
             className="btn-logout"
             onClick={handleLogout}
-            title="Log out"
+            title="Log out of the Admin role"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -200,7 +249,7 @@ function AppHeader() {
 }
 
 function AppRoutes() {
-  const { adminOpenAccess, configLoaded } = useSession();
+  const { configLoaded } = useSession();
 
   if (!configLoaded) {
     return (
@@ -212,28 +261,19 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route
-        path="/"
-        element={
-          adminOpenAccess ? <Navigate to="/admin" replace /> : <IdentityPage />
-        }
-      />
-      <Route
-        path="/user"
-        element={
-          <RequireRole role="user">
-            <UserHome />
-          </RequireRole>
-        }
-      />
+      <Route path="/login" element={<AdminLoginPage />} />
       <Route
         path="/admin"
         element={
-          <RequireRole role="admin">
+          <RequireAdmin>
             <AdminHome />
-          </RequireRole>
+          </RequireAdmin>
         }
       />
+      <Route path="/user" element={<UserHome />} />
+      <Route path="/bot" element={<UserHome />} />
+      <Route path="/view" element={<UserHome />} />
+      <Route path="/" element={<RootRoute />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

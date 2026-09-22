@@ -1,7 +1,7 @@
 """Persist step 3 one bot at a time, the way step 2 is persisted.
 
-    data/report/<bot_id>/latest.json
-    data/report/index.json
+    data/report/single/<bot_id>/latest.json
+    data/report/single/index.json
 
 Step 3 is the decision, and a decision that only exists inside a terminal
 scroll cannot be handed to a trading agent. Each file carries the two scores,
@@ -10,12 +10,23 @@ full Vietnamese narrative, because the numbers are the attachment and the text
 is the message.
 
 Unified data layout (2026-09): one folder per bot_id, no venue/asset
-segregation -- `data/report/<bot_id>/` holds this module's `latest.json`
-alongside `data/analysis`'s `performance.json`/`monte_carlo.json` for the same
-bot (see `Agent/backend/qc/reporting/analysis_store.py`), so every derived
-output for one bot lives at one path. `_slot_index`/venue/symbol are still
-computed below because they are recorded INSIDE each payload (display
+segregation -- `data/report/single/<bot_id>/` holds this module's
+`latest.json` alongside `data/analysis`'s `performance.json`/`monte_carlo.json`
+for the same bot (see `Agent/backend/qc/reporting/analysis_store.py`), so every
+derived output for one bot lives at one path. `_slot_index`/venue/symbol are
+still computed below because they are recorded INSIDE each payload (display
 metadata), not because they are part of the file path anymore.
+
+Single vs. multi (2026-09): a bot's SINGLE-bot assessment lives under
+`report/single/`; a PORTFOLIO's (multi-bot correlation) assessment is a
+different kind of record -- keyed by the member set, not by one bot_id -- and
+lives under `report/multi/` instead (see
+`Agent.backend.report.qc.history.portfolio_store.PortfolioHistoryStore`). The
+two never overlap: `PortfolioSupervisionPipeline` re-scores each member's
+OWN single-bot assessment (still written here, under `report/single/`) and
+separately produces one portfolio-level assessment (written under
+`report/multi/`) -- see `Agent/backend/pipeline_portfolio.py`'s module
+docstring.
 """
 
 from __future__ import annotations
@@ -27,7 +38,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from Agent.backend.report.qc.reporting.reasons import recommendation_vi
 
-ASSESSMENT_DIRNAME = "report"
+ASSESSMENT_DIRNAME = "report/single"
 
 
 def _write(path: Path, payload: Dict[str, Any]) -> None:
