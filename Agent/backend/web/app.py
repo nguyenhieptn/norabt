@@ -3111,7 +3111,9 @@ def create_app(
         # Missing/null/wrong-type/blank `code` gets the structured 400 above
         # (Việc 4, "missing" branch) -- also free of charge against the rate
         # limiter, same reasoning as the conflict branch just above.
-        codes = _split_code_list(code)
+        # A string only, as before: `code` has always been one string, and a
+        # JSON list here stays the structured "missing" 400 it always was.
+        codes = _split_code_list(code) if isinstance(code, str) else None
         if not codes:
             return _missing_code_response()
         if len(codes) >= 2:

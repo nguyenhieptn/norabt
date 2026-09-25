@@ -33,25 +33,24 @@ Thay các mã trên bằng mã bot cần kiểm tra. AGY tự chạy và trả k
 
 1. Cài OnchainOS: `npx -y @okxweb3/onchainos-installer install`
 2. Đăng nhập ví OKX: `onchainos wallet login`
-3. Gọi Agent SID 40700 qua OKX (thay `code` bằng mã cần kiểm tra):
+3. Gọi Agent SID 40700 — OKX tự tra endpoint theo SID, người dùng không cần biết endpoint (cần `jq`):
 
 ```bash
-# 3a. Gửi yêu cầu -> OKX trả về một confirmationId
-onchainos agent a2mcp-probe probe \
-  --routing-json '{"schemaVersion":1,"serviceSnapshot":{"serviceType":"A2MCP","endpoint":"https://agent.expsolution.io/api/analyze","serviceId":40700}}' \
-  --params-json '{"code":"EF1CC6F40E834D1A"}'
+CODE="EF1CC6F40E834D1A"          # Multi: CODE="35F888C7BB441B2B,6F262ADB3B44266C"
 
-# 3b. Xác nhận (dịch vụ miễn phí) -> nhận kết quả
-onchainos agent a2mcp-probe confirm-free --confirmation-id <confirmationId> --yes
+# OKX trả thông tin dịch vụ theo SID -> dựng routing
+ROUTING=$(onchainos agent service-detail --sid 40700 --agentic-id 13753 \
+  | jq -c '{schemaVersion:1, serviceSnapshot:{serviceType:.data.serviceType, endpoint:.data.endpoint, serviceId:.data.sid}}')
+
+# Gửi yêu cầu qua OKX -> confirmationId
+CID=$(onchainos agent a2mcp-probe probe --routing-json "$ROUTING" --params-json "{\"code\":\"$CODE\"}" \
+  | jq -r '.data.payload.confirmationId')
+
+# Xác nhận (miễn phí) -> kết quả
+onchainos agent a2mcp-probe confirm-free --confirmation-id "$CID" --yes
 ```
 
-**Multi — danh mục 2–8 bot:** chỉ đổi `--params-json`, các mã cách nhau bằng dấu phẩy:
-
-```bash
---params-json '{"code":"35F888C7BB441B2B,6F262ADB3B44266C"}'
-```
-
-> Đã có mã nguồn repo: `bash Agent/docker/run-nora.sh <mã> [mã ...]` chạy gộp 3a + 3b, và tự tra endpoint bằng `onchainos agent service-detail --sid 40700 --agentic-id 13753`.
+> Đã có mã nguồn repo: `bash Agent/docker/run-nora.sh <mã> [mã ...]` chạy đúng 3 bước trên trong một lệnh.
 
 ---
 
@@ -65,6 +64,8 @@ Kèm link báo cáo chi tiết (biểu đồ, Monte Carlo 10.000 kịch bản):
 
 - **Single:** `https://agent.expsolution.io/bot/<mã bot>`
 - **Multi:** `https://agent.expsolution.io/portfolio/<mã danh mục>` — thêm phần tương quan giữa các bot, Monte Carlo chung (joint) và đóng góp của từng bot. Bot ẩn sổ lệnh vẫn được tính qua PnL công khai theo ngày.
+
+**Thời gian chờ:** bot/danh mục đã chấm gần đây trả kết quả đầy đủ trong ~1 giây. Bot chưa từng chấm mất đến ~1 phút, danh mục mới ~1–2 phút. Khi đó kết quả trả về `status: PENDING` kèm `report_url` (không phải lỗi): mở link — trang tự tải lại khi báo cáo xong — hoặc chạy lại đúng lệnh sau 1–2 phút để nhận JSON đầy đủ.
 
 ---
 

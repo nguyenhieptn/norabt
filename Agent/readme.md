@@ -46,19 +46,19 @@ onchainos wallet login                        # 2. log in with your OKX wallet
 >
 > Multi: *Use Agent SID 40700 on OnchainOS to check the portfolio of OKX bots `35F888C7BB441B2B, 6F262ADB3B44266C`*
 
-**Option B: from the terminal** (any machine with OnchainOS, no repo needed).
+**Option B: from the terminal** (any machine with OnchainOS and `jq`, no repo needed).
+OKX resolves the endpoint from the SID; you only give the SID and the bot code(s).
 
 ```bash
-# send the request -> OKX returns a confirmationId
-onchainos agent a2mcp-probe probe \
-  --routing-json '{"schemaVersion":1,"serviceSnapshot":{"serviceType":"A2MCP","endpoint":"https://agent.expsolution.io/api/analyze","serviceId":40700}}' \
-  --params-json '{"code":"EF1CC6F40E834D1A"}'        # multi: '{"code":"35F888C7BB441B2B,6F262ADB3B44266C"}'
-
-# confirm the free call -> result
-onchainos agent a2mcp-probe confirm-free --confirmation-id <confirmationId> --yes
+CODE="EF1CC6F40E834D1A"          # multi: CODE="35F888C7BB441B2B,6F262ADB3B44266C"
+ROUTING=$(onchainos agent service-detail --sid 40700 --agentic-id 13753 \
+  | jq -c '{schemaVersion:1, serviceSnapshot:{serviceType:.data.serviceType, endpoint:.data.endpoint, serviceId:.data.sid}}')
+CID=$(onchainos agent a2mcp-probe probe --routing-json "$ROUTING" --params-json "{\"code\":\"$CODE\"}" \
+  | jq -r '.data.payload.confirmationId')
+onchainos agent a2mcp-probe confirm-free --confirmation-id "$CID" --yes
 ```
 
-<sub>With this repo checked out, `bash docker/run-nora.sh <code> [code ...]` runs both steps in one go.</sub>
+<sub>With this repo checked out, `bash docker/run-nora.sh <code> [code ...]` runs the same three steps in one go.</sub>
 
 **Result:** 🟢 **PASS** safe · 🟡 **HIDDEN RISK** hidden risk · 🔴 **REJECT** danger,
 plus a link to the full report (charts, 10,000-path Monte Carlo):
