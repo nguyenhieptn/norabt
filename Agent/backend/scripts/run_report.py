@@ -914,15 +914,17 @@ def build_assessment_extras(
             # `traded_symbol` là mã hợp đồng, khác với tên ô lưu trữ), và
             # đoán sai đường dẫn ở đây sẽ âm thầm giữ được 0 đoạn văn rồi
             # xoá sạch -- đúng thứ cả nhánh này sinh ra để tránh.
-            root = Path(data_dir) / "assessment"
-            by_code = {
-                path.parent.name.rpartition("__")[2]: path
-                for path in root.glob("*/*/bot/*/assessment.json")
-            }
+            #
+            # Unified data layout (2026-09): mỗi bot giờ nằm phẳng tại
+            # data/report/single/<code>/latest.json (không còn
+            # data/assessment/<venue>/<asset>/bot/<nick>__<code>/
+            # assessment.json) -- tra thẳng theo mã, không cần glob/parse
+            # tên thư mục nữa.
+            root = Path(data_dir) / "report" / "single"
             kept = 0
             for row in rows:
-                path = by_code.get(row.unique_code)
-                if path is None:
+                path = root / row.unique_code / "latest.json"
+                if not path.exists():
                     continue
                 try:
                     stored = json.loads(path.read_text(encoding="utf-8"))

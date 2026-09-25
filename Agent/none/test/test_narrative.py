@@ -828,6 +828,45 @@ def test_retry_not_attempted_on_transport_failure() -> None:
     assert backend.calls == 1
 
 
+def test_a_transport_failure_trips_the_circuit_breaker_for_the_next_bot() -> None:
+    """HỒI QUY 22/09: sự cố THẬT (xem `agy`'s own `cli.log`) -- CLI tự thử
+    lại 8+ lần với exponential backoff mỗi khi backend báo lỗi vận chuyển,
+    tức MỘT lượt `_call_backend_once` có thể âm thầm đốt 8+ request thật
+    vào đúng một tài khoản đã cạn trần request/ngày. Không có cờ dòng lệnh
+    an toàn nào tắt được hành vi đó của `agy` mà không đánh đổi việc cắt
+    oan một lượt sinh văn CHẬM NHƯNG ĐANG CHẠY ĐÚNG (xem lịch sử
+    `AGY_TIMEOUT_SECONDS`). Thứ AN TOÀN duy nhất: đừng tự bắn thêm lượt
+    MỚI vào một backend vừa xác nhận đang cạn -- test này khoá đúng hành
+    vi đó cho `generate_narrative` (dùng bởi batch nhiều bot): bot THỨ HAI
+    trong một batch không được phép tự gọi backend thật nếu bot đầu tiên
+    vừa thất bại ở tầng vận chuyển trong vòng
+    `_BACKEND_COOLDOWN_SECONDS` giây trước đó."""
+    backend = _FakeBackend("", is_error=True, error="boom")
+
+    first_bot = narrative.generate_narrative_sync(
+        _CLEAN_NUMBERS, _context(), backend=backend
+    )
+    assert first_bot == narrative.FALLBACK_NARRATIVE_VI
+    assert backend.calls == 1
+
+    # Bot THỨ HAI hỏi ngay sau, cùng batch -- mạch còn mở, KHÔNG được gọi
+    # backend thật lần nữa.
+    second_bot = narrative.generate_narrative_sync(
+        _CLEAN_NUMBERS, _context(), backend=backend
+    )
+    assert second_bot == narrative.FALLBACK_NARRATIVE_VI
+    assert backend.calls == 1
+
+    # Giả lập thời gian nghỉ đã trôi qua -- bot tiếp theo lại được thử thật.
+    clean_backend = _FakeBackend(_CLEAN_TEXT)
+    narrative._backend_unavailable_until = 0.0
+    third_bot = narrative.generate_narrative_sync(
+        _CLEAN_NUMBERS, _context(), backend=clean_backend
+    )
+    assert third_bot == _CLEAN_TEXT
+    assert clean_backend.calls == 1
+
+
 # --------------------------------------------------------------------------- #
 # CliNarrativeBackend -- fake `spawn`, never a real subprocess.
 # --------------------------------------------------------------------------- #
@@ -1177,6 +1216,20 @@ def _make_version_file(directory: Path, name: str, *, executable: bool = True) -
     path.write_bytes(b"fake-claude-binary")
     path.chmod(0o755 if executable else 0o644)
     return path
+
+
+@pytest.fixture(autouse=True)
+def _reset_backend_circuit_breaker():
+    """`narrative._backend_unavailable_until` là trạng thái CẤP MODULE (xem
+    comment cạnh `_BACKEND_COOLDOWN_SECONDS` trong `narrative.py`) -- không
+    reset thì một test cố tình gây lỗi vận chuyển (vd.
+    `test_retry_not_attempted_on_transport_failure`) sẽ để lại mạch mở,
+    khiến các test CHẠY SAU nó trong cùng tiến trình pytest bị bỏ qua lượt
+    gọi backend giả một cách âm thầm -- `calls`/`prompts` đếm sai mà
+    KHÔNG BÁO LỖI RÕ RÀNG, chỉ lặng lẽ thấp hơn số mong đợi."""
+    narrative._backend_unavailable_until = 0.0
+    yield
+    narrative._backend_unavailable_until = 0.0
 
 
 @pytest.fixture(autouse=True)
@@ -1926,6 +1979,28 @@ def test_semantic_gate_falls_back_when_both_drafts_are_rejected(monkeypatch) -> 
     )
     result = narrative.generate_narrative_sync(_CLEAN_NUMBERS, _context(), backend=backend)
     assert result == narrative.FALLBACK_NARRATIVE_VI
+
+
+def test_semantic_gate_transport_failure_trips_the_circuit_breaker(monkeypatch) -> None:
+    """HỒI QUY 23/09: cổng ngữ nghĩa dùng chung `_call_backend_once` với
+    lượt sinh văn chính, nhưng trước bản vá này KHÔNG ghi nhận thất bại
+    VẬN CHUYỂN của riêng nó vào bộ ngắt mạch chung. Một lượt phân tích có
+    thể sinh văn THÀNH CÔNG (qua hết ba cổng tất định) rồi mới gặp 429
+    ĐÚNG ở bước kiểm ngữ nghĩa -- vì mạch không mở, bot TIẾP THEO trong
+    cùng batch vẫn tự thử backend thật từ đầu thay vì rơi fallback nhanh,
+    đúng lúc backend đã biết là cạn quota."""
+    monkeypatch.setenv(narrative.ENV_SEMANTIC_VERIFY, "1")
+    backend = _SequenceBackend(
+        [
+            _R(_CLEAN_TEXT),  # sinh văn chính -- thành công, qua hết cổng tất định
+            narrative.BackendResult(None, True, "boom"),  # kiểm ngữ nghĩa -- lỗi vận chuyển
+        ]
+    )
+    result = narrative.generate_narrative_sync(_CLEAN_NUMBERS, _context(), backend=backend)
+    # Bất biến của cổng này vẫn giữ nguyên: hỏng cổng KHÔNG được huỷ một
+    # đoạn văn đã qua hết cổng tất định.
+    assert result == _CLEAN_TEXT
+    assert narrative._backend_recently_failed() is True
 
 
 def test_a_broken_verifier_never_destroys_a_draft_that_passed_every_gate(

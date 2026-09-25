@@ -347,6 +347,8 @@ def build_assessment(
             "reconciliation_status": row.reconciliation_status,
             "ledger_coverage_days": row.ledger_coverage_days,
             "declared_lead_days": row.declared_lead_days,
+            "ledger_truncated": row.ledger_truncated,
+            "reconciliation_warnings": row.reconciliation_warnings,
             # Việc 1 (assessment side): `row` above already carries the
             # phase-derived fields cohort.py fills onto `BotEvaluationRow`
             # directly; these four cannot come from `row` (that schema does

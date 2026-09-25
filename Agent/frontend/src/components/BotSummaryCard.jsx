@@ -55,17 +55,17 @@ export default function BotSummaryCard({ lookup }) {
             width: "48px",
             height: "48px",
             borderRadius: "var(--radius-md, 12px)",
-            background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+            background: "var(--ink, #0f172a)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            color: "#ffffff",
-            fontSize: "22px",
-            boxShadow: "0 4px 12px rgba(59, 130, 246, 0.35)",
+            color: "var(--panel, #ffffff)",
+            fontSize: "18px",
+            fontWeight: 700,
             flexShrink: 0,
           }}
         >
-          🤖
+          {String(lookup.name || lookup.code || "?").trim().charAt(0).toUpperCase()}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "4px" }}>

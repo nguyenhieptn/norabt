@@ -8,6 +8,10 @@ from Agent.backend.market.schemas.market_result import MarketResult
 from Agent.backend.bot.mcp.schemas.bot_result import BotResult
 from Agent.backend.report.qc.scoring.quality import assess as assess_quality
 from Agent.backend.report.qc.scoring.verdict import decide as decide_verdict
+from Agent.backend.report.qc.scoring.verdict import (
+    VERDICT_LOW_DD_GOOD_Q,
+    VERDICT_LOW_DD_WEAK_Q,
+)
 from Agent.backend.report.qc.schemas.risk_assessment import (
     BotRiskAssessment,
     DimensionContribution,
@@ -312,6 +316,24 @@ class RiskFusionEngine:
                 if item.score >= 60.0
             ]
         verdict = decide_verdict(bot, final_score, quality.score, drivers)
+        # `verdict`'s own "DRAWDOWN: LOW/HIGH" label and `tier` (just above)
+        # are two independent thresholds on the SAME `final_score`
+        # (verdict.py's DANGEROUS_RISK=70 vs this method's HIGH-tier
+        # boundary of 65) -- a score in [65, 70) reads "DRAWDOWN: LOW" next
+        # to a HIGH/CRITICAL/EMERGENCY risk tier on the same report, with
+        # nothing explaining why the two seemingly disagree. Not merging the
+        # thresholds (that would reclassify every bot already scored in that
+        # 5-point band, a much larger behaviour change than this task asked
+        # for) -- just naming the gap where it appears.
+        if tier in (RiskTier.HIGH, RiskTier.CRITICAL, RiskTier.EMERGENCY) and verdict.verdict in (
+            VERDICT_LOW_DD_GOOD_Q,
+            VERDICT_LOW_DD_WEAK_Q,
+        ):
+            verdict.reason += (
+                f" (Risk tier is {tier.value}, a stricter internal threshold than the "
+                "70-point mark this verdict label itself uses -- both read the same "
+                f"underlying score of {final_score:.0f}.)"
+            )
 
         return BotRiskAssessment(
             methodology_version=cls.METHODOLOGY_VERSION,
@@ -325,7 +347,9 @@ class RiskFusionEngine:
             bot_as_of_ms=bot.as_of_ms,
             risk_score=final_score,
             quality_score=quality.score,
-            quality_components={k: round(v, 1) for k, v in quality.components.items()},
+            quality_components={
+                k: round(v, 1) for k, v in quality.components.items() if v is not None
+            },
             quality_notes=quality.notes,
             verdict=verdict.verdict,
             verdict_reason=verdict.reason,

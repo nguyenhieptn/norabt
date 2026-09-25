@@ -48,18 +48,31 @@ SIM_HORIZON = 500
 # ordering, so a test's own explicit env manipulation always wins for the
 # duration of that test and is still cleanly undone afterwards.
 #
-# Deliberately scoped to the "NORABT_" prefix only -- OKX_* variables
-# (OKX_API_KEY, OKX_API_SECRET, OKX_SIMULATED, ...) are read by tests that
-# genuinely need them and are NOT the source of this bug, so they are left
-# completely untouched.
+# Deliberately scoped to "NORABT_" (plus X402_/OKX_X402_, added 23/09 --
+# see below) -- the REST of OKX_* (OKX_API_KEY, OKX_API_SECRET,
+# OKX_SIMULATED, ...) is read by tests that genuinely need it and is NOT
+# the source of this bug, so it is left completely untouched.
+#
+# X402_*/OKX_X402_* added 23/09: SAME bug, caught live -- flipping
+# `X402_ENABLED=true` in the operator's real `Agent/.env` (to test the
+# payment gate for real against a running `agent-mcp` container) turned 23
+# tests in `test_agent_server.py` red on THIS machine, including its own
+# canary (`test_x402_disabled_by_default_in_this_test_environment`) --
+# every one of them assumes x402 starts OFF and drives it explicitly via
+# `monkeypatch.setenv` per test, exactly the "not the source of this bug"
+# carve-out above never applied to. `envfile.py` loads `Agent/.env`
+# straight into the real process env the same way for X402_* as it does
+# for NORABT_*, so it needed the exact same isolation, not a special case.
 # --------------------------------------------------------------------------- #
 
-_ISOLATED_ENV_PREFIX = "NORABT_"
+_ISOLATED_ENV_PREFIXES = ("NORABT_", "X402_", "OKX_X402_")
 
 
 @pytest.fixture(autouse=True)
 def _isolate_norabt_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in [k for k in os.environ if k.startswith(_ISOLATED_ENV_PREFIX)]:
+    for key in [
+        k for k in os.environ if k.startswith(_ISOLATED_ENV_PREFIXES)
+    ]:
         monkeypatch.delenv(key, raising=False)
 
 

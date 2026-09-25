@@ -19,6 +19,7 @@ Bộ tài liệu kỹ thuật của dự án NoraBT tại `Agent/docs/` được
 Agent/docs/
 ├── readme.md                 <-- [Bạn đang ở đây] Chỉ mục toàn diện & Kiến trúc tổng quan
 ├── OKX_AI_REPORT.md          <-- Báo cáo đặc tả kỹ thuật đạt chuẩn OKX AI Track (Agents & AI-Native Businesses)
+├── SYSTEM_OVERVIEW.md        <-- Mô tả hệ thống: bài toán, kiến trúc, mô hình kinh doanh (cài đặt & sử dụng: README.md ở gốc repo)
 └── bmad/
     ├── story/                <-- QUÁ TRÌNH & TIẾN ĐỘ PHÁT TRIỂN HỆ THỐNG (Chia theo 10 phân hệ)
     │   ├── 00_overview/                  <-- Báo cáo tiến độ tổng thể (STORY-00)
@@ -46,7 +47,7 @@ Thư mục `bmad/story/` lưu trữ toàn bộ tiến trình lịch sử phát t
 
 - 📘 **Tài liệu trung tâm:** [STORY-00: Quá Trình và Tiến Độ Phát Triển Toàn Diện Hệ Thống](bmad/story/00_overview/STORY-00_SYSTEM_PROGRESSION_AND_STATUS.md)
   - **Giai đoạn 1 (10-12/09):** Khởi tạo Engine 1 — Tái cấu trúc sổ lệnh, 10 lăng kính rủi ro và bộ tiêu chí Veto an toàn.
-  - **Giai đoạn 2 (13-14/09):** Chuẩn hóa giao thức MCP Server (cổng 8000), cơ chế thanh toán vi mô x402 qua USDC trên X Layer và bộ đệm Redis Snapshot.
+  - **Giai đoạn 2 (13-14/09):** Chuẩn hóa giao thức MCP Server (cổng 8765), cơ chế thanh toán vi mô x402 qua USDC trên X Layer và bộ đệm Redis Snapshot.
   - **Giai đoạn 3 (15/09):** Thẩm định ngoài mẫu (Out-of-sample) trên 36 bot OKX thực tế, kiểm chuẩn tương quan hạng Spearman, Deflated Sharpe Ratio và MinTRL.
   - **Giai đoạn 4 (16-17/09):** Xây dựng ứng dụng quản trị Single-Page App (React SPA), thẻ tóm tắt Quant, phân quyền Admin truy cập mở.
   - **Giai đoạn 5 (17-18/09):** Tích hợp Động cơ Nhận định Chuyên môn Định tính (Narrative Synthesizer), bỏ nhãn AI máy móc, popup chú giải công thức tài chính.

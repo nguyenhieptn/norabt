@@ -307,11 +307,15 @@ class PortfolioAggregator:
     def _merge_capital(bots: Sequence[BotResult]) -> CapitalModel:
         capitals = [bot.capital for bot in bots]
         at_risk = [item.capital_at_risk for item in capitals]
+        # Same reasoning as `_merge_quality`: a count per member, not every
+        # member's capital notes pasted end to end.
         warnings: List[str] = []
         for bot, item in zip(bots, capitals):
-            warnings.extend(
-                f"[{bot.identity.nick_name}] {line}" for line in item.warnings
-            )
+            if item.warnings:
+                warnings.append(
+                    f"[{bot.identity.nick_name}] {len(item.warnings)} capital "
+                    f"note{'' if len(item.warnings) == 1 else 's'}"
+                )
         if any(value is None or value <= 0 for value in at_risk):
             missing = [
                 bot.identity.nick_name
@@ -354,11 +358,22 @@ class PortfolioAggregator:
     ) -> DataQualityAssessment:
         qualities = [bot.data_quality for bot in bots]
         coverages = [item.coverage_days for item in qualities]
+        # SUMMARISED, not concatenated. `RiskFusionEngine.fuse` copies these
+        # straight into `BotRiskAssessment.limitations`, which the report
+        # renders as one "Data limitation: ..." sentence joined by semicolons
+        # -- so pasting every member's notes in verbatim turned that line into
+        # 2,390 characters of prose for a two-bot portfolio, and would scale
+        # linearly with members. Each member gets one line with a count; the
+        # full text is kept per member and surfaced by the portfolio section,
+        # where it sits behind a chip instead of in the page's body copy.
         warnings: List[str] = list(extra)
         for bot, item in zip(bots, qualities):
-            warnings.extend(
-                f"[{bot.identity.nick_name}] {line}" for line in item.warnings
-            )
+            if item.warnings:
+                warnings.append(
+                    f"[{bot.identity.nick_name}] {len(item.warnings)} data "
+                    f"note{'' if len(item.warnings) == 1 else 's'} on its own "
+                    "ledger"
+                )
         return DataQualityAssessment(
             # Minimum, not mean: the portfolio's evidence is as good as its
             # weakest member's, because that member's gaps are in every
@@ -402,9 +417,12 @@ class PortfolioAggregator:
         )
         warnings: List[str] = []
         for bot, entry in zip(bots, entries):
-            warnings.extend(
-                f"[{bot.identity.nick_name}] {line}" for line in entry.warnings
-            )
+            if entry.warnings:
+                warnings.append(
+                    f"[{bot.identity.nick_name}] {len(entry.warnings)} "
+                    "reconciliation note"
+                    f"{'' if len(entry.warnings) == 1 else 's'}"
+                )
         return LedgerReconciliation(
             status=status,
             reported_pnl=reported_total,
@@ -526,19 +544,19 @@ class PortfolioAggregator:
         stress = StressSimulator.run_stress(trades, capital.capital_at_risk)
         exit_rule = ExitRuleAnalyzer.analyze(trades)
 
+        # Kept terse on purpose: `RiskFusionEngine` copies these into
+        # `BotRiskAssessment.limitations`, which the report joins into one
+        # "Data limitation: ..." sentence. Anything written at paragraph
+        # length here becomes paragraph-length body copy on the page. The
+        # reasoning behind each line lives in this module's docstring, which
+        # is where a developer looks; the page needs the fact, not the essay.
         caveats = [
-            f"Synthetic portfolio of {len(bots)} bots: every figure is the merged "
-            "book, not any one member's own number",
-            "Streaks, averaging-down and re-entry patterns are read across the "
-            "merged ledger, so they describe what the combined account did -- two "
-            "independent members adding to the same losing instrument counts here, "
-            "as it does to the account",
+            f"Merged book of {len(bots)} bots: every figure is the combined "
+            "account, not any member's",
+            "Streaks and averaging-down are read across the merged ledger",
         ]
         if not capital.capital_at_risk:
-            caveats.append(
-                "No portfolio capital could be summed, so every percentage-of-capital "
-                "figure is absent rather than estimated"
-            )
+            caveats.append("No portfolio capital: percent-of-capital figures absent")
 
         fingerprint = hashlib.sha256(
             "|".join(

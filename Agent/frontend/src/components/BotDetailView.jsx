@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useSession } from "../context/SessionContext.jsx";
+import { verdictColor as verdictToken } from "./verdictUi.jsx";
+
 
 /**
  * Renders a server-built report document inside the SPA.
@@ -12,13 +14,42 @@ import { useSession } from "../context/SessionContext.jsx";
  * meant two things to keep in sync forever, and they would not have stayed in
  * sync.
  */
-export default function BotDetailView({ code, reportPath, onBack, isUser = false }) {
+/** Adds `href` to <head> once (older report sheets are removed) and resolves
+ *  when it is usable. */
+function ensureStylesheet(href) {
+  if (!href) return Promise.resolve();
+  const existing = document.head.querySelector(`link[data-report-css][href="${href}"]`);
+  if (existing) return existing.__ready || Promise.resolve();
+  document.head.querySelectorAll("link[data-report-css]").forEach((l) => l.remove());
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = href;
+  link.setAttribute("data-report-css", "");
+  link.__ready = new Promise((resolve) => {
+    link.onload = () => resolve();
+    link.onerror = () => resolve();
+  });
+  document.head.appendChild(link);
+  return link.__ready;
+}
+
+export default function BotDetailView({
+  code,
+  reportPath,
+  onBack,
+  onOpenBot,
+  isUser = false,
+  // A portfolio page re-runs through the portfolio endpoint, not `?refresh=1`.
+  onReanalyze = null,
+  backLabel = null,
+}) {
   const { session } = useSession();
   const [htmlContent, setHtmlContent] = useState("");
   const [botMeta, setBotMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [reanalyzing, setReanalyzing] = useState(false);
   const containerRef = useRef(null);
   const reAnalyzeBtnRef = useRef(null);
 
@@ -39,11 +70,26 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
     const params = new URLSearchParams();
     if (isRefresh) params.set("refresh", "1");
     if (isUserView) params.set("view", "user");
-    params.set("_t", String(Date.now()));
-    const url = `${reportPath || `/bot/${code}`}?${params.toString()}`;
-    fetch(url, { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
+    const query = params.toString();
+    const url = `${reportPath || `/bot/${code}`}${query ? `?${query}` : ""}`;
+    // "no-cache" = always ask the server (the analysis is always current),
+    // but a page identical to the one already held comes back as a bodiless
+    // 304 against its ETag instead of the whole document.
+    fetch(url, { cache: "no-cache" })
       .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}: Bot report not found`);
+        if (!res.ok) {
+          // Subject-aware on purpose: this component now renders portfolios
+          // too, and telling someone their PORTFOLIO could not be found
+          // because a "bot report" is missing sends them looking for the
+          // wrong thing.
+          const subject = reportPath ? "report" : "bot report";
+          throw new Error(
+            res.status === 404
+              ? `This ${subject} is no longer available on the server. `
+                + `Run the analysis again to rebuild it.`
+              : `HTTP ${res.status}: could not load this ${subject}`
+          );
+        }
         return res.text();
       })
       .then((html) => {
@@ -58,8 +104,31 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
         const verdict = verdictEl ? verdictEl.textContent.trim() : "";
         const verdictColor = verdictEl ? verdictEl.style.getPropertyValue("--badge-color") : "";
 
+        // "DRAWDOWN: X · QUALITY: Y" chip -- server-rendered inside the header
+        // that step 2 below strips, so copy it out first and show it on this
+        // SPA's own header row (right side of the bot name).
+        const verdictChipEl = doc.querySelector(".report-verdict-chip");
+        if (verdictChipEl) {
+          // Sentence case for the header pill ("Drawdown: High · Quality:
+          // Weak", "Hidden risk"); the words themselves are unchanged.
+          const walker = doc.createTreeWalker(verdictChipEl, NodeFilter.SHOW_TEXT);
+          for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+            n.textContent = n.textContent
+              .toLowerCase()
+              .replace(/(^\s*|·\s*)(\p{L})/gu, (m, pre, ch) => pre + ch.toUpperCase());
+          }
+        }
+        const verdictChipHtml = verdictChipEl ? verdictChipEl.outerHTML : "";
+
+        // Portfolio pages: the member chips and the "merged book of N bots"
+        // line the server puts where a bot's market badge would be.
+        const membersEl = doc.querySelector(".report-members");
+        const membersHtml = membersEl ? membersEl.outerHTML : "";
+        const sublineEl = doc.querySelector(".report-subline");
+        const subline = sublineEl ? sublineEl.textContent.trim() : "";
+
         const symbolEl = doc.querySelector(".venue-symbol-badge");
-        const marketTag = symbolEl ? symbolEl.textContent.trim() : "";
+        const marketTag = symbolEl ? symbolEl.textContent.replace(/^[^\w(]+/u, "").trim() : "";
 
         const snapshotEl = doc.querySelector(".snapshot-banner");
         let snapshotTime = "";
@@ -91,6 +160,11 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
         });
         if (nameEl) nameEl.remove();
 
+        // (The old 2b-2e passes -- rewriting LIMITED narratives into tiles,
+        // regrouping score notes, injecting formula stars into Monte Carlo
+        // tables -- targeted markup the server no longer renders; they
+        // matched nothing and only cost a full scan of every report.)
+
         // 3. Tab mặc định: Kích hoạt panel-report đầu tiên
         const reportPanel = doc.querySelector("#panel-report");
         if (reportPanel) {
@@ -107,8 +181,12 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
           .map((s) => s.textContent)
           .join("\n");
 
-        // 5. Kích hoạt scripts (như METRIC_INFO, modal handlers)
+        // 5. Kích hoạt scripts (như METRIC_INFO, modal handlers). Data
+        // islands (`type="application/json"`, e.g. the ledger rows) are data,
+        // not code -- they stay in the markup for the runtime to read.
         Array.from(doc.querySelectorAll("script")).forEach((s) => {
+          const type = (s.getAttribute("type") || "").trim().toLowerCase();
+          if (type && type !== "text/javascript" && type !== "module") return;
           if (s.textContent && !s.src) {
             try {
               const scriptEl = document.createElement("script");
@@ -126,7 +204,11 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
           name: botName,
           verdict,
           verdictColor,
+          verdictChipHtml,
           marketTag,
+          membersHtml,
+          subline,
+          hasShortAnswer: !!doc.querySelector(".short-answer"),
           snapshotTime,
           hasRefresh,
         });
@@ -135,8 +217,14 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
         } else if (code) {
           document.title = `Nora - Risk Management · ${code}`;
         }
-        setHtmlContent({ styles, bodyContent });
-        setLoading(false);
+        // The report's own stylesheet is a cached file now (`<link>` in the
+        // served page): add it to <head> once and show the report when it
+        // has loaded, so it never paints unstyled.
+        const sheet = doc.querySelector('link[rel="stylesheet"][href^="/assets/report-"]');
+        return ensureStylesheet(sheet ? sheet.getAttribute("href") : null).then(() => {
+          setHtmlContent({ styles, bodyContent });
+          setLoading(false);
+        });
       })
       .catch((err) => {
         setError(err.message || "Error loading report");
@@ -146,7 +234,7 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
 
   useEffect(() => {
     loadReport(false);
-  }, [code, reportPath]);
+  }, [code, reportPath, onOpenBot]);
 
   useEffect(() => {
     if (!containerRef.current || !htmlContent) return;
@@ -191,6 +279,18 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
     // Active nhãn tab đầu tiên mặc định
     const defaultLabel = root.querySelector(".label-report");
     if (defaultLabel) defaultLabel.classList.add("active-tab-label");
+
+    // Từ bảng thành viên của một danh mục, mở thẳng bot đó. Link mang href
+    // thật (`/bot/<code>`) nên vẫn đi được khi trang được mở trực tiếp; ở
+    // trong SPA thì chặn lại để không rời khỏi router của nó.
+    root.querySelectorAll("a.pf-member-link").forEach((link) => {
+      link.onclick = (e) => {
+        const memberCode = link.getAttribute("data-code");
+        if (!memberCode || !onOpenBot) return;
+        e.preventDefault();
+        onOpenBot(memberCode);
+      };
+    });
 
     // Intercept back button clicks
     const backButtons = root.querySelectorAll(".btn-subnav-back, .back-link");
@@ -281,9 +381,9 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
     // Monte Carlo view tabs switcher (3 tabs: Distribution, Probability Band, Median Line)
     const mcTabBtns = root.querySelectorAll(".mc-view-tab-btn");
     const mcTabLabels = {
-      dist: "📊 Distribution",
-      fan: "📈 Probability Band",
-      median: "📉 Median Line",
+      dist: "Distribution",
+      fan: "Probability Band",
+      median: "Median Line",
     };
     mcTabBtns.forEach((btn) => {
       const tab = btn.getAttribute("data-tab");
@@ -512,7 +612,6 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
 
         richTip.innerHTML = `
           <div class="rich-tip-header">
-            <span class="rich-tip-icon">📐</span>
             <span class="rich-tip-title">${data.title || "Formula"}</span>
           </div>
           ${data.formula ? `<div class="rich-tip-formula-box"><strong class="rich-tip-formula-label">Formula:</strong> <span class="rich-tip-formula-code">${data.formula}</span></div>` : ""}
@@ -598,7 +697,6 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
 
       richTip.innerHTML = `
         <div class="rich-tip-header">
-          <span class="rich-tip-icon">📐</span>
           <span class="rich-tip-title">${data.title || "Formula"}</span>
         </div>
         ${data.formula ? `<div class="rich-tip-formula-box"><strong class="rich-tip-formula-label">Formula:</strong> <span class="rich-tip-formula-code">${data.formula}</span></div>` : ""}
@@ -822,11 +920,28 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
       }
     }
 
+    // Monte Carlo charts scale with their card, so their axis text would
+    // shrink to a few pixels on a phone. Expose the scale factor
+    // (viewBox width / drawn width) as --mc-k; the stylesheet multiplies the
+    // tick size by it on narrow screens to keep the text a readable size.
+    const mcSvgs = root.querySelectorAll(".mc-svg");
+    const fitMcText = () => {
+      mcSvgs.forEach((svg) => {
+        const drawn = svg.getBoundingClientRect().width;
+        const box = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal.width : 0;
+        if (drawn > 0 && box > 0) svg.style.setProperty("--mc-k", (box / drawn).toFixed(3));
+      });
+    };
+    const mcResize = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fitMcText) : null;
+    if (mcResize) mcSvgs.forEach((svg) => mcResize.observe(svg));
+    fitMcText();
+
     root.addEventListener("mouseover", handleMouseOver);
     root.addEventListener("mousemove", handleMouseMove);
     root.addEventListener("mouseout", handleMouseOut);
 
     return () => {
+      if (mcResize) mcResize.disconnect();
       root.removeEventListener("mouseover", handleMouseOver);
       root.removeEventListener("mousemove", handleMouseMove);
       root.removeEventListener("mouseout", handleMouseOut);
@@ -856,7 +971,7 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
         <p className="spa-error-desc">{error}</p>
         <div className="btn-row" style={{ justifyContent: "center", marginTop: 16 }}>
           <button type="button" className="btn pri" onClick={() => loadReport(false)}>
-            🔄 Retry loading report
+            Retry loading report
           </button>
           {onBack && (
             <button type="button" className="btn" onClick={onBack}>
@@ -873,11 +988,10 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
       {/* HEADER ĐỒNG NHẤT 100% VỚI HỆ THỐNG GIAO DIỆN CHUNG */}
       {botMeta && (
         <div className="head report-unified-head">
-          <div className="crumb">MONITORING SYSTEM · DETAILED QUANTITATIVE PROFILE</div>
-          <div className="head-row report-head-row">
-            {(onBack || (!isUserView && botMeta.hasRefresh)) && (
-              <>
-                <div className="head-actions report-head-actions-left">
+          {/* Hàng 1: nút Back / Re-analyze. Hàng 2: tên bot + sàn, chip
+              verdict căn phải. */}
+          {(onBack || (!isUserView && (botMeta.hasRefresh || onReanalyze))) && (
+                <div className="head-actions report-head-actions-left report-head-actions-top">
                   {onBack && (
                     <button
                       type="button"
@@ -885,19 +999,21 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
                       onClick={onBack}
                       title={isUserView ? "Look up another bot" : "Back to bot list"}
                     >
-                      ← {isUserView ? "Look up another bot" : "Back to list"}
+                      <span className="back-arrow">←</span>
+                      <span>{backLabel || (isUserView ? "Look up another bot" : "Back to list")}</span>
                     </button>
                   )}
-                  {!isUserView && botMeta.hasRefresh && (
+                  {!isUserView && (botMeta.hasRefresh || onReanalyze) && (
                     <div className="reanalyze-wrapper" style={{ position: "relative" }}>
                     <button
                       ref={reAnalyzeBtnRef}
                       type="button"
                       className="btn"
                       onClick={() => setConfirmOpen((v) => !v)}
+                      disabled={reanalyzing}
                       title="Re-scan the latest data from OKX and recalculate from scratch"
                     >
-                      ⚡ Re-analyze
+                      {reanalyzing ? "Re-analyzing…" : "Re-analyze"}
                     </button>
 
                     {confirmOpen && (
@@ -908,12 +1024,14 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
                           onClick={() => setConfirmOpen(false)}
                         />
                         <div className="reanalyze-confirm-popover" role="dialog" aria-modal="true">
-                          <div className="reanalyze-confirm-icon">⚡</div>
-                          <div className="reanalyze-confirm-title">Re-analyze this bot?</div>
+                          <div className="reanalyze-confirm-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10" /></svg></div>
+                          <div className="reanalyze-confirm-title">
+                            {onReanalyze ? "Re-analyze this portfolio?" : "Re-analyze this bot?"}
+                          </div>
                           <div className="reanalyze-confirm-body">
-                            This will fetch live data from OKX and re-run all 10,000 Monte Carlo
-                            simulations from scratch. The current snapshot will be overwritten.
-                            This may take 30–60 seconds.
+                            {onReanalyze
+                              ? "This re-reads every member bot from OKX, rebuilds the merged book and re-runs the correlation and joint simulation. The current report will be overwritten. This may take a few minutes."
+                              : "This will fetch live data from OKX and re-run all 10,000 Monte Carlo simulations from scratch. The current snapshot will be overwritten. This may take 30–60 seconds."}
                           </div>
                           <div className="reanalyze-confirm-actions">
                             <button
@@ -921,10 +1039,17 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
                               className="btn reanalyze-btn-confirm"
                               onClick={() => {
                                 setConfirmOpen(false);
-                                loadReport(true);
+                                if (onReanalyze) {
+                                  setReanalyzing(true);
+                                  Promise.resolve(onReanalyze())
+                                    .then(() => loadReport(false))
+                                    .finally(() => setReanalyzing(false));
+                                } else {
+                                  loadReport(true);
+                                }
                               }}
                             >
-                              ⚡ Confirm re-analyze
+                              Confirm re-analyze
                             </button>
                             <button
                               type="button"
@@ -940,9 +1065,8 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
                   </div>
                   )}
                 </div>
-                <div className="report-head-divider" />
-              </>
-            )}
+          )}
+          <div className="head-row report-head-row">
             <div className="report-title-group">
               <h1>{botMeta.name || code}</h1>
               {botMeta.name && botMeta.name !== code && (
@@ -952,11 +1076,27 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
                 <span className="venue-symbol-badge">{botMeta.marketTag}</span>
               )}
             </div>
+            {/* The verdict reads inside the report's short answer now; the
+                header copy is only kept for reports rendered without one. */}
+            {botMeta.verdictChipHtml && !botMeta.hasShortAnswer && (
+              <div
+                className="report-head-verdict"
+                style={{ "--vc": verdictToken(botMeta.verdict) }}
+                dangerouslySetInnerHTML={{ __html: botMeta.verdictChipHtml }}
+              />
+            )}
           </div>
 
+          {botMeta.membersHtml && (
+            <div
+              className="report-head-members"
+              dangerouslySetInnerHTML={{ __html: botMeta.membersHtml }}
+            />
+          )}
+          {botMeta.subline && <div className="report-head-subline">{botMeta.subline}</div>}
           {botMeta.snapshotTime ? (
             <div className="report-snapshot-notice">
-              <span className="notice-icon">⏱️</span>
+              <svg className="notice-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
               <span>
                 Analysis time: <strong>{botMeta.snapshotTime}</strong>
               </span>
@@ -974,6 +1114,7 @@ export default function BotDetailView({ code, reportPath, onBack, isUser = false
       )}
       <div
         className="bot-report-inner-main"
+        id="bot-report-body"
         dangerouslySetInnerHTML={{ __html: htmlContent.bodyContent }}
       />
     </div>

@@ -1100,18 +1100,41 @@ def assess_limited_bot(
     ]
     profile_line = _profile_text(profile)
     if profile_line:
-        text.append(profile_line)
+        text.append(f"• {profile_line}")
     text.extend(
-        f"{c.label_vi}: {'; '.join(c.findings)}"
+        f"• {c.label_vi}: {'; '.join(c.findings)}"
         for c in [drawdown, stability]
         if c.findings
     )
-    text.extend(mc_text)
+    # "• " prefix (rather than appending these plain) so `report_page.py`'s
+    # `_render_conclusion` classifies each fact as its own `proof_items`
+    # bullet -- rendered as a structured evidence row -- instead of every
+    # one of these fact lines falling through to its undifferentiated
+    # `other_lines` bucket and being concatenated into one unbroken
+    # paragraph (real bug, found rendering a real 60004-blocked OKX bot:
+    # boss's own report, "nội dung QUANTITATIVE EVIDENCE... trồi ra ngoài").
+    text.extend(f"• {line}" for line in mc_text)
     text.append(
-        "Could not be computed (requires individual trade data OKX does not publish): "
+        "• Could not be computed (requires individual trade data OKX does not publish): "
         + ", ".join(_ALWAYS_UNAVAILABLE_LABELS_VI[d] for d in ALWAYS_UNAVAILABLE)
         + ", PSR/DSR"
         + (", Monte Carlo simulation" if mc_component.status != "AVAILABLE" else "")
+    )
+    # Stated up front, once, instead of five separate near-empty report
+    # sections each repeating their own "no data" notice (project owner's
+    # own report on a real 60004-blocked bot: state what is hidden right at
+    # the start, and hide the sections that have nothing to show rather than
+    # rendering their empty form). report_page.py's LIMITED renderers for
+    # these five sections return "" and vanish from the page/nav entirely
+    # when this bot has none of the underlying public data -- this bullet is
+    # the only place that fact is still stated.
+    text.append(
+        "• Sections with nothing to show for this bot are left out of this "
+        "report rather than shown empty: how it trades, open-position audit, "
+        "statistical inference (PSR/DSR), and the list of recent closed "
+        "trades are never public for a 60004-blocked bot; the market being "
+        "scored and traded-assets sections are shown only if this bot's "
+        "public profile still lists its instruments."
     )
     text.append(
         f"CONCLUSION: {verdict} — risk score {risk:.0f}/100, confidence "

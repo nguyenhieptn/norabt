@@ -186,7 +186,7 @@ def test_full_result_renders_every_section(full_result: Dict[str, Any]) -> None:
     assert full_result["verdict"] in out
 
     # Section 2: conclusion / recommendation, not dumped into a bare <pre>.
-    assert "Conclusion and recommendation" in out
+    assert "Conclusion" in out
     assert "<pre>" not in out
 
     # Section ①: "How this bot trades", placed right after the conclusion --
@@ -212,7 +212,9 @@ def test_full_result_renders_every_section(full_result: Dict[str, Any]) -> None:
     # at least one "sở cứ + lý thuyết" collapsible -- the task's own
     # explicit third requirement. Was ">= 5" before section ① added its own
     # theory block.
-    assert out.count('<details class="theory">') >= 6
+    # 2026-09-24 redesign: the per-section "Methodology & interpretation"
+    # drawers were removed at the project owner's request -- each figure now
+    # carries its own "*" formula instead -- so there is no count to assert.
 
 
 def test_full_result_shows_veto_or_weighted_average_explicitly(
@@ -257,7 +259,7 @@ def _limited_result(**overrides: Any) -> Dict[str, Any]:
         "quality": 40.0,
         "confidence": 35.0,
         "evidence": {
-            "profile": {"aum": 20000.0, "rank": 3},
+            "profile": {"aum": 20000.0, "rank": 3, "traderInsts": ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]},
             "stats": {"winRatio": "0.62"},
             "weekly_points": 12,
             "equity_curve_basis": "WEEKLY_PNL",
@@ -286,6 +288,10 @@ def _limited_result(**overrides: Any) -> Dict[str, Any]:
         "assets": [],
         "text": [
             "Đây là ĐÁNH GIÁ HẠN CHẾ cho mã ED2DE1A47EEF62EC: bot không công khai sổ lệnh.",
+            "• Sections with nothing to show for this bot are left out of this "
+            "report rather than shown empty: how it trades, open-position audit, "
+            "statistical inference (PSR/DSR), and the list of recent closed "
+            "trades are never public for a 60004-blocked bot.",
             "Kết luận: TIỀM ẨN -- điểm rủi ro 62/100, độ tin cậy 35/100.",
         ],
     }
@@ -306,10 +312,14 @@ def test_limited_result_renders_without_crashing_and_shows_banner() -> None:
 def test_limited_result_marks_concealed_dimension_and_hides_unmeasured_score() -> None:
     result = _limited_result()
     out = render_bot_report_html(result)
-    # The concealed component must show up as "not measured", never with a
-    # numeric bar that could be mistaken for an actual measured 70.
-    assert "concealed" in out
-    assert "Profit factor" in out  # the component's own label still shows
+    # The concealed component must never get a numeric bar that could be
+    # mistaken for an actual measured 70. Since 2026-09-24 (project owner:
+    # what a bot does not publish is not talked about) it is left out of the
+    # dimension list entirely rather than listed as "not measured".
+    dims = re.search(r'<section class="card[^"]*" id="diem-chieu"[^>]*>.*?</section>', out, re.S)
+    assert dims, "missing section diem-chieu"
+    assert "concealed" not in dims.group(0)
+    assert "Not measured" not in dims.group(0)
 
 
 def test_limited_result_shows_public_stats_and_assets_placeholder_not_full_metrics() -> (
@@ -331,7 +341,7 @@ def test_limited_result_shows_public_stats_and_assets_placeholder_not_full_metri
 
     def _section_body(anchor: str) -> str:
         match = re.search(
-            rf'<section class="card[^"]*" id="{anchor}">.*?</section>', out, re.S
+            rf'<section class="card[^"]*" id="{anchor}"[^>]*>.*?</section>', out, re.S
         )
         assert match, f"missing section {anchor}"
         return match.group(0)
@@ -349,57 +359,69 @@ def test_limited_result_shows_public_stats_and_assets_placeholder_not_full_metri
         assert full_only_metric not in _section_body("tai-san")
 
 
-def test_limited_result_has_the_same_section_ids_as_a_full_result(
+def test_limited_result_hides_sections_it_has_nothing_to_show_for(
     full_result: Dict[str, Any],
 ) -> None:
-    """The task's own main acceptance criterion: a LIMITED result must
-    render the exact same set of section anchors a FULL result does, even
-    though most of them are honest placeholders for this bot -- a reader
-    must never see a materially shorter page and wonder whether the system
-    is broken."""
+    """Reversed 2026-09-22, project owner's own report on a real 60004-blocked
+    OKX bot: a LIMITED result used to render the exact same section ids as a
+    FULL result, padding out every unmeasurable one with a lone ".notice"
+    explanation ("cái nào không có dữ kiện... thay vì thế... nêu ngay từ đầu
+    -> và ẩn các mục không thể tính toán"). That produced 6+ near-empty cards
+    per bot. Now a LIMITED section with nothing to show returns "" (so
+    `_section`'s own `if not body: return ""` guard, and the anchor drops out
+    of the auto-generated nav with it) instead of rendering its empty shell,
+    and the fact that it is missing -- and why -- is stated ONCE, up front, in
+    `limited.py`'s own `text` (surfaces in "Conclusion"'s
+    QUANTITATIVE EVIDENCE, see `test_limited_result_states_hidden_sections_up_front`
+    below), not repeated per empty card.
+
+    Some anchors are unconditionally unmeasurable for ANY 60004-blocked bot
+    (no public endpoint ever carries this data, regardless of which fields
+    this particular bot's profile/stats happen to have) and must never
+    appear for a LIMITED result. Others are conditional on this bot's own
+    public data and may or may not appear -- `_limited_result()`'s fixture
+    profile/stats are rich enough that "nhan-dinh"/"thi-truong-chinh"/
+    "so-lieu"/"tai-san" DO render (asserted by sibling tests in this file),
+    so this test only pins the anchors that can never come back regardless
+    of fixture data.
+    """
     limited_out = render_bot_report_html(_limited_result())
     full_out = render_bot_report_html(full_result)
     limited_ids = set(
         re.findall(r'<section class="card[^"]*" id="([^"]+)"', limited_out)
     )
     full_ids = set(re.findall(r'<section class="card[^"]*" id="([^"]+)"', full_out))
-    # The insight sections need the bot's own closed-trade ledger, which a
-    # LIMITED record does not have. They are therefore not rendered at all
-    # rather than rendered empty -- four cards repeating "this needs a ledger"
-    # is noise, and the limitation is stated once in the data-limitations
-    # drawer instead. Every OTHER section keeps the original parity: a reader
-    # must not see a materially shorter page and wonder what broke.
+    never_measurable_for_limited = {
+        "thi-truong",  # per-symbol trading-value share needs the trade ledger
+        "cach-choi",  # entry direction/leverage/hold-time needs the trade ledger
+        "vi-the-mo",  # per-position unrealised loss needs the trade ledger
+        "suy-luan",  # PSR/DSR needs a per-trade return series
+        "danh-sach-lenh",  # there is no trade ledger to list trades from
+    }
+    assert never_measurable_for_limited & full_ids == never_measurable_for_limited
+    assert limited_ids.isdisjoint(never_measurable_for_limited)
+    # Every OTHER anchor a FULL result has (minus the pre-existing
+    # ledger-only "insight" cards this same invariant already excluded) is
+    # still a REACHABLE anchor for a LIMITED bot with rich enough public
+    # data -- this fixture just doesn't happen to populate all of them.
     insight_only = {"holdout", "scenario-lab", "market-compatibility"}
-    assert limited_ids == full_ids - insight_only
-    assert insight_only <= full_ids
-    # 14 -> 17: three deterministic insight sections were added to both pages
-    # ("In one look", "Did earlier results hold up later", "Scenario
-    # laboratory"). A LIMITED record cannot compute any of them, so each one
-    # renders its shell and states the reason -- which is exactly the invariant
-    # this test exists to protect.
-    # 17 -> 18 -> 17: "Market compatibility" was added to the market tab, and
-    # the extra "essence" card was removed from the result tab, which is back
-    # to its original five sections.
-    # "Ask Nora AI" was added OUTSIDE the three tab panels entirely (visible
-    # regardless of which tab is open, see `_render_chat_widget`'s call site
-    # in `render_bot_report_html`), so it carries no `<section class="card"
-    # id="...">` and does not change this count at all -- see
-    # `test_render_invariants.py::test_result_tab_stays_an_overview`, which
-    # protects the OTHER half of this same decision (tab 1 stays exactly 5).
-    assert len(full_ids) == 17
+    assert limited_ids <= full_ids - insight_only - never_measurable_for_limited
 
 
-def test_limited_result_placeholder_sections_state_a_reason_not_a_bare_dash() -> None:
-    """Every section a LIMITED bot cannot honestly fill (no closed ledger)
-    must carry a `.notice` explanation, never a bare "0"/"—" that could be
-    misread as an actual zero-risk measurement."""
+def test_limited_result_states_hidden_sections_up_front() -> None:
+    """The reason sections are missing is stated ONCE, near the top of the
+    page (inside "Conclusion"'s QUANTITATIVE EVIDENCE),
+    rather than left for the reader to notice on their own -- the other half
+    of the same 2026-09-22 change `test_limited_result_hides_sections_it_has_
+    nothing_to_show_for` protects."""
     out = render_bot_report_html(_limited_result())
-    for anchor in ("cach-choi", "vi-the-mo", "suy-luan", "danh-sach-lenh"):
-        section = re.search(
-            rf'<section class="card[^"]*" id="{anchor}">.*?</section>', out, re.S
-        )
-        assert section, f"missing section {anchor}"
-        assert "notice" in section.group(0), f"{anchor} has no explanation notice"
+    ket_luan = re.search(
+        r'<section class="card[^"]*" id="ket-luan"[^>]*>.*?</section>', out, re.S
+    )
+    assert ket_luan, "missing section ket-luan"
+    # Reversed 2026-09-24 (project owner: a bot that hides its data is simply
+    # not talked about): the "left out of this report" row is gone too.
+    assert "left out of this report" not in ket_luan.group(0)
 
 
 def test_limited_result_with_valid_monte_carlo_renders_mc_section() -> None:
@@ -592,7 +614,7 @@ def test_narrative_appears_right_after_the_conclusion_section() -> None:
         narrative="Điểm rủi ro thấp, nhất quán với sụt vốn ghi nhận.", code="OK5"
     )
     out = render_bot_report_html(result)
-    conclusion_pos = out.index("Conclusion and recommendation")
+    conclusion_pos = out.index('id="ket-luan"')
     narrative_pos = out.index("Expert assessment")
     dimensions_pos = out.index("Score by risk dimension")
     assert conclusion_pos < narrative_pos < dimensions_pos
@@ -1262,14 +1284,14 @@ def _market_coverage_result(**evidence_overrides: Any) -> Dict[str, Any]:
 
 
 def _market_coverage_fragment(out: str) -> str:
-    match = re.search(r'<section class="card" id="thi-truong">.*?</section>', out, re.S)
+    match = re.search(r'<section class="card" id="thi-truong"[^>]*>.*?</section>', out, re.S)
     assert match, "expected a rendered 'Market being scored' section"
     return match.group(0)
 
 
 def test_market_coverage_section_present_right_after_conclusion() -> None:
     out = render_bot_report_html(_market_coverage_result())
-    conclusion_pos = out.index("Conclusion and recommendation")
+    conclusion_pos = out.index('id="ket-luan"')
     market_pos = out.index("Market being scored")
     assert conclusion_pos < market_pos
     # `_market_coverage_result` carries no `evidence.strategy`, so "Cách bot
@@ -1640,18 +1662,20 @@ def _strategy_result(**overrides: Any) -> Dict[str, Any]:
 
 
 def _cach_choi_fragment(out: str) -> str:
-    match = re.search(r'<section class="card" id="cach-choi">.*?</section>', out, re.S)
+    match = re.search(r'<section class="card" id="cach-choi"[^>]*>.*?</section>', out, re.S)
     assert match, "expected a rendered 'How this bot trades' section"
     return match.group(0)
 
 
 def test_strategy_section_present_right_after_conclusion_with_own_details() -> None:
     out = render_bot_report_html(_strategy_result())
-    conclusion_pos = out.index("Conclusion and recommendation")
+    conclusion_pos = out.index('id="ket-luan"')
     strategy_pos = out.index("How this bot trades")
     assert conclusion_pos < strategy_pos
     fragment = _cach_choi_fragment(out)
-    assert '<details class="theory">' in fragment
+    # The "Methodology & interpretation" note was dropped from this section
+    # at the project owner's request (2026-09-24).
+    assert '<details class="theory">' not in fragment
 
 
 def test_strategy_section_translates_every_enum_no_raw_tokens_leak() -> None:
@@ -1889,9 +1913,10 @@ def test_tab_titles_renamed_and_verdict_wording_gone(
     full_result: Dict[str, Any],
 ) -> None:
     out = render_bot_report_html(full_result)
-    assert '<span class="tab-title">Analyst Result</span>' in out
-    assert '<span class="tab-title">Premium Market</span>' in out
-    assert '<span class="tab-title">Other &amp; Position</span>' in out
+    # Plain tab names (2026-09-25): what each tab answers.
+    assert '<span class="tab-title">Summary</span>' in out
+    assert '<span class="tab-title">Markets</span>' in out
+    assert '<span class="tab-title">Trades &amp; positions</span>' in out
     assert "Báo Cáo Phán Quyết" not in out
     # Vòng tròn số thứ tự tab và animation đổi tab đã bỏ hẳn (animation làm
     # ảnh chụp kiểm thử thị giác bắt được trạng thái mờ dở dang).
@@ -1899,16 +1924,12 @@ def test_tab_titles_renamed_and_verdict_wording_gone(
     assert "fadeIn" not in out
 
 
-def test_section_renders_block_header_and_body_with_optional_eyebrow_note() -> None:
+def test_section_renders_body_without_a_visible_title_but_keeps_it_as_aria_label() -> None:
     plain = report_page_module._section("Tiêu đề", "<p>x</p>", anchor="abc")
-    assert '<section class="card" id="abc">' in plain
-    assert '<header class="block-h"><h2>Tiêu đề</h2></header>' in plain
+    assert '<section class="card" id="abc" aria-label="Tiêu đề">' in plain
     assert '<div class="block-b"><p>x</p></div>' in plain
-    rich = report_page_module._section(
-        "Tiêu đề", "<p>x</p>", eyebrow="Nhóm", note="nguồn: OKX"
-    )
-    assert '<span class="eyebrow">Nhóm</span>' in rich
-    assert '<span class="note">nguồn: OKX</span>' in rich
+    assert "<h2>" not in plain
+    assert "block-h" not in plain
 
 
 # --------------------------------------------------------------------------- #

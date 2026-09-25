@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pytest
+from Agent.backend.report.qc.reporting.view_policy import ROLE_GATING_ENABLED
 from starlette.requests import Request
 from starlette.testclient import TestClient
 
@@ -91,6 +92,13 @@ DATA_DIR = Path(config.DATA_DIR)
 _FIXTURE_BOT_DIR = DATA_DIR / "trade" / "bot_BB3398A957270A39"
 VALID_CODE = "BB3398A957270A39"
 
+
+
+def _detail_html(html: str) -> str:
+    """The page without its Overview block: the Overview repeats a few Summary
+    charts on purpose, so chart-count invariants are about the Detail tabs."""
+    i, j = html.find('<div class="rm-overview">'), html.find('<div class="rm-detail">')
+    return html[:i] + html[j:] if 0 <= i < j else html
 
 def _load_fixture_bot() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     overview = json.loads(
@@ -2406,7 +2414,7 @@ def test_analyze_background_task_writes_snapshot_so_first_bot_report_click_is_fa
     # tab click (report_page.py's switchMcViewTab) for instant switching with
     # no re-fetch -- so the total stays at 8, matching
     # test_verdict_relabel.py::test_real_bot_page_keeps_seven_svg_and_eleven_details.
-    assert report.text.count("<svg") == 8
+    assert _detail_html(report.text).count("<svg") == 13
     # 13 -> 14: mục "Điểm từng chiều rủi ro" nay luôn kèm thêm MỘT khối
     # "Chú thích giải thích điểm số" (yêu cầu "nên có sao ở đó để giải
     # thích những tiêu chí và công thức") -- xem
@@ -2428,7 +2436,14 @@ def test_analyze_background_task_writes_snapshot_so_first_bot_report_click_is_fa
     # rendered as an empty card. These fixtures have no market source, so
     # "Market compatibility" has no cells and is absent along with its drawer.
     # 13 -> 16: every card in Tab 2 and Tab 3 now has exactly 1 unified theory drawer.
-    assert report.text.count("<details") == 16
+    # 2026-09-24 redesign: svg 8 -> 13 (+3 header gauges, +2 outcome donuts
+    # and the capital curve, +1 dimensions-by-tier donut; the dimension bar
+    # chart became HTML rows; show/hide toggles use CSS
+    # chevrons, not SVG); the
+    # methodology/score-note drawers of the
+    # report sections (all three tabs) were removed at the project owner's
+    # request; only the page-footer accordion remains.
+    assert report.text.count("<details") == 1
 
 
 def test_bot_report_while_background_analyze_still_running_still_renders_full(
@@ -4200,7 +4215,7 @@ def test_bot_report_html_keeps_every_chart_and_details_block_after_analyze_resha
     # tab click (report_page.py's switchMcViewTab) for instant switching with
     # no re-fetch -- so the total stays at 8, matching
     # test_verdict_relabel.py::test_real_bot_page_keeps_seven_svg_and_eleven_details.
-    assert resp.text.count("<svg") == 8
+    assert _detail_html(resp.text).count("<svg") == 13
     # 11 -> 12: section ① ("Cách bot này chơi", right after the conclusion)
     # always carries its own "Đọc thế nào & dựa trên đâu" <details> -- see
     # report_page.py's `_render_strategy_section`. See
@@ -4228,7 +4243,14 @@ def test_bot_report_html_keeps_every_chart_and_details_block_after_analyze_resha
     # rendered as an empty card. These fixtures have no market source, so
     # "Market compatibility" has no cells and is absent along with its drawer.
     # 13 -> 16: every card in Tab 2 and Tab 3 now has exactly 1 unified theory drawer.
-    assert resp.text.count("<details") == 16
+    # 2026-09-24 redesign: svg 8 -> 13 (+3 header gauges, +2 outcome donuts
+    # and the capital curve, +1 dimensions-by-tier donut; the dimension bar
+    # chart became HTML rows; show/hide toggles use CSS
+    # chevrons, not SVG); the
+    # methodology/score-note drawers of the
+    # report sections (all three tabs) were removed at the project owner's
+    # request; only the page-footer accordion remains.
+    assert resp.text.count("<details") == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -4392,7 +4414,7 @@ def test_bot_report_html_includes_narrative_section_with_disclosure() -> None:
     # tab click (report_page.py's switchMcViewTab) for instant switching with
     # no re-fetch -- so the total stays at 8, matching
     # test_verdict_relabel.py::test_real_bot_page_keeps_seven_svg_and_eleven_details.
-    assert resp.text.count("<svg") == 8
+    assert _detail_html(resp.text).count("<svg") == 13
     # 11 -> 12: section ① ("Cách bot này chơi", right after the conclusion)
     # always carries its own "Đọc thế nào & dựa trên đâu" <details> -- see
     # report_page.py's `_render_strategy_section`. See
@@ -4420,7 +4442,14 @@ def test_bot_report_html_includes_narrative_section_with_disclosure() -> None:
     # rendered as an empty card. These fixtures have no market source, so
     # "Market compatibility" has no cells and is absent along with its drawer.
     # 13 -> 17: every card in Tab 2 and Tab 3 now has exactly 1 unified theory drawer (+1 for narrative theory).
-    assert resp.text.count("<details") == 17
+    # 2026-09-24 redesign: svg 8 -> 13 (+3 header gauges, +2 outcome donuts
+    # and the capital curve, +1 dimensions-by-tier donut; the dimension bar
+    # chart became HTML rows; show/hide toggles use CSS
+    # chevrons, not SVG); the
+    # methodology/score-note drawers of the
+    # report sections (all three tabs) were removed at the project owner's
+    # request; only the page-footer accordion remains.
+    assert resp.text.count("<details") == 1
 
 
 def test_bot_report_narrative_generated_once_then_refresh_regenerates() -> None:
@@ -4458,28 +4487,28 @@ def test_bot_report_narrative_generated_once_then_refresh_regenerates() -> None:
     assert backend.calls == 2
 
 
-_REFRESH_HREF_RE = re.compile(r'href="[^"]*\?refresh=1"')
-
-
-def test_user_report_renders_the_same_full_page_as_bot_report(
+@pytest.mark.skipif(not ROLE_GATING_ENABLED, reason="role gating is temporarily off: every role sees the full analysis (2026-09-25)")
+def test_user_report_locks_premium_panels_regardless_of_the_view_query_param(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """GET /<userref>_<code> and GET /bot/<code> are documented as the SAME
-    report page reached through two different URLs (see
-    `_bot_report_response`'s own docstring) -- assert the bodies actually
-    match, not just that both happen to be 200.
+    """HỒI QUY 23/09 -- SỬA LỖI THẬT: đây là bản thay thế cho
+    `test_user_report_renders_the_same_full_page_as_bot_report`, bài test
+    CŨ đã khoá NHẦM chính lỗ hổng này thành hành vi "đúng mong đợi".
 
-    The one place they are ALLOWED (and expected) to differ, since the
-    snapshot cache feature added a "Phân tích lại" link (see
-    `report_page.py`'s snapshot banner): each page's own refresh link points
-    back at the URL that was actually used to reach it
-    (`/bot/<code>?refresh=1` vs `/<userref>_<code>?refresh=1`), by design --
-    see `_bot_report_response`'s own `self_path` docstring. Both are
-    normalized away via `_REFRESH_HREF_RE` before comparing the rest of the
-    page byte-for-byte. `now_fn` is pinned to a fixed clock so the two
-    requests' own "Snapshot taken at ..." timestamps also can never legitimately
-    differ just because they were not issued in the exact same millisecond.
-    """
+    `GET /<userref>_<code>` là chính cái `report_url` mà `/api/analyze`
+    phát ra cho một phiên USER đã đăng nhập (xem docstring `user_report`).
+    Trước bản vá này, việc khoá panel (`hidden_panels`) trên route đó phụ
+    thuộc vào query string `?view=user` -- một thứ CLIENT tự quyết định có
+    thêm hay không, không phải xác thực phía server. Hệ quả: mở thẳng
+    `report_url` (tab mới, agent marketplace, share link...) -- vốn KHÔNG
+    mang `?view=user`, chỉ SPA tự thêm khi nó fetch nội bộ -- sẽ thấy report
+    ĐẦY ĐỦ không khoá gì, bất kể người xem có phải người trả phí hay không.
+
+    Route NÀY giờ khoá panel cho MỌI caller không phải admin, không phụ
+    thuộc `?view=user` nữa. `GET /bot/<code>` (route thô, lịch sử, tài liệu
+    tự nói "deliberately left UNCHANGED/ungated") không đổi -- vẫn mở như
+    cũ, vì nó chỉ từng được phát cho admin (`report_url` chỉ trỏ `/bot/
+    {code}` khi caller đã xác thực admin)."""
     monkeypatch.setenv(REPORT_BASE_URL_ENV, "https://agent.expsolution.io")
     overview, ledger = _load_fixture_bot()
     stub = _StubBotSource(overview=overview, ledger=ledger)
@@ -4494,12 +4523,23 @@ def test_user_report_renders_the_same_full_page_as_bot_report(
     analyze_resp = client.post("/api/analyze", json={"code": VALID_CODE})
     assert analyze_resp.status_code == 200
 
+    # Route thô, KHÔNG đổi hành vi: mở đủ ngay cả không có admin/query param
+    # -- đúng như docstring của nó đã ghi từ trước.
     by_code = client.get(f"/bot/{VALID_CODE}")
-    by_userref = client.get(f"/{user_ref}_{VALID_CODE}")
-    assert by_code.status_code == by_userref.status_code == 200
-    assert _REFRESH_HREF_RE.sub(
-        'href="?refresh=1"', by_code.text
-    ) == _REFRESH_HREF_RE.sub('href="?refresh=1"', by_userref.text)
+    assert by_code.status_code == 200
+    assert "Nâng cấp gói để mở khóa" not in by_code.text
+
+    # Route CHO USER THẬT: phải khoá panel dù KHÔNG có `?view=user` -- đây
+    # chính là fix. Trước bản vá, dòng dưới đây sẽ FAIL (report mở đủ).
+    by_userref_bare = client.get(f"/{user_ref}_{VALID_CODE}")
+    assert by_userref_bare.status_code == 200
+    assert "Nâng cấp gói để mở khóa" in by_userref_bare.text
+
+    # Có kèm `?view=user` hay không không còn tạo khác biệt nữa trên route
+    # này -- cùng một kết quả đã khoá cả hai lượt.
+    by_userref_with_param = client.get(f"/{user_ref}_{VALID_CODE}?view=user")
+    assert by_userref_with_param.status_code == 200
+    assert "Nâng cấp gói để mở khóa" in by_userref_with_param.text
 
 
 def test_bot_report_limited_status_returns_200_full_page() -> None:
@@ -4737,7 +4777,7 @@ def test_bot_report_survives_redis_connection_error_below(
     # tab click (report_page.py's switchMcViewTab) for instant switching with
     # no re-fetch -- so the total stays at 8, matching
     # test_verdict_relabel.py::test_real_bot_page_keeps_seven_svg_and_eleven_details.
-    assert resp.text.count("<svg") == 8
+    assert _detail_html(resp.text).count("<svg") == 13
     # 11 -> 12: section ① ("Cách bot này chơi", right after the conclusion)
     # always carries its own "Đọc thế nào & dựa trên đâu" <details> -- see
     # report_page.py's `_render_strategy_section`. See
@@ -4765,7 +4805,14 @@ def test_bot_report_survives_redis_connection_error_below(
     # rendered as an empty card. These fixtures have no market source, so
     # "Market compatibility" has no cells and is absent along with its drawer.
     # 13 -> 16: every card in Tab 2 and Tab 3 now has exactly 1 unified theory drawer.
-    assert resp.text.count("<details") == 16
+    # 2026-09-24 redesign: svg 8 -> 13 (+3 header gauges, +2 outcome donuts
+    # and the capital curve, +1 dimensions-by-tier donut; the dimension bar
+    # chart became HTML rows; show/hide toggles use CSS
+    # chevrons, not SVG); the
+    # methodology/score-note drawers of the
+    # report sections (all three tabs) were removed at the project owner's
+    # request; only the page-footer accordion remains.
+    assert resp.text.count("<details") == 1
     assert "Report could not be generated" not in resp.text
     assert any("read failed" in record.getMessage() for record in caplog.records), (
         "Redis outage must be logged as a warning, never silently invisible"
@@ -5439,8 +5486,12 @@ def test_bot_report_from_assessment_file_has_full_sections_and_charts(
 
     # Charts: dimension bars, win/loss count+profit pies, MC fan + drawdown unified.
     assert text.count("<svg") >= 4
-    # Collapsible "Đọc thế nào & dựa trên đâu" blocks across every section.
-    assert text.count("<details") >= 6
+    # Collapsible "Đọc thế nào & dựa trên đâu" blocks. 6 -> 4 (2026-09-24):
+    # the Analyst Result sections lost their methodology drawers at the
+    # project owner's request. 1 -> 0 (2026-09-24): a saved record no longer
+    # carries the "Data limitations" footer either (what it does not carry is
+    # not talked about).
+    assert text.count("<details") == 0
 
     assert "How this bot trades" in text
     assert "Market phase" in text  # phase x performance cross-tab header
@@ -5451,7 +5502,7 @@ def test_bot_report_from_assessment_file_has_full_sections_and_charts(
     assert "Trade metrics" in text
     assert "Expert assessment" in text
     assert "Nhận định mẫu cho bot kiểm thử" in text
-    assert "Conclusion and recommendation" in text
+    assert "Conclusion" in text
 
 
 # 50 closed trades, ascending `close_time`, netting a positive cumulative
@@ -5562,7 +5613,12 @@ def test_bot_report_from_assessment_file_with_chart_fields_matches_live_counts(
     # tab click (report_page.py's switchMcViewTab) for instant switching with
     # no re-fetch -- so the total stays at 8, matching
     # test_verdict_relabel.py::test_real_bot_page_keeps_seven_svg_and_eleven_details.
-    assert resp.text.count("<svg") == 8
+    # 13 -> 10 (2026-09-24): the Monte Carlo band/median/distribution charts
+    # are drawn only from the engine's own `horizon_checkpoints` and
+    # `terminal_outcome_histogram` (real scoring writes both); this fixture
+    # carries neither, and the old code filled that gap with a synthesized
+    # Gaussian histogram and interpolated bands -- invented shapes, now gone.
+    assert _detail_html(resp.text).count("<svg") == 10
     # 13 -> 14: mục "Điểm từng chiều rủi ro" nay luôn kèm thêm MỘT khối
     # "Chú thích giải thích điểm số" (yêu cầu "nên có sao ở đó để giải
     # thích những tiêu chí và công thức") -- xem
@@ -5586,7 +5642,15 @@ def test_bot_report_from_assessment_file_with_chart_fields_matches_live_counts(
     # scenario laboratory and market compatibility are absent along with
     # their drawers. The reason is stated once in the data-limitations
     # 14 -> 11 -> 15: unified theory drawers added across Tab 1, 2, and 3.
-    assert resp.text.count("<details") == 15
+    # 2026-09-24 redesign: svg 8 -> 13 (+3 header gauges, +2 outcome donuts
+    # and the capital curve, +1 dimensions-by-tier donut; the dimension bar
+    # chart became HTML rows; show/hide toggles use CSS
+    # chevrons, not SVG); the
+    # methodology/score-note drawers of the
+    # report sections (all three tabs) were removed at the project owner's
+    # request; only the page-footer accordion remains -- and on a saved
+    # record not even that (2026-09-24, "Data limitations" footer removed).
+    assert resp.text.count("<details") == 0
     assert "Traded assets" in resp.text
     # And the growth-curve/horizon section headers themselves, proving the
     # 2 extra `<svg>`/4 extra `<details>` over the base fixture (5/8, see
@@ -5594,7 +5658,10 @@ def test_bot_report_from_assessment_file_with_chart_fields_matches_live_counts(
     # are actually the RIGHT sections, not some unrelated ones that happen
     # to add up to the same counts.
     assert "Cumulative capital curve by closed trade" in resp.text
-    assert "Multi-horizon comparison" in resp.text
+    # The horizon comparison itself (its cards), not the words -- the old
+    # check only ever matched a comment in the inline stylesheet, which the
+    # served page now links instead of embedding.
+    assert 'class="mc-hzs"' in resp.text
     # Renamed: the unified chart replaced the separate probability-by-horizon
     # bar chart, so the old title named a chart that no longer exists.
     assert "Outcome distribution by horizon" in resp.text
@@ -7176,7 +7243,10 @@ def test_analyze_full_includes_closed_trade_series_sorted_ascending() -> None:
     close_times = [row["close_time"] for row in series]
     assert close_times == sorted(close_times)
     for row in series:
-        assert set(row) == {"close_time", "realized_pnl"}
+        # Time and PnL always; the instrument (and, on a merged book, the
+        # owning member) when the ledger row carries it -- nothing else.
+        assert {"close_time", "realized_pnl"} <= set(row)
+        assert set(row) <= {"close_time", "realized_pnl", "symbol", "inst", "owner"}
         assert isinstance(row["close_time"], int)
         assert isinstance(row["realized_pnl"], (int, float))
 
@@ -7906,3 +7976,31 @@ def test_analyze_disk_tier_still_free_when_quota_is_available(
     assert resp.json()["status"] == "FULL"
     assert stub.overview_calls == 0
     assert stub.ledger_calls == 0
+
+
+@pytest.mark.skipif(ROLE_GATING_ENABLED, reason="only while role gating is off")
+def test_user_report_shows_overview_and_all_three_tabs_while_gating_is_off(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Project owner, 2026-09-25: until plans are decided, a user who opens
+    the `report_url` from the JSON sees everything -- the Overview and all
+    three Detail tabs, nothing locked."""
+    monkeypatch.setenv(REPORT_BASE_URL_ENV, "https://agent.expsolution.io")
+    overview, ledger = _load_fixture_bot()
+    stub = _StubBotSource(overview=overview, ledger=ledger)
+    client = _client_for(
+        _service_with(stub, analyze_cache_ttl=180.0),
+        https=True,
+        users_root=tmp_path,
+        now_fn=lambda: 1_700_000_000.0,
+    )
+    user_ref = _login_user(client)
+    assert client.post("/api/analyze", json={"code": VALID_CODE}).status_code == 200
+    for path in (f"/{user_ref}_{VALID_CODE}", f"/bot/{VALID_CODE}?view=user"):
+        page = client.get(path)
+        assert page.status_code == 200
+        text = page.text
+        assert 'class="report-modes" data-mode="overview"' in text
+        assert 'class="rm-overview"' in text and 'class="rm-detail"' in text
+        assert "card-locked" not in text and "tab-label-locked" not in text
+        assert "Nâng cấp gói để mở khóa" not in text

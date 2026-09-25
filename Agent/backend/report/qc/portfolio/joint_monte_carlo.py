@@ -120,6 +120,69 @@ class JointMonteCarloEngine:
             "p_ruin": float(np.mean(np.any(equity <= 0.0, axis=1)) * 100.0),
         }
 
+    CHECKPOINTS = 40
+    SAMPLE_PATHS = 40
+    HISTOGRAM_BINS = 30
+
+    @classmethod
+    def _checkpoint_steps(cls, horizon: int) -> np.ndarray:
+        """Evenly spaced path steps (1-based, last = horizon) to report at."""
+        count = min(horizon, cls.CHECKPOINTS)
+        return np.unique(np.linspace(1, horizon, count).round().astype(int))
+
+    @classmethod
+    def _path_profile(
+        cls, path_pnl: np.ndarray, capital: float, days_per_bucket: float
+    ) -> Dict[str, object]:
+        """Percentile checkpoints, terminal histogram and a few sample paths
+        of the cumulative return, % of `capital` -- the pictures of the same
+        paths `_summarise` reads the statistics from."""
+        returns = np.cumsum(path_pnl, axis=1) / capital * 100.0
+        horizon = returns.shape[1]
+        steps = cls._checkpoint_steps(horizon)
+        checkpoints = [{"day": 0.0, "p05": 0.0, "p25": 0.0, "p50": 0.0, "p75": 0.0, "p95": 0.0}]
+        for step in steps:
+            column = returns[:, step - 1]
+            q = np.percentile(column, [5, 25, 50, 75, 95])
+            checkpoints.append({
+                "day": round(float(step) * days_per_bucket, 3),
+                "p05": round(float(q[0]), 4), "p25": round(float(q[1]), 4),
+                "p50": round(float(q[2]), 4), "p75": round(float(q[3]), 4),
+                "p95": round(float(q[4]), 4),
+            })
+        terminal = returns[:, -1]
+        lo, hi = np.percentile(terminal, [0.5, 99.5])
+        if hi <= lo:
+            hi = lo + 1.0
+        counts, edges = np.histogram(np.clip(terminal, lo, hi), bins=cls.HISTOGRAM_BINS, range=(lo, hi))
+        pick = np.linspace(0, returns.shape[0] - 1, min(cls.SAMPLE_PATHS, returns.shape[0])).astype(int)
+        samples = [
+            [[0.0, 0.0]] + [
+                [round(float(step) * days_per_bucket, 3), round(float(returns[row, step - 1]), 3)]
+                for step in steps
+            ]
+            for row in pick
+        ]
+        return {
+            "path_checkpoints": checkpoints,
+            "terminal_histogram": {
+                "bin_edges_pct": [round(float(e), 4) for e in edges],
+                "counts": [int(c) for c in counts],
+            },
+            "sample_paths": samples,
+        }
+
+    @classmethod
+    def _median_path(
+        cls, path_pnl: np.ndarray, capital: float, days_per_bucket: float
+    ) -> List[List[float]]:
+        returns = np.cumsum(path_pnl, axis=1) / capital * 100.0
+        steps = cls._checkpoint_steps(returns.shape[1])
+        return [[0.0, 0.0]] + [
+            [round(float(step) * days_per_bucket, 3), round(float(np.median(returns[:, step - 1])), 4)]
+            for step in steps
+        ]
+
     @classmethod
     def run(
         cls,
@@ -213,7 +276,11 @@ class JointMonteCarloEngine:
             independent_paths.append(independent)
             remaining -= batch
 
-        joint_stats = cls._summarise(np.concatenate(joint_paths), total_capital)
+        days_per_bucket = series.bucket_ms / _DAY_MS
+        joint_all = np.concatenate(joint_paths)
+        joint_stats = cls._summarise(joint_all, total_capital)
+        joint_profile = cls._path_profile(joint_all, total_capital, days_per_bucket)
+        del joint_all
         independent_stats = cls._summarise(
             np.concatenate(independent_paths), total_capital
         )
@@ -221,6 +288,7 @@ class JointMonteCarloEngine:
         # Each bot alone, on its own capital, so the per-member VaR is
         # comparable with what that bot's own report already shows.
         per_member: Dict[str, float] = {}
+        member_paths: Dict[str, List[List[float]]] = {}
         undiversified = 0.0
         for row, label in enumerate(labels):
             member_rng = np.random.default_rng(
@@ -233,8 +301,13 @@ class JointMonteCarloEngine:
                 own = cls._indices(member_rng, sample_length, batch, horizon)
                 paths.append(matrix[row][own])
                 remaining -= batch
-            stats = cls._summarise(
-                np.concatenate(paths), float(member_capital[row])
+            member_all = np.concatenate(paths)
+            stats = cls._summarise(member_all, float(member_capital[row]))
+            # On the COMBINED capital: each line is that bot's share of the
+            # portfolio's return, on the same ruler as the combined path
+            # (a small bot's own-capital percentages would dwarf it).
+            member_paths[label] = cls._median_path(
+                member_all, total_capital, days_per_bucket
             )
             per_member[label] = round(stats["var_95_pct"], 4)
             # Weighted into portfolio terms: a bot holding 10% of the capital
@@ -302,6 +375,10 @@ class JointMonteCarloEngine:
                 round(correlation_cost, 4) if correlation_cost is not None else None
             ),
             per_member_var_95_pct=per_member,
+            path_checkpoints=joint_profile["path_checkpoints"],
+            terminal_histogram=joint_profile["terminal_histogram"],
+            sample_paths=joint_profile["sample_paths"],
+            member_median_paths=member_paths,
             is_valid=True,
             warnings=warnings,
         )

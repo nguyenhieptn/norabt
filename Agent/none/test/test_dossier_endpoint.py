@@ -21,6 +21,8 @@ from Agent.backend.external.sources.market_source import MarketDataSource
 from Agent.backend.report.qc.reporting.view_policy import WITHHELD_MARKER
 from Agent.backend.web.app import create_app
 from Agent.backend.web.data import WebDataService
+import pytest
+from Agent.backend.report.qc.reporting.view_policy import ROLE_GATING_ENABLED
 
 DATA_DIR = Path(config.DATA_DIR)
 _FIXTURE_BOT_DIR = DATA_DIR / "trade" / "bot_BB3398A957270A39"
@@ -144,6 +146,7 @@ def test_user_view_marks_withheld_branches_instead_of_dropping_them() -> None:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.skipif(not ROLE_GATING_ENABLED, reason="role gating is temporarily off: every role sees the full analysis (2026-09-25)")
 def test_user_view_keeps_panel_ids_and_marks_them_withheld() -> None:
     """The panel ids are a compatibility contract, so a withheld panel keeps
     its shell and says it is withheld instead of vanishing."""

@@ -17,7 +17,7 @@ Tài liệu này là **Bản đồ Đặc tả Kỹ thuật Toàn diện** của
 Hệ thống được tổ chức thành 3 khối tài liệu kỹ thuật cốt lõi:
 1. **Tầm nhìn Khởi tạo (Vision & Idea):** `IDEA-01`
 2. **Yêu cầu Sản phẩm Engine 1 (PRD Suite - 10 Chuyên đề):** `PRD-01` đến `PRD-10`
-3. **Đặc tả Kỹ năng & Kỹ thuật Chi Tiết (Technical Skill Specs - 8 Chuyên đề):** `SPEC-01` đến `SPEC-08`
+3. **Đặc tả Kỹ năng & Kỹ thuật Chi Tiết (Technical Skill Specs - 9 Chuyên đề):** `SPEC-01` đến `SPEC-09`
 
 ---
 
@@ -33,6 +33,7 @@ Hệ thống được tổ chức thành 3 khối tài liệu kỹ thuật cốt
 | [SPEC-06](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/02_technical_skills/SPEC-06_QUALITATIVE_NARRATIVE_SYNTHESIS_SKILL.md) | **Tổng Hợp Nhận Định Chuyên Môn Định Tính** | `Agent/backend/qc/reporting/narrative.py` | Cấu trúc 3 tầng + ký hiệu `◆`, 5 cổng kiểm duyệt (Flesch-Kincaid 10-14, cấm từ AI) |
 | [SPEC-07](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/02_technical_skills/SPEC-07_MCP_SERVER_AND_MICRO_PAYMENTS_SKILL.md) | **Máy Chủ MCP & Thanh Toán Vi Mô x402** | `Agent/backend/scripts/agent_server.py`, `payments/x402.py` | Chuẩn JSON-RPC 2.0, 6 tools MCP, USDC micro-payments trên X Layer |
 | [SPEC-08](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/02_technical_skills/SPEC-08_INSTITUTIONAL_UI_AND_VISUALIZATION_SKILL.md) | **Giao Diện Quản Trị & Báo Cáo Chuẩn Fintech** | `Agent/frontend/`, `tokens.css`, `report_page.py` | Bảng màu Deep Slate Obsidian (`#0B0F19`), typography Inter & JetBrains Mono |
+| [SPEC-09](file:///home/ubuntu/norabt/Agent/docs/bmad/spec/02_technical_skills/SPEC-09_MULTI_BOT_PORTFOLIO_AND_CORRELATION_SKILL.md) | **Phân Tích Tổ Hợp Đa Bot & Tương Quan Danh Mục** | `Agent/backend/report/qc/portfolio/`, `pipeline_portfolio.py` | Ma trận Pearson/Spearman, khoảng cách chiến lược, Joint Monte Carlo, Diversification Benefit |
 
 ---
 

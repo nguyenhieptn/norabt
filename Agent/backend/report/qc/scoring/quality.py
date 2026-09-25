@@ -116,7 +116,15 @@ def assess(bot: BotResult) -> QualityScore:
 
     measured = {k: v for k, v in components.items() if v is not None}
     if not measured:
-        return QualityScore(None, components, [], ["Not enough evidence to score"])
+        # `components` (unlike `measured`) can carry None values -- e.g.
+        # "profitability" is always present as a key but `_band()` returns
+        # None when there is no profit factor to band. Returning the raw
+        # dict here left every downstream reader of `quality.components`
+        # (fusion.py's own `round(v, 1)` was one, patched separately) at
+        # risk of the same `TypeError` on a bot with zero measurable
+        # dimensions -- fixed at the source instead of re-guarding each
+        # caller.
+        return QualityScore(None, measured, [], ["Not enough evidence to score"])
 
     total_weight = sum(WEIGHTS[k] for k in measured)
     score = sum(v * WEIGHTS[k] for k, v in measured.items()) / total_weight

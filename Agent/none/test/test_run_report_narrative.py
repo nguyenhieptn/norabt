@@ -326,9 +326,11 @@ def test_extras_include_closed_trade_series_horizon_scenarios_and_assets(
     )
 
     extra = extras["TESTCODE1"]
+    # Each row also names its instrument (base symbol + pair), which the
+    # ledger table and the regime chart read directly.
     assert extra["closed_trade_series"] == [
-        {"close_time": 1_700_000_000_000, "realized_pnl": 12.5},
-        {"close_time": 1_700_003_600_000, "realized_pnl": -4.0},
+        {"close_time": 1_700_000_000_000, "realized_pnl": 12.5, "symbol": "ETH", "inst": "ETH-USDT"},
+        {"close_time": 1_700_003_600_000, "realized_pnl": -4.0, "symbol": "ETH", "inst": "ETH-USDT"},
     ]
     assert [s["label"] for s in extra["horizon_scenarios"]] == ["SHORT", "MEDIUM"]
     assert extra["horizon_scenarios"][1]["probability_of_profit"] == 85.0

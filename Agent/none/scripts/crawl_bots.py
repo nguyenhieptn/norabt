@@ -55,6 +55,29 @@ def note_failure(code: str, label: str) -> None:
         _FETCH_FAILURES.setdefault(code, []).append(label)
 
 
+def failures_for(code: str) -> List[str]:
+    """Every endpoint failure seen for `code` on this run, oldest first.
+
+    This exists because the list `note_failure` builds used to be written and
+    never read: `fetch_checked` recorded the exact OKX answer (including
+    60004 "Trader doesn't exist", which is a trader CONCEALING its order book
+    rather than a fetch going wrong), `rows()` then turned the same payload
+    into `[]`, and the folder on disk ended up byte-identical to one written
+    for a trader that genuinely has no trades.
+
+    That collapse matters downstream. A concealed ledger is supposed to raise
+    a bot's risk -- Agent/backend/bot/analysis/limited.py scores every
+    dimension it costs as an ELEVATED contributor, never a neutral one -- but
+    nothing can apply that rule to a snapshot that no longer says which of
+    the two happened. `fetch`'s own docstring already states the principle
+    for the transport layer ("a dropped request must not look like empty
+    data"); this carries it up to the ledger layer, where the distinction is
+    the difference between "no evidence" and "evidence withheld".
+    """
+    with _FAILURE_LOCK:
+        return list(_FETCH_FAILURES.get(code, ()))
+
+
 def fetch(
     url: str, timeout: int = 25, attempts: int = FETCH_ATTEMPTS
 ) -> Dict[str, Any]:
@@ -330,8 +353,16 @@ def crawl_one(
 
     stats = attribute_positions(positions, trades, prices)
     symbol = primary_symbol(trades, positions)
-    folder = DATA_DIR / "cex" / symbol / "bot" / f"bot_{code}"
+    # Unified data layout (2026-09): data/trade/<bot_id>/, no venue/asset
+    # nesting -- venue/asset provenance is recorded in the crawl_slot.json
+    # sidecar below instead of being encoded in the directory path (see
+    # Agent/backend/live/store.py's own module docstring for the same
+    # convention on the live-poller side).
+    folder = DATA_DIR / "trade" / f"bot_{code}"
     folder.mkdir(parents=True, exist_ok=True)
+    (folder / "crawl_slot.json").write_text(
+        json.dumps({"venue": "CEX", "asset": symbol}), encoding="utf-8"
+    )
 
     # Profile fields cannot be fetched per trader, so carry them over from a prior
     # snapshot of the SAME uniqueCode, preferring one that actually holds them.
@@ -413,7 +444,13 @@ def crawl_one(
         "ledger_page_size": PAGE_SIZE,
         "positions_without_instrument": unattributed,
         "inference": stats,
-        "provenance": {"crawled_at_ms": now},
+        "provenance": {
+            "crawled_at_ms": now,
+            # Empty, and WHY it is empty. Read by the snapshot data source to
+            # tell a concealed ledger from an absent one -- see
+            # `failures_for`.
+            "fetch_failures": failures_for(code),
+        },
     }
     (folder / "overview.json").write_text(
         json.dumps(overview, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -421,6 +458,36 @@ def crawl_one(
     (folder / "trade_list.json").write_text(
         json.dumps(trade_list, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+    # OKX's public aggregates, which survive a withheld order book (60004):
+    # up to 365 days of daily PnL, currency preference, stats. The portfolio
+    # layer measures co-movement on this series for EVERY member (one ruler),
+    # which is the only way a concealed bot can enter the correlation matrix.
+    # Same row shapes the live source returns -- see
+    # Agent/backend/report/qc/portfolio/public_series.py.
+    time.sleep(REQUEST_DELAY_SECONDS)
+    public_pnl = rows(fetch(f"{BASE_URL}/public-pnl?uniqueCode={code}&instType=SWAP&lastDays=4"))
+    time.sleep(REQUEST_DELAY_SECONDS)
+    preference = rows(
+        fetch(f"{BASE_URL}/public-preference-currency?uniqueCode={code}&instType=SWAP")
+    )
+    time.sleep(REQUEST_DELAY_SECONDS)
+    stats_rows = rows(fetch(f"{BASE_URL}/public-stats?uniqueCode={code}&instType=SWAP&lastDays=4"))
+    if public_pnl:
+        (folder / "public_profile.json").write_text(
+            json.dumps(
+                {
+                    "uniqueCode": code,
+                    "nickName": overview.get("nickName"),
+                    "pnl": public_pnl,
+                    "preference": preference,
+                    "stats": stats_rows[0] if stats_rows else None,
+                    "provenance": {"crawled_at_ms": now, "last_days": 4},
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
     inferred = (
         f" suy_luận[xác định={stats['determined']} thu hẹp={stats['narrowed']}"
         f" ngoài={stats['outside']}]"
@@ -428,7 +495,7 @@ def crawl_one(
         else ""
     )
     line = (
-        f"{overview['nickName'][:22]:22s} {code:20s} -> cex/{symbol}/bot/bot_{code}"
+        f"{overview['nickName'][:22]:22s} {code:20s} -> trade/bot_{code} (CEX/{symbol})"
         f" | lệnh={len(trades):4d} cắt={truncated} vị thế={len(positions):3d}"
         f" thiếu_instId={unattributed} tuần={len(weekly)}{inferred}"
     )

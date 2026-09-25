@@ -265,8 +265,8 @@ class CorrelationAnalyzer:
         for pair in pairs:
             if pair.co_active_buckets == 0 and pair.pearson is not None:
                 warnings.append(
-                    f"[{pair.label_a}] and [{pair.label_b}] never closed a trade in "
-                    "the same bucket, so their coefficient describes alternating "
+                    f"[{pair.label_a}] and [{pair.label_b}] never had PnL in the "
+                    "same period, so their coefficient describes alternating "
                     "activity rather than co-movement"
                 )
 

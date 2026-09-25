@@ -67,6 +67,13 @@ RETIRED_LABELS = {"NGUY HIỂM", "TIỀM ẨN", "TIỀM NĂNG", "AN TOÀN"}
 # --------------------------------------------------------------------------- #
 
 
+
+def _detail_html(html: str) -> str:
+    """The page without its Overview block: the Overview repeats a few Summary
+    charts on purpose, so chart-count invariants are about the Detail tabs."""
+    i, j = html.find('<div class="rm-overview">'), html.find('<div class="rm-detail">')
+    return html[:i] + html[j:] if 0 <= i < j else html
+
 def _real_assessment_files() -> List[Path]:
     return sorted((DATA_DIR / "report" / "single").glob("*/latest.json"))
 
@@ -327,6 +334,10 @@ _FORBIDDEN_ACTION_SUBSTRINGS = (
     "trong mọi trường hợp",
     "phải",
     "tuyệt đối",
+    # Assessment only: no advice, and no "decide for yourself" either.
+    "your call",
+    "no action needed",
+    "copy it",
 )
 
 
@@ -496,7 +507,21 @@ def test_real_bot_page_keeps_seven_svg_and_eleven_details(full_result):
     html = render_bot_report_html(full_result)
     # 6 -> 8: Khối Monte Carlo nay cung cấp 3 góc nhìn chọn qua tab (Distribution,
     # Probability Cone, Median Trajectory), mỗi tab 1 SVG riêng biệt (tổng 8 SVGs).
-    assert html.count("<svg") == html.count("</svg>") == 8
+    # 8 -> 13 (2026-09-24 redesign): +3 half-circle gauges on the header
+    # scores, +2 outcome donuts and the capital curve in Growth, +1 "by tier"
+    # donut in the risk-dimension section, whose bar chart became HTML rows.
+    # 13 -> 14: the Monte Carlo "Show streaks & horizons" toggle's chevron.
+    # 15 -> 13: the show/hide toggles draw their chevron in CSS, not SVG.
+    # 13 -> 19: the Overview mode (`_render_overview`, "same renderers, same
+    # numbers as Detail") draws a second copy of the conclusion's two WHY
+    # icons, the three Growth charts and the Monte Carlo median path. The
+    # Detail copies are unchanged: 13 of the 19 are still the Detail page.
+    # Counted on the Detail tabs only: the Overview is a summary view that
+    # re-renders a few Summary charts and is checked separately in
+    # test_report_modes.py (its figures must equal Detail's). The whole page
+    # must still close every chart it opens.
+    assert html.count("<svg") == html.count("</svg>")
+    assert _detail_html(html).count("<svg") == 13
     # 11 -> 12: the strategy-narrative task added section ① ("Cách bot này
     # chơi", right after the conclusion), which always carries its own
     # "Đọc thế nào & dựa trên đâu" <details> -- see report_page.py's
@@ -535,7 +560,15 @@ def test_real_bot_page_keeps_seven_svg_and_eleven_details(full_result):
     # also carries exactly 1 unified "Methodology & interpretation" drawer
     # (+1 dominant market, +1 open positions, +1 closed trades; market coverage
     # keeps its always-visible methodology block per the explicit rule).
-    assert html.count("<details") == html.count("</details>") == 18
+    # 18 -> 12 (2026-09-24 redesign, project owner's request): the
+    # "Methodology & interpretation" drawers of Conclusion, How this bot
+    # trades, Growth and Expert assessment, and the risk-dimension section's
+    # score-note + methodology drawers, were removed.
+    # 12 -> 11: the Monte Carlo section's methodology drawer went too
+    # (each figure there now carries its own "*" formula).
+    # 11 -> 1: the Premium Market and Other & Position sections lost their
+    # methodology drawers too; only the page-footer accordion is left.
+    assert html.count("<details") == html.count("</details>") == 1
 
 
 def test_real_bot_page_has_no_stray_vietnamese(full_result):
@@ -605,3 +638,74 @@ def test_a_handful_of_real_bots_with_real_market_data_have_no_stray_vietnamese()
         assert not hits, f"{venue}/{asset}/{bot_dir.name}: stray Vietnamese {hits}"
         checked += 1
     assert checked >= 2, f"only {checked} real bots produced a FULL result to check"
+
+
+def test_legacy_advice_on_disk_is_scrubbed_to_assessment_wording():
+    from Agent.backend.report.qc.reporting.reasons import scrub_legacy_advice
+
+    old = (
+        "Risk score 12/100, no sign of anything abnormal. Whether to keep copying is still "
+        "your call. The current measurement sits in a watch zone, no action needed yet."
+    )
+    new = scrub_legacy_advice(old)
+    assert "your call" not in new and "no action needed" not in new
+    assert new == (
+        "Risk score 12/100, no sign of anything abnormal. The current measurement sits "
+        "in a watch zone."
+    )
+
+
+def test_risk_level_text_never_shows_a_control_order():
+    from Agent.backend.report.qc.reporting.reasons import risk_level_text
+
+    for code in ACTION_VI:
+        assert risk_level_text(code) != code
+
+
+# --------------------------------------------------------------------------- #
+# Overview / Detail modes: the Overview is a summary view of the same
+# analysis, re-rendering a few Summary blocks with the same renderers. These
+# pin what makes that safe -- it never duplicates an element id (anchors and
+# getElementById would hit the wrong copy) and every figure it shows is the
+# figure Detail shows.
+# --------------------------------------------------------------------------- #
+from collections import Counter
+
+
+def _split(html: str):
+    i, j = html.find('<div class="rm-overview">'), html.find('<div class="rm-detail">')
+    assert 0 <= i < j, "the page must carry both an Overview and a Detail block"
+    return html[i:j], html[j:]
+
+
+def _markup(html: str) -> str:
+    """The page without <script>/<style> bodies (their comments quote ids)."""
+    return re.sub(r"<(script|style)\b.*?</\1>", "", html, flags=re.S)
+
+
+def _values(fragment: str, cls: str) -> list:
+    return [v.strip() for v in re.findall(r'class="%s[^"]*">([^<]+)<' % re.escape(cls), fragment)]
+
+
+def test_both_modes_are_rendered(full_result) -> None:
+    html = render_bot_report_html(full_result)
+    overview, detail = _split(html)
+    assert overview.strip() and detail.strip()
+
+
+def test_no_element_id_is_used_twice(full_result) -> None:
+    html = _markup(render_bot_report_html(full_result))
+    ids = Counter(re.findall(r'\sid="([^"]+)"', html))
+    dups = sorted(k for k, n in ids.items() if n > 1)
+    assert not dups, f"duplicate element ids: {dups}"
+
+
+def test_overview_figures_are_the_detail_figures(full_result) -> None:
+    overview, detail = _split(render_bot_report_html(full_result))
+    compared = 0
+    for cls in ("qe-chip-value", "mc-stat-v", "mc-pcard-v", "why-chip"):
+        shown = _values(overview, cls)
+        compared += len(shown)
+        missing = [v for v in shown if v not in _values(detail, cls)]
+        assert not missing, f"{cls}: Overview shows {missing}, which Detail does not"
+    assert compared >= 5, "the Overview should show key figures to compare"

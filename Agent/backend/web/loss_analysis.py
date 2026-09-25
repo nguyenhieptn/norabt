@@ -192,6 +192,13 @@ def _deepest_episode(
     cumulative = 0.0
     best_depth = 0.0
     best: Optional[Dict[str, Any]] = None
+    # With a reference capital the episode is the deepest in PERCENT, the
+    # standard max drawdown: equity = capital + cumulative PnL, depth =
+    # (peak equity - equity) / peak equity, capped at 100% (equity at or
+    # below zero is a wipe-out). This is the same path and formula the Monte
+    # Carlo simulation uses, so the two are directly comparable. Without a
+    # capital it falls back to the deepest fall in USDT.
+    base = float(capital) if capital is not None and capital > 0.0 else None
     for index, row in enumerate(trades):
         cumulative += row["realized_pnl"]
         if cumulative >= peak:
@@ -200,8 +207,9 @@ def _deepest_episode(
             peak_index = index
             continue
         depth = peak - cumulative
-        if depth > best_depth:
-            best_depth = depth
+        score = (min(1.0, depth / (base + peak)) if base + peak > 0 else 1.0) if base is not None else depth
+        if score > best_depth:
+            best_depth = score
             best = {
                 "depth_abs": depth,
                 "peak_cum": peak,
@@ -236,7 +244,14 @@ def _deepest_episode(
     best["recovered"] = recovered_at_ms is not None
     best["recovered_at_ms"] = recovered_at_ms
     best["duration_hours"] = max(end_ms - start_ms, 0.0) / _MS_PER_HOUR
-    best["depth_pct"] = _pct_of(best["depth_abs"], capital)
+    if base is not None:
+        peak_equity = base + best["peak_cum"]
+        best["depth_pct"] = min(100.0, best["depth_abs"] / peak_equity * 100.0) if peak_equity > 0 else 100.0
+    else:
+        best["depth_pct"] = None
+    # The fall as a share of the reference capital (not a drawdown): kept for
+    # the "x% of capital" sub-line.
+    best["depth_pct_of_capital"] = _pct_of(best["depth_abs"], capital)
     return best
 
 

@@ -45,7 +45,7 @@ from datetime import datetime, timezone
 from numbers import Real
 from pathlib import Path
 from tempfile import mkdtemp
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
 from Agent.backend.infra.config import config
@@ -53,6 +53,8 @@ from Agent.backend.infra.quality import EvaluationMode
 from Agent.backend.live.ratelimit import TokenBucket
 from Agent.backend.market.service import MarketDataUnavailableError, MarketService
 from Agent.backend.bot.mcp.service import BotObservationService
+from Agent.backend.bot.mcp.aggregate import PortfolioAggregator
+from Agent.backend.report.qc.reporting.reasons import risk_level_text, scrub_legacy_advice
 from Agent.backend.external.okx.client import OkxApiError, OkxClient, OkxError
 from Agent.backend.pipeline import RiskSupervisionPipeline
 from Agent.backend.pipeline_portfolio import (
@@ -79,6 +81,7 @@ from Agent.backend.external.sources.bot_source import (
 )
 from Agent.backend.external.sources.bot_source import STATUS_NOT_FOUND as _SOURCE_NOT_FOUND
 from Agent.backend.external.sources.market_source import LiveMarketDataSource, MarketDataSource
+from Agent.backend.bot.mcp.schemas.bot_result import SimulationResults as _SimulationResults
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +128,9 @@ except ImportError:
 # what makes a path-traversal payload like "../../etc" fail here before it
 # can ever reach a path join (see WebDataService._analyze_full).
 _CODE_RE = re.compile(r"^[A-Za-z0-9]{1,64}$")
+# A portfolio id is produced by this codebase, not typed by a user, but it
+# still becomes a path segment -- validated here rather than trusted.
+SAFE_PORTFOLIO_ID = re.compile(r"[^A-Za-z0-9_.-]+")
 # Two is the floor because correlation between fewer than two things is not a
 # quantity. The ceiling is a timeout budget, not a statistical one: every
 # member is a full OKX ledger fetch, and eight of those already sit close to
@@ -190,6 +196,342 @@ def validate_portfolio_codes(raw: Any) -> List[str]:
             "finish inside the gateway timeout."
         )
     return seen
+
+
+# Bucket labels as words. See the correlation line for why.
+_BUCKET_WORD = {"1d": "daily", "4h": "four-hour", "1h": "hourly", "15m": "15-minute"}
+
+
+def _portfolio_text_lines(
+    payload: Dict[str, Any],
+    portfolio: Any,
+    member_count: int,
+    combined_action: Optional[str] = None,
+) -> List[str]:
+    """The conclusion block's lines, one fact per line.
+
+    `report_page.py` classifies these: a line starting with a bullet becomes
+    its own audit row, and everything else is joined -- with `" ".join` -- into
+    a single paragraph. The default explanation emits four long unbulleted
+    lines, so a portfolio's conclusion rendered as one run-on block of prose
+    with the data-limitation list inlined in the middle of it.
+
+    Each bullet below is one measurement, short enough to read at a glance.
+    The member-by-member data notes are reduced to counts here; their full
+    text is in the diversification section's chip, which is where a reader
+    opens detail deliberately.
+    """
+    correlation = getattr(portfolio, "correlation", None)
+    joint = getattr(portfolio, "joint_simulation", None)
+    concentration = getattr(portfolio, "concentration", None)
+    alignment = getattr(correlation, "alignment", None)
+
+    def pct(value: Any, digits: int = 1) -> str:
+        return f"{float(value):.{digits}f}%" if isinstance(value, (int, float)) else "n/a"
+
+    def num(value: Any, digits: int = 2, sign: bool = False) -> str:
+        if not isinstance(value, (int, float)):
+            return "n/a"
+        return f"{float(value):+.{digits}f}" if sign else f"{float(value):.{digits}f}"
+
+    members = list(getattr(portfolio, "members", None) or [])
+    hidden = [m for m in members if getattr(m, "ledger_hidden", False)]
+    ledger_scope = (
+        f" of the {len(members) - len(hidden)} members whose order book is visible"
+        if hidden else ""
+    )
+    lines: List[str] = [
+        # No portfolio id in this line. `report_page.py` highlights every run
+        # of digits it finds, so `PORT_AB68BEC6D4F6` comes out with four of
+        # its characters coloured as if they were measurements. The id is
+        # already in the page title and the URL; it is not a number and does
+        # not belong in a sentence that gets number-highlighted.
+        f"{payload.get('name')} — "
+        f"{_fmt_int(payload.get('evidence', {}).get('performance', {}).get('trade_count'))} "
+        f"closed trades on the merged ledger{ledger_scope}.",
+    ]
+
+    # The three-tier EMERGENCY/CAUTION/STANDARD banner in `report_page.py`
+    # (`_render_conclusion`) is built ENTIRELY by scanning these lines for
+    # one that starts with the literal prefix "CONCLUSION:" -- no such line,
+    # no banner, whatever the scorecard above it says. A single bot gets one
+    # of these from `recommendation_vi` when it was scored through the
+    # cohort/persisted path; a portfolio never called that path at all, so
+    # every portfolio report rendered with the scorecard's bare numbers and
+    # no verdict box (confirmed live, 2026-09-23: a merged 2-bot book showed
+    # "Risk score 40 (lower = better)" and nothing else). The comment this
+    # replaced claimed the renderer built a verdict box some other way; it
+    # does not, and this was the actual reason it was always empty here.
+    #
+    # `payload["verdict"]`/`risk`/`quality` are the combined bot's own
+    # scores -- the SAME merged-ledger `BotRiskAssessment` a single bot's
+    # scorecard reads from (`assess_portfolio`'s own docstring: "There is
+    # deliberately no second score here"), so this reuses that score rather
+    # than inventing a portfolio-specific one. `verdict` is one of the exact
+    # strings `_render_conclusion` pattern-matches on ("DRAWDOWN: HIGH",
+    # "HIDDEN RISK", ...), so the tier comes out right without this line
+    # having to know the tier rules itself.
+    verdict = payload.get("verdict")
+    if verdict:
+        risk = payload.get("risk")
+        quality = payload.get("quality")
+        risk_text = f"{risk:.0f}/100" if isinstance(risk, (int, float)) else "not scored"
+        quality_text = (
+            f"{quality:.0f}/100" if isinstance(quality, (int, float)) else "not scored"
+        )
+        action = (combined_action or "").strip()
+        # `<combined verdict> — <PortfolioVerdict>`: the merged book's own
+        # DRAWDOWN/QUALITY reading, and the diversification section's
+        # separate verdict about whether the members actually spread the
+        # risk, on ONE line -- sếp's exact spec (2026-09-23, M3). They are
+        # different axes (a portfolio can be individually low-risk and still
+        # HIGH_CORRELATION_CLUSTER, or the reverse) and a reader must see
+        # both, not just whichever one this line happened to lead with.
+        portfolio_verdict = getattr(portfolio, "verdict", None)
+        portfolio_verdict_text = (
+            getattr(portfolio_verdict, "value", portfolio_verdict)
+            if portfolio_verdict is not None
+            else None
+        )
+        tail = f"quality {quality_text}, risk {risk_text}."
+        if action:
+            # The raw control code ("PAUSE", "REDUCE") reads as an order; the
+            # page only ever states the risk level it stands for.
+            tail += f" Risk level: {risk_level_text(action)}."
+        lines.append(
+            f"CONCLUSION: {verdict} — {portfolio_verdict_text}. {tail}"
+            if portfolio_verdict_text
+            else f"CONCLUSION: {verdict} — {tail}"
+        )
+
+    if correlation is not None and correlation.is_valid:
+        pair = " × ".join(correlation.max_pearson_pair or []) or "n/a"
+        significant = [
+            p.pearson for p in correlation.pairs
+            if p.is_significant and p.pearson is not None
+        ]
+        basis = (
+            " (mark-to-market daily PnL)"
+            if getattr(alignment, "pnl_basis", None) == "MARK_TO_MARKET_DAILY"
+            else ""
+        )
+        lines.append(
+            # "1d" would be highlighted as the number 1 followed by a stray
+            # "d"; the word says the same thing and survives the highlighter.
+            f"• Correlation: average r {num(correlation.average_pearson, 2, True)} "
+            f"over {getattr(alignment, 'evaluated_buckets', 'n/a')} shared "
+            f"{_BUCKET_WORD.get(getattr(alignment, 'bucket_label', ''), 'time')} "
+            f"buckets; strongest pair {pair} at "
+            f"{num(correlation.max_pearson, 2, True)}."
+        )
+        # The verdict is decided on the significant pairs only, so the
+        # number it used is stated next to the all-pairs average above.
+        lines.append(
+            f"• Verdict basis: {len(significant)} of {len(correlation.pairs)} pairs "
+            "significant"
+            + (
+                f", average r {num(sum(significant) / len(significant), 2, True)}"
+                if significant else ""
+            )
+            + f"{basis}."
+        )
+    else:
+        lines.append(
+            "• Correlation: not measurable — the members have no usable shared "
+            "trading window."
+        )
+
+    style_verdict = getattr(portfolio, "style_verdict", None)
+    if style_verdict is not None:
+        lines.append(
+            f"• Behaviour: {getattr(style_verdict, 'value', style_verdict)} — "
+            "measured on exit discipline, independent of results."
+        )
+    if getattr(portfolio, "style_vs_pnl_conflict", False):
+        lines.append(
+            "• TRAP: a pair whose results look unrelated trades the same way; "
+            "the offset is timing, not design."
+        )
+
+    book = getattr(portfolio, "book", None)
+    if joint is not None and joint.is_valid:
+        days = joint.horizon_calendar_days
+        horizon = f" over {days:.0f} days" if isinstance(days, (int, float)) and days >= 1 else ""
+        # "Label: ..." -- the renderer turns the words before the colon into
+        # the row's tag, so the qualifiers go after it.
+        lines.append(
+            f"• Monte Carlo: joint simulation of every member{horizon}, 95% VaR "
+            f"{pct(joint.var_95_pct)} of combined capital against "
+            f"{pct(joint.sum_individual_var_95_pct)} undiversified."
+        )
+        measured = (
+            f"measured on the book {pct(book.max_drawdown_pct)}; "
+            if book is not None and isinstance(book.max_drawdown_pct, (int, float))
+            else ""
+        )
+        lines.append(
+            f"• Drawdown: {measured}simulated median {pct(joint.median_max_drawdown)}, "
+            f"one joint path in twenty deeper than {pct(joint.p95_max_drawdown)}."
+        )
+
+    if concentration is not None and concentration.largest_symbol:
+        directional = concentration.directional_alignment
+        lines.append(
+            f"• Concentration: {pct(concentration.largest_symbol_share_pct, 0)} of "
+            f"open exposure in {concentration.largest_symbol}; "
+            f"{pct(None if directional is None else directional * 100.0, 0)} of the "
+            "book points one way"
+            + (
+                f" (the {len(members) - len(hidden)} members with a visible order book)."
+                if hidden else "."
+            )
+        )
+
+    notes = [
+        (candidate.nick_name, len(candidate_warnings))
+        for candidate, candidate_warnings in (
+            (member, member_warnings)
+            for member, member_warnings in _portfolio_member_notes(portfolio)
+        )
+    ]
+    if notes:
+        lines.append(
+            "• Data notes per member: "
+            + ", ".join(f"{count} ({name})" for name, count in notes)
+            + " — full text in the diversification section."
+        )
+    return lines
+
+
+def _portfolio_page_overrides(portfolio: Any) -> Dict[str, Any]:
+    """What a portfolio page shows INSTEAD of the single-bot headline numbers.
+
+    The page is rendered by the single-bot renderer over the merged order
+    book, so its five headline numbers and its two simulated chips would
+    otherwise be single-bot formulas run over a pooled trade list -- and would
+    leave out every member whose order book OKX hides. Measured on a live
+    4-bot book (2026-09-24): pooled Sharpe 5.97 vs the book's 2.06, capital
+    923,826 vs 3,323,204 (a hidden member held 85% of it). So:
+
+    * `headline`      -- the book as ONE account (`PortfolioBookMetrics`),
+                         all N members, on the matrix's own ruler;
+    * `headline_sim`  -- max drawdown and ruin from the JOINT simulation
+                         (co-movement kept), not the merged-ledger one;
+    * `formula_overrides` -- every formula the page can open, portfolio-
+                         worded; numbers still computed over the merged
+                         ledger say so, and say who is not in it.
+
+    Empty when there is no book to describe (legacy records, invalid
+    alignment): the page then falls back to what it always showed.
+    """
+    from Agent.backend.web.portfolio_formulas import portfolio_formula_overrides
+    from Agent.backend.web.report_page import METRIC_FORMULA_INFO
+
+    out: Dict[str, Any] = {}
+    members = list(getattr(portfolio, "members", None) or [])
+    hidden = [m for m in members if getattr(m, "ledger_hidden", False)]
+    book = getattr(portfolio, "book", None)
+    hidden_share = None
+    if book is not None and hidden:
+        weights = {m.label: m.capital_weight_pct for m in book.members}
+        values = [weights.get(m.label) for m in hidden]
+        if all(isinstance(v, (int, float)) for v in values):
+            hidden_share = float(sum(values))
+    out["formula_overrides"] = portfolio_formula_overrides(
+        METRIC_FORMULA_INFO,
+        measured=len(members),
+        ledger_visible=len(members) - len(hidden),
+        ledger_hidden=len(hidden),
+        hidden_capital_pct=hidden_share,
+    )
+    if book is None or book.capital is None:
+        return out
+
+    def tone_dd(value: Optional[float]) -> str:
+        if not isinstance(value, (int, float)):
+            return "qrs-neutral"
+        return "qrs-danger" if value >= 20 else "qrs-warn" if value >= 10 else "qrs-safe"
+
+    daily = book.bucket_label == "1d"
+    mdd = book.max_drawdown_pct
+    days = book.profitable_period_pct
+    sharpe = book.sharpe_annual
+    out["headline"] = [
+        {"label": "Portfolio capital", "key": "pf_capital",
+         "value": f"{book.capital:,.0f} USDT", "tone": "qrs-neutral"},
+        {"label": "Max drawdown", "key": "pf_max_drawdown",
+         "value": f"-{mdd:.1f}%" if isinstance(mdd, (int, float)) else "—", "tone": tone_dd(mdd)},
+        {"label": "Profitable days" if daily else "Profitable periods", "key": "pf_profitable_periods",
+         "value": f"{days:.1f}%" if isinstance(days, (int, float)) else "—",
+         "tone": "qrs-safe" if isinstance(days, (int, float)) and days >= 50 else "qrs-warn"},
+        {"label": "Sharpe (annualised)", "key": "pf_sharpe",
+         "value": f"{sharpe:.2f}" if isinstance(sharpe, (int, float)) else "—",
+         "tone": "qrs-safe" if isinstance(sharpe, (int, float)) and sharpe >= 1 else "qrs-warn"},
+        {"label": "Bots · periods", "key": "pf_periods",
+         "value": f"{len(members)} bots · {book.periods} {'days' if daily else 'periods'}",
+         "tone": "qrs-safe" if book.periods >= 60 else "qrs-warn"},
+    ]
+    joint = getattr(portfolio, "joint_simulation", None)
+    if joint is not None and joint.is_valid:
+        # The BAD case, as the single-bot chip now shows (P95, per the
+        # project owner): falls back to the median only when P95 is missing.
+        p95 = joint.p95_max_drawdown
+        out["headline_sim"] = {
+            "max_drawdown": p95 if p95 is not None else joint.median_max_drawdown,
+            "p_ruin": joint.p_ruin,
+            "dd_label": "Joint sim. max DD · P95" if p95 is not None else "Joint sim. max DD (med)",
+            "dd_key": "pf_sim_max_dd" if p95 is not None else "pf_sim_max_dd_median",
+            "ruin_label": "Joint ruin prob.",
+            "ruin_key": "pf_ruin",
+        }
+    return out
+
+
+def _portfolio_member_notes(portfolio: Any) -> List[Any]:
+    """(member, its own limitation lines) pairs, from the portfolio's record."""
+    grouped: Dict[str, List[str]] = {}
+    for line in getattr(portfolio, "limitations", None) or []:
+        if line.startswith("[") and "]" in line:
+            name = line[1 : line.index("]")]
+            grouped.setdefault(name, []).append(line)
+    members = {member.nick_name: member for member in getattr(portfolio, "members", [])}
+    return [
+        (members.get(name) or _NamedOnly(name), lines)
+        for name, lines in grouped.items()
+    ]
+
+
+class _NamedOnly:
+    """Stand-in when a note names a member the assessment no longer lists."""
+
+    def __init__(self, nick_name: str) -> None:
+        self.nick_name = nick_name
+
+
+def _portfolio_engine_summary(lines: Sequence[str]) -> str:
+    """What the independent-view block shows when the model gives nothing.
+
+    That block renders a narrative: prose lines become the thesis, bulleted
+    lines become numbered findings. When the language model times out or its
+    output fails the number/wording checks, the shared fallback is two
+    sentences of apology -- a whole section of the report carrying no figure
+    at all, which is the one thing it must never be.
+
+    The engine already computed every number in those sentences' place, so
+    the fallback becomes one short line saying where this text came from,
+    followed by the same measurements the conclusion lists. The block keeps
+    its shape and stops being empty.
+    """
+    bullets = [line for line in lines if line.startswith("• ")]
+    if not bullets:
+        return narrative.FALLBACK_NARRATIVE_VI
+    return "\n".join(
+        [
+            "Engine summary: the language model returned nothing usable for "
+            "this run, so the points below are computed, not written.",
+            *bullets,
+        ]
+    )
 
 
 def _portfolio_unavailable(
@@ -441,18 +783,53 @@ def _holding_assets_note(assets: List[Dict[str, Any]]) -> Optional[str]:
 # --------------------------------------------------------------------------- #
 
 
+# Parsed documents by file, reused while the file is unchanged (same mtime
+# and size). Every screen that lists bots (/api/bots, peer ranks, the
+# same-market table, /healthz) used to re-parse all of them -- ~4 MB of JSON,
+# ~100 ms -- on every request. The cached objects are shared: callers read
+# them and never modify them (a caller that needs to change one copies it).
+_JSON_DOC_CACHE: Dict[str, Tuple[Tuple[int, int], Any]] = {}
+_JSON_DOC_LOCK = threading.Lock()
+
+
+def _file_signature(path: Path) -> Optional[Tuple[int, int]]:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
 def _read_json_documents(root: Path, pattern: str) -> List[Dict[str, Any]]:
     """Read every JSON object matching `pattern` under `root`, skipping any
     file that fails to parse rather than letting one bad file 500 the route.
+    A file whose mtime and size are unchanged since the last read is served
+    from `_JSON_DOC_CACHE` instead of being parsed again.
     """
     out: List[Dict[str, Any]] = []
     if not root.is_dir():
         return out
     for path in sorted(root.glob(pattern)):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        key = str(path)
+        sig = _file_signature(path)
+        if sig is None:
             continue
+        with _JSON_DOC_LOCK:
+            hit = _JSON_DOC_CACHE.get(key)
+        if hit is not None and hit[0] == sig:
+            payload = hit[1]
+        else:
+            try:
+                payload = json.loads(scrub_legacy_advice(path.read_text(encoding="utf-8")))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                with _JSON_DOC_LOCK:
+                    _JSON_DOC_CACHE.pop(key, None)
+                continue
+            # Re-check after reading: a file replaced mid-read keeps its new
+            # signature out of the cache, so the next call reads it again.
+            if _file_signature(path) == sig:
+                with _JSON_DOC_LOCK:
+                    _JSON_DOC_CACHE[key] = (sig, payload)
         if isinstance(payload, dict):
             out.append(payload)
     return out
@@ -723,6 +1100,8 @@ _ASSESSMENT_PERFORMANCE_KEYS: Tuple[str, ...] = (
     "reconciliation_status",
     "ledger_coverage_days",
     "declared_lead_days",
+    "ledger_truncated",
+    "reconciliation_warnings",
 )
 # Sibling-analysis enrichment only -- see the module comment above.
 _ANALYSIS_PERFORMANCE_ENRICH_KEYS: Tuple[str, ...] = (
@@ -754,10 +1133,105 @@ def _read_json_document(path: Optional[Path]) -> Optional[Dict[str, Any]]:
     if path is None:
         return None
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(scrub_legacy_advice(path.read_text(encoding="utf-8")))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def portfolio_document_path(data_dir: Path, portfolio_id: str) -> Path:
+    """`report/multi/<portfolio_id>/latest.json`, mirroring the single-bot
+    layout at `report/single/<code>/latest.json`."""
+    safe = SAFE_PORTFOLIO_ID.sub("_", portfolio_id).strip("_") or "unknown_portfolio"
+    return Path(data_dir) / "report" / "multi" / safe / "latest.json"
+
+
+def write_portfolio_document(data_dir: Path, payload: Dict[str, Any]) -> Optional[Path]:
+    """Persist a finished portfolio payload so its page survives this process.
+
+    WHY THE PAYLOAD AND NOT AN ASSESSMENT. The single-bot path stores an
+    assessment document and reshapes it back into a payload on read, because
+    that document is a shared artifact half a dozen other things consume
+    (`/api/bots`, the cohort report, the ranking index). A portfolio payload
+    has exactly one consumer -- its own page -- so storing the payload itself
+    removes the reshaping step and, with it, the possibility of the stored
+    form and the rendered form drifting apart.
+
+    WHY IT MATTERS AT ALL. Without this, `/portfolio/<id>` could only serve
+    runs still sitting in this process's memory: the link in `report_url`
+    would die after the cache TTL, after a restart, or simply by landing on a
+    different worker. Handing out a URL that mostly 404s is worse than not
+    handing one out.
+
+    Never raises: a report that cannot be filed is still a report that was
+    produced, and failing the caller's analysis over a disk error would trade
+    a degraded link for no result at all.
+    """
+    portfolio_id = str(payload.get("portfolio_id") or "").strip()
+    if not portfolio_id:
+        return None
+    path = portfolio_document_path(data_dir, portfolio_id)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Written beside the target and moved into place, so a reader never
+        # sees a half-written document -- a portfolio payload is ~1 MB and a
+        # concurrent read of a partial file would be a JSON error, not a miss.
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+        tmp.replace(path)
+        return path
+    except (OSError, UnicodeError, TypeError, ValueError):
+        logger.exception(
+            "norabt portfolio: could not persist %s -- the run stands, only its "
+            "durable link is lost",
+            portfolio_id,
+        )
+        return None
+
+
+def portfolio_alias_path(data_dir: Path, requested_id: str) -> Path:
+    """Where the id of the SUBMITTED code set points at the run it became.
+
+    The run's own id is derived from the members that were actually read
+    (`PortfolioAggregator.portfolio_id`), so a code that could not be read at
+    all changes it -- while a link handed out before the run finished (a
+    PENDING `/api/analyze` answer) could only be built from the codes the
+    caller sent.
+    """
+    return portfolio_document_path(data_dir, requested_id).with_name("alias.json")
+
+
+def write_portfolio_alias(data_dir: Path, requested_id: str, portfolio_id: str) -> None:
+    try:
+        path = portfolio_alias_path(data_dir, requested_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"portfolio_id": portfolio_id}), encoding="utf-8")
+    except OSError:
+        logger.exception("norabt portfolio: could not file alias %s -> %s", requested_id, portfolio_id)
+
+
+def read_portfolio_alias(data_dir: Path, requested_id: str) -> Optional[str]:
+    try:
+        value = json.loads(portfolio_alias_path(data_dir, requested_id).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    target = value.get("portfolio_id") if isinstance(value, dict) else None
+    return str(target) if target else None
+
+
+def read_portfolio_document(
+    data_dir: Path, portfolio_id: str
+) -> Optional[Dict[str, Any]]:
+    path = portfolio_document_path(data_dir, portfolio_id)
+    if not path.exists():
+        return None
+    try:
+        document = json.loads(scrub_legacy_advice(path.read_text(encoding="utf-8")))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    return document if isinstance(document, dict) else None
 
 
 def find_assessment_document(data_dir: Path, code: str) -> Optional[Dict[str, Any]]:
@@ -888,10 +1362,6 @@ def _string_list(value: Any) -> List[str]:
     )
 
 
-# Tên trường của `SimulationResults`, dùng để mang qua mọi chỉ số mô phỏng
-# mà bản ghi đã lưu thật sự có -- xem vòng lặp trong
-# `assessment_to_analyze_result` bên dưới.
-from Agent.backend.bot.mcp.schemas.bot_result import SimulationResults as _SimulationResults
 
 _SIMULATION_FIELDS = tuple(_SimulationResults.model_fields)
 
@@ -1469,6 +1939,26 @@ def _live_performance_evidence(bot: Any) -> Dict[str, Any]:
         "pnl_kurtosis": getattr(bot.trade_statistics, "pnl_kurtosis", None),
         "capital_at_risk": getattr(bot.capital, "capital_at_risk", None),
         "capital_basis": getattr(bot.capital, "basis", None),
+        # Same convergence as every field above -- these six live on
+        # `bot.reconciliation`/`bot.data_quality`, not on `BotPerformanceMetrics`,
+        # but the disk-read path (`assessment_store.build_assessment` ->
+        # `_ASSESSMENT_PERFORMANCE_KEYS`) already flattens them into
+        # `evidence["performance"]`. Without this, a bot's very first,
+        # freshly-scored page (never yet written to assessment.json) silently
+        # renders without the "Partial ledger" notice that an identical bot
+        # read back from disk a moment later would show.
+        "measurement_mode": getattr(
+            getattr(bot.data_quality, "measurement_mode", None), "value", None
+        ),
+        "reconciliation_status": getattr(bot.reconciliation, "status", None),
+        "ledger_coverage_days": getattr(
+            bot.reconciliation, "ledger_coverage_days", None
+        ),
+        "declared_lead_days": getattr(bot.reconciliation, "declared_lead_days", None),
+        "ledger_truncated": getattr(bot.reconciliation, "ledger_truncated", None),
+        "reconciliation_warnings": list(
+            getattr(bot.reconciliation, "warnings", None) or []
+        ),
     }
     for key, value in extra.items():
         if payload.get(key) is None:
@@ -1497,10 +1987,26 @@ def _closed_trade_series_from_bot_result(bot: Any) -> List[Dict[str, Any]]:
     re-derive the right order itself -- it only has to trust this one
     contract.
     """
-    rows = [
-        {"close_time": item.close_time, "realized_pnl": item.realized_pnl}
-        for item in bot.trade_ledger_summary
-    ]
+    rows = []
+    for item in bot.trade_ledger_summary:
+        row: Dict[str, Any] = {"close_time": item.close_time, "realized_pnl": item.realized_pnl}
+        # Which instrument, and -- on a portfolio's merged book -- which
+        # member. The ledger table, the worst-trades list and the per-bot
+        # contribution all need them, and a (time, PnL) join against a file
+        # on disk cannot recover either for a merged book. `trade_id` is
+        # namespaced "<first 8 of the member code>:<id>" by
+        # `PortfolioAggregator._merge_trades`; a single bot's ids carry no
+        # prefix, so `owner` is simply absent there.
+        symbol = str(getattr(item, "symbol", "") or "").strip().upper()
+        if symbol:
+            parts = symbol.split("-")
+            row["symbol"] = parts[0]
+            if len(parts) >= 2:
+                row["inst"] = f"{parts[0]}-{parts[1]}"
+        trade_id = str(getattr(item, "trade_id", "") or "")
+        if ":" in trade_id:
+            row["owner"] = trade_id.split(":", 1)[0]
+        rows.append(row)
     rows.sort(key=lambda row: row["close_time"])
     return rows
 
@@ -2295,6 +2801,7 @@ def _start_background_narrative(
     result: Any,
     *,
     backend: Optional["narrative.NarrativeBackend"],
+    on_ready: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> None:
     """Sinh nhận định ở một luồng NỀN (daemon, không giữ tiến trình sống
     nếu nó chưa xong khi tiến trình bị tắt), rồi GHI ĐÈ TẠI CHỖ
@@ -2336,6 +2843,19 @@ def _start_background_narrative(
             text = narrative.FALLBACK_NARRATIVE_VI
         if text is not None:
             payload["narrative"] = text
+        if on_ready is not None:
+            # A caller that has ALSO filed this payload somewhere durable
+            # needs to re-file it now: the copy on disk was written while the
+            # narrative still said "being drafted", and nothing else would
+            # ever correct it. Wrapped because a failure here must not take
+            # down a daemon thread that has already done its real work.
+            try:
+                on_ready(payload)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "norabt narrative: the on_ready hook failed -- the "
+                    "narrative itself is in the payload either way"
+                )
 
     threading.Thread(target=_run, name="norabt-narrative-bg", daemon=True).start()
 
@@ -2345,6 +2865,7 @@ def _narrative_field_for_full_result(
     result: Any,
     *,
     backend: Optional["narrative.NarrativeBackend"] = None,
+    on_ready: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Optional[str]:
     """Giá trị NGAY LẬP TỨC cho `payload["narrative"]` của một lượt chấm
     SỐNG (`_full_result`, nhánh live/chưa từng chấm) -- `None` khi tính
@@ -2360,7 +2881,9 @@ def _narrative_field_for_full_result(
     )
     if resolved_backend is None:
         return None
-    _start_background_narrative(payload, result, backend=resolved_backend)
+    _start_background_narrative(
+        payload, result, backend=resolved_backend, on_ready=on_ready
+    )
     return NARRATIVE_PENDING_VI
 
 
@@ -2501,6 +3024,7 @@ def _full_result(
     result: Any,
     *,
     narrative_backend: Optional["narrative.NarrativeBackend"] = None,
+    on_narrative_ready: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     assessment = result.risk_assessment
     bot = result.bot_result
@@ -2614,7 +3138,7 @@ def _full_result(
         "narrative": None,
     }
     payload["narrative"] = _narrative_field_for_full_result(
-        payload, result, backend=narrative_backend
+        payload, result, backend=narrative_backend, on_ready=on_narrative_ready
     )
     return payload
 
@@ -2659,6 +3183,17 @@ def build_report_url(code: str) -> str:
     never has to defend against a hostile path segment itself.
     """
     return f"{report_base_url()}/bot/{code}"
+
+
+def build_portfolio_report_url(portfolio_id: str) -> str:
+    """The page a portfolio payload points at.
+
+    Deliberately NOT `/bot/<id>`: a portfolio id is not a uniqueCode and that
+    route would look it up as one, fail, and then try to fetch it from OKX as
+    an unknown bot. Same base-url gate as the single-bot link, for the same
+    reason -- see `report_url_is_usable`.
+    """
+    return f"{report_base_url()}/portfolio/{portfolio_id}"
 
 
 # --------------------------------------------------------------------------- #
@@ -3259,7 +3794,17 @@ class WebDataService:
         # Keyed by portfolio id, so opening the report right after launching
         # the run does not need the code list again.
         self._portfolio_by_id = _TTLCache(portfolio_cache_ttl, clock=clock)
-        self.portfolio_history = PortfolioHistoryStore()
+        self.portfolio_history = PortfolioHistoryStore(
+            root=self.data_dir / "report" / "multi" / "state" / "portfolios"
+        )
+        # One lock per member set, so two callers asking for the SAME
+        # portfolio at the same moment do not both start an N-ledger run. The
+        # second waits, then finds the cache warm. Nothing is serialised
+        # between DIFFERENT portfolios -- the guard is per key, not global,
+        # because a scan submitting many distinct sets must still run them
+        # concurrently.
+        self._portfolio_locks: Dict[str, threading.Lock] = {}
+        self._portfolio_locks_guard = threading.Lock()
         self._leaderboard_cache = _TTLCache(leaderboard_cache_ttl, clock=clock)
         self._leaderboard_pages = leaderboard_pages
         self._lookup_cache = _TTLCache(lookup_cache_ttl, clock=clock)
@@ -3795,6 +4340,21 @@ class WebDataService:
         """
         codes = validate_portfolio_codes(raw_codes)
         cache_key = "|".join(sorted(codes))
+        with self._portfolio_locks_guard:
+            lock = self._portfolio_locks.setdefault(cache_key, threading.Lock())
+        with lock:
+            return self._analyze_portfolio_guarded(
+                codes, cache_key, force=force, progress=progress
+            )
+
+    def _analyze_portfolio_guarded(
+        self,
+        codes: Sequence[str],
+        cache_key: str,
+        *,
+        force: bool,
+        progress: Optional[Callable[[str], None]],
+    ) -> Dict[str, Any]:
         if not force:
             cached = self._portfolio_cache.get(cache_key)
             if cached is not None:
@@ -3806,11 +4366,27 @@ class WebDataService:
                 return {**cached, "cached": True}
         payload = self._analyze_portfolio_live(codes, progress=progress, force=force)
         payload["cached"] = False
+        # The same two fields `analyze()` attaches to a single-bot result, for
+        # the same two audiences: a Markdown rendering for a machine or a CLI
+        # to read, and a link for a human. Their absence here was not a
+        # decision -- the portfolio payload is the single-bot payload and has
+        # to carry the same keys, or every consumer needs a special case.
+        payload["report_markdown"] = build_report_markdown(payload)
+        if payload.get("portfolio_id") and report_url_is_usable():
+            payload["report_url"] = build_portfolio_report_url(
+                str(payload["portfolio_id"])
+            )
         self._portfolio_cache.set(cache_key, payload)
         if payload.get("status") == "FULL":
             # Keyed by portfolio id too, so `/portfolio/<id>` can render a run
             # the user just launched without asking for the code list again.
             self._portfolio_by_id.set(str(payload.get("portfolio_id")), payload)
+            requested_id = PortfolioAggregator.portfolio_id(codes)
+            if requested_id != payload.get("portfolio_id"):
+                # A member could not be read, so the run's id differs from the
+                # one a PENDING answer already linked to -- keep that link alive.
+                self._portfolio_by_id.set(requested_id, payload)
+                write_portfolio_alias(self.data_dir, requested_id, str(payload.get("portfolio_id")))
         return payload
 
     def portfolio_report(self, portfolio_id: str) -> Optional[Dict[str, Any]]:
@@ -3823,7 +4399,19 @@ class WebDataService:
         cached = self._portfolio_by_id.get(portfolio_id)
         if cached is not None:
             return cached
-        return None
+        # Then disk. This is what makes a `report_url` worth handing out: the
+        # page outlives the cache TTL, a restart, and landing on a different
+        # worker. Still never re-analyses -- the codes behind an id are not
+        # recoverable from the id, and a page view must not become N live
+        # ledger fetches.
+        stored = read_portfolio_document(self.data_dir, portfolio_id)
+        if stored is None:
+            target = read_portfolio_alias(self.data_dir, portfolio_id)
+            if target and target != portfolio_id:
+                stored = read_portfolio_document(self.data_dir, target)
+        if stored is not None:
+            self._portfolio_by_id.set(portfolio_id, stored)
+        return stored
 
     def list_portfolio_runs(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Rows for the portfolio-history table, newest first."""
@@ -3833,13 +4421,65 @@ class WebDataService:
             rows.append(
                 {
                     "portfolio_id": entry.portfolio_id,
+                    # Whether `/portfolio/<id>` can actually render. A row
+                    # whose document is gone -- an older run, a pruned data
+                    # directory -- still carries real measurements worth
+                    # listing, but offering it as a link would hand the
+                    # reader a 404. The caller disables the link instead.
+                    "report_available": portfolio_document_path(
+                        self.data_dir, entry.portfolio_id
+                    ).exists(),
                     "assessment_id": entry.assessment_id,
                     "timestamp": entry.timestamp,
                     "as_of_ms": entry.as_of_ms,
                     "member_codes": list(entry.member_codes),
                     "member_count": len(entry.member_codes),
                     "measurable_member_count": entry.measurable_member_count,
+                    # How many codes were SUBMITTED, before concealed/failed
+                    # ones dropped out of `member_codes` entirely (see
+                    # `PortfolioRiskAssessment.submitted_member_count`'s own
+                    # docstring: found live 2026-09-24, a 4-code request
+                    # persisted here as a bare "3 bots" with no trace one had
+                    # been left out). Falls back to `member_count` for rows
+                    # written before this field existed, on old history --
+                    # `0` would read as "nothing was ever submitted", which
+                    # is worse than just not knowing the exclusion happened.
+                    "submitted_member_count": (
+                        entry.submitted_member_count or len(entry.member_codes)
+                    ),
+                    "concealed_member_codes": list(entry.concealed_member_codes),
+                    # Capital-weighted when known -- see `PortfolioQCService.
+                    # _measurement_coverage`. Was silently omitted from this
+                    # listing even after `submitted_member_count`/
+                    # `concealed_member_codes` were added (2026-09-24): all
+                    # three exist to answer the same question ("how much of
+                    # this row can be trusted at face value"), and shipping
+                    # two of three left a reader unable to tell a barely-
+                    # affected exclusion from one that swallowed most of the
+                    # book's capital.
+                    "measurement_coverage_pct": entry.measurement_coverage_pct,
                     "member_names": [member.label for member in entry.members],
+                    # The member list the table renders chips from. A row that
+                    # only carries names cannot show which instrument a member
+                    # trades or whether it was inside the measurement, and
+                    # those are the two things a reader scanning the list
+                    # actually wants from a chip.
+                    "members": [
+                        {
+                            "code": member.unique_code,
+                            "name": member.label,
+                            "symbol": member.symbol,
+                            "risk_score": member.risk_score,
+                            "risk_tier": member.risk_tier,
+                            "verdict": member.verdict,
+                            "closed_trade_count": member.closed_trade_count,
+                            "excluded_reason": member.excluded_reason,
+                            # Order book hidden on OKX, measured from public
+                            # daily PnL -- a member, not an absence.
+                            "ledger_hidden": member.ledger_hidden,
+                        }
+                        for member in entry.members
+                    ],
                     "symbols": sorted(
                         {member.symbol for member in entry.members if member.symbol}
                     ),
@@ -3857,6 +4497,22 @@ class WebDataService:
                     "combined_verdict": entry.combined_verdict,
                     "joint_var_95_pct": (
                         entry.joint_simulation.var_95_pct
+                        if entry.joint_simulation
+                        else None
+                    ),
+                    # Named for WHICH drawdown it is. A bare "max drawdown"
+                    # column would have to pick one of these silently, and the
+                    # median and the 95th percentile of a simulated drawdown
+                    # distribution are different answers to different
+                    # questions -- the typical bad run against the bad run
+                    # worth sizing for.
+                    "joint_median_max_drawdown": (
+                        entry.joint_simulation.median_max_drawdown
+                        if entry.joint_simulation
+                        else None
+                    ),
+                    "joint_p95_max_drawdown": (
+                        entry.joint_simulation.p95_max_drawdown
                         if entry.joint_simulation
                         else None
                     ),
@@ -3954,7 +4610,15 @@ class WebDataService:
         outcome = pipeline.assemble(
             members,
             failures=failures,
-            nick_name=f"Portfolio of {len(members)} bots",
+            # The number the reader BOOKED, not the number that could be
+            # measured. A 4-code request with one concealed member used to be
+            # titled "Portfolio of 3 bots" -- the reader's first question was
+            # where the fourth had gone (2026-09-24). What was measured is
+            # stated where it matters, per section ("3 measured · 1
+            # concealed"); the title names the portfolio the reader asked for.
+            # Label only: the combined bot's id is derived from the member
+            # codes (`PortfolioAggregator.portfolio_id`), never from this.
+            nick_name=f"Portfolio of {len(codes)} bots",
             notify=progress,
         )
         if outcome.combined is None or outcome.portfolio is None:
@@ -3966,12 +4630,24 @@ class WebDataService:
             )
 
         portfolio = outcome.portfolio
-        if self.portfolio_history is not None:
-            self.portfolio_history.append(portfolio)
+        def _refile(updated: Dict[str, Any]) -> None:
+            # The model's own text wins whenever it produced one. Only the
+            # apology is replaced.
+            if updated.get("narrative") == narrative.FALLBACK_NARRATIVE_VI:
+                updated["narrative"] = _portfolio_engine_summary(
+                    updated.get("text") or []
+                )
+            # The document filed below is written while the narrative still
+            # says "being drafted"; this puts the finished text on disk once
+            # the background thread has it, so a page opened tomorrow reads
+            # the same thing a page opened now eventually shows.
+            write_portfolio_document(self.data_dir, updated)
+
         payload = _full_result(
             portfolio.portfolio_id,
             outcome.combined,
             narrative_backend=self._narrative_backend,
+            on_narrative_ready=_refile,
         )
         payload["portfolio_id"] = portfolio.portfolio_id
         payload["member_codes"] = list(codes)
@@ -3979,14 +4655,40 @@ class WebDataService:
         payload["failures"] = [
             item.model_dump(mode="json") for item in outcome.failures
         ]
+        # The page's headline numbers and every formula it explains, the
+        # PORTFOLIO way -- see `_portfolio_page_overrides`.
+        payload.update(_portfolio_page_overrides(portfolio))
         # Where each member came from. Stated rather than left implicit: a
         # reader comparing two runs of the same portfolio needs to know
         # whether the second one re-read OKX or replayed what was in hand,
         # because only the first says anything about the market now.
+        # Replace the default four-line explanation with one fact per line.
+        # See `_portfolio_text_lines` for why the default renders as a single
+        # paragraph of prose.
+        payload["text"] = _portfolio_text_lines(
+            payload,
+            portfolio,
+            len(members),
+            combined_action=outcome.combined.risk_assessment.recommended_action,
+        )
+        if payload.get("narrative") in (None, narrative.FALLBACK_NARRATIVE_VI):
+            payload["narrative"] = _portfolio_engine_summary(payload["text"])
         payload["member_sources"] = {
             code: ("reused" if f"bot_{code}" in prefetched else "fetched")
             for code in codes
         }
+        # ORDER MATTERS, and it is the fix for a 404 a user actually hit.
+        # The history entry is what puts a row in the portfolio list; the
+        # document is what the page renders from. Writing history first meant
+        # any failure in between left a row nobody could open -- the list
+        # offered five runs and only one had a page behind it. Document
+        # first, row second: a run can now be openable-but-unlisted
+        # (harmless, its id is in the response), never listed-but-unopenable.
+        # Filed before returning, so the `report_url` handed out in this very
+        # response already resolves.
+        stored = write_portfolio_document(self.data_dir, payload)
+        if self.portfolio_history is not None and stored is not None:
+            self.portfolio_history.append(portfolio)
         if progress is not None:
             progress("done")
         return payload
@@ -4180,3 +4882,549 @@ class WebDataService:
         if exc.status == _SOURCE_NOT_FOUND:
             return _not_found_result(exc.code, str(exc))
         return _limited_fallback_result(exc.code, detail)
+
+
+# --------------------------------------------------------------------------- #
+# Market regime by asset (report page, "Market compatibility").
+#
+# A bot can trade several markets, and each market goes through its own
+# phases: one pair can trend while another ranges. This labels the last
+# `days` days of every traded symbol we hold hourly candles for, with the
+# SAME rule the scoring engine uses (`analytics/strategy/phases.py`
+# `build_timeline`: EMA50/EMA200 trend gap, ATR percentile), compressed to
+# one majority phase per day. Symbols without candles are reported as such
+# and never borrow another market's phases.
+# --------------------------------------------------------------------------- #
+
+_REGIME_CACHE: Dict[Tuple[str, str, int], Tuple[float, Dict[str, Any]]] = {}
+_REGIME_CACHE_LOCK = threading.Lock()
+_REGIME_CACHE_TTL_S = 3600.0
+# EMA200 warm-up plus the 30-day ATR window the phase rule needs behind the
+# first hour it labels.
+_REGIME_WARMUP_HOURS = 200 + 720
+
+
+def _load_symbol_candles(data_dir: Path, symbol: str) -> Optional[List[Dict[str, Any]]]:
+    paths = [
+        data_dir / "market" / venue / symbol / name
+        for venue in ("cex", "dex")
+        for name in ("ohlcv_1h_2023_present.json", "ohlcv_1h_2026.json")
+    ]
+    paths.append(data_dir / "market" / "phases" / f"{symbol}.json")
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            candles = json.loads(path.read_text(encoding="utf-8")).get("candles")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            continue
+        if candles:
+            return candles
+    return None
+
+
+def regime_timeline(data_dir: Path, symbol: str, days: int = 180) -> Dict[str, Any]:
+    """{"symbol", "available", "days": [[day_start_ms, PHASE], ...]} for the
+    last `days` days of `symbol` ending at its last candle."""
+    from Agent.backend.bot.mcp.analytics.strategy.phases import build_timeline
+
+    key = (str(data_dir), symbol, days)
+    now = time.time()
+    with _REGIME_CACHE_LOCK:
+        hit = _REGIME_CACHE.get(key)
+        if hit and now - hit[0] < _REGIME_CACHE_TTL_S:
+            return hit[1]
+    out: Dict[str, Any] = {"symbol": symbol, "available": False, "days": []}
+    candles = _load_symbol_candles(Path(data_dir), symbol)
+    if candles:
+        try:
+            ordered = sorted(
+                (c for c in candles if isinstance(c, dict) and c.get("timestamp") is not None and c.get("close") is not None),
+                key=lambda c: int(c["timestamp"]),
+            )
+            ordered = ordered[-(days * 24 + _REGIME_WARMUP_HOURS):]
+            tl = build_timeline(symbol, ordered)
+            end = int(tl.timestamps[-1]) if tl.timestamps else 0
+            start = end - days * 86_400_000
+            buckets: Dict[int, Dict[str, int]] = {}
+            hours: Dict[str, int] = {}
+            closes: Dict[int, float] = {}
+            first_close = last_close = None
+            for ts, ph, close in zip(tl.timestamps, tl.phases, tl.closes):
+                if ts < start:
+                    continue
+                day = int(ts) // 86_400_000 * 86_400_000
+                name = getattr(ph, "value", str(ph))
+                buckets.setdefault(day, {})
+                buckets[day][name] = buckets[day].get(name, 0) + 1
+                hours[name] = hours.get(name, 0) + 1
+                closes[day] = float(close)
+                if first_close is None:
+                    first_close = float(close)
+                last_close = float(close)
+            day_list = []
+            for day in sorted(buckets):
+                counts = {k: v for k, v in buckets[day].items() if k != "UNKNOWN"}
+                day_list.append([day, max(counts, key=counts.get) if counts else "UNKNOWN"])
+            out = {
+                "symbol": symbol,
+                "available": bool(day_list),
+                "days": day_list,
+                # hours spent in each phase over the window (UNKNOWN included)
+                "hours": hours,
+                # daily closing price (last hourly close of each day)
+                "closes": [[d, closes[d]] for d in sorted(closes)],
+                "return_pct": ((last_close / first_close - 1.0) * 100.0) if first_close else None,
+                "last_phase_hourly": getattr(tl.phases[-1], "value", str(tl.phases[-1])) if tl.phases else None,
+            }
+        except Exception:  # noqa: BLE001 - optional page decoration
+            logger.warning("regime timeline failed for %s", symbol, exc_info=True)
+    with _REGIME_CACHE_LOCK:
+        _REGIME_CACHE[key] = (now, out)
+    return out
+
+
+def regime_timelines(data_dir: Path, result: Mapping[str, Any], days: int = 180, limit: int = 8) -> List[Dict[str, Any]]:
+    """Regime timelines for the symbols `result` traded, largest trading
+    value first (see `regime_timeline`)."""
+    evidence = result.get("evidence") if isinstance(result, Mapping) else None
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    share = evidence.get("symbol_exposure_share")
+    symbols: List[str] = []
+    if isinstance(share, Mapping):
+        symbols = [s for s, _ in sorted(share.items(), key=lambda kv: -(float(kv[1]) if _is_finite_number(kv[1]) else 0.0))]
+    traded = evidence.get("traded_symbol")
+    if not symbols and isinstance(traded, str):
+        symbols = [traded]
+    return [regime_timeline(data_dir, str(s), days) for s in symbols[:limit]]
+
+
+def list_peer_rows(data_dir: Path) -> List[Dict[str, Any]]:
+    """`list_bot_listing_rows` plus the few figures the report page compares
+    a bot against its peers with (primary market, profit factor, max
+    drawdown, win rate). Kept separate so `GET /api/bots`'s pinned row shape
+    does not change."""
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for doc in list_scored_bots(data_dir):
+        row = bot_listing_row(doc)
+        if row is None or row["code"] in seen:
+            continue
+        seen.add(row["code"])
+        bot = doc.get("bot") if isinstance(doc.get("bot"), dict) else {}
+        ev = doc.get("evidence") if isinstance(doc.get("evidence"), dict) else {}
+        row = dict(row)
+        row["primary_symbol"] = bot.get("traded_symbol") if isinstance(bot.get("traded_symbol"), str) else None
+        for key in ("profit_factor", "max_drawdown_pct", "win_rate"):
+            row[key] = float(ev[key]) if _is_finite_number(ev.get(key)) else None
+        out.append(row)
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Same-market comparison per traded pair (report page, "Traded markets").
+#
+# Every analyzed bot's raw closed-trade ledger is on disk
+# (data/trade/bot_<code>/trade_list.json, the same rows ledger.py turns into
+# TradeLedgerItem: `instId` -> pair, `pnl` -> realized PnL). Splitting it by
+# pair gives each bot's own figures ON THAT PAIR: closed trades, win rate,
+# profit factor and the deepest drawdown of that pair's cumulative PnL as %
+# of the bot's reference capital (`capital_at_risk` of its assessment).
+# --------------------------------------------------------------------------- #
+
+_PAIR_STATS_CACHE: Dict[str, Tuple[float, Dict[str, Dict[str, Dict[str, Any]]]]] = {}
+# Per ledger file: ((path, (mtime_ns, size), capital), {pair: stats}).
+_PAIR_STATS_BY_FILE: Dict[str, Tuple[Tuple[Any, ...], Dict[str, Dict[str, Any]]]] = {}
+_PAIR_STATS_LOCK = threading.Lock()
+
+
+def _pair_stats_from_ledger(rows: Sequence[Any], capital: Optional[float]) -> Dict[str, Dict[str, Any]]:
+    by_pair: Dict[str, List[Tuple[float, float]]] = {}
+    for r in rows:
+        if not isinstance(r, Mapping):
+            continue
+        inst = str(r.get("instId") or r.get("symbol") or "").upper()
+        try:
+            pnl = float(r.get("pnl", r.get("pnl_usdt", r.get("realized_pnl"))))
+            ct = float(r.get("closeTime", r.get("uTime", r.get("close_time"))))
+        except (TypeError, ValueError):
+            continue
+        if not inst or not math.isfinite(pnl) or not math.isfinite(ct):
+            continue
+        by_pair.setdefault(inst.split("-")[0], []).append((ct, pnl))
+    out: Dict[str, Dict[str, Any]] = {}
+    for sym, trades in by_pair.items():
+        trades.sort()
+        n = len(trades)
+        wins = sum(1 for _, p in trades if p > 0)
+        gp = sum(p for _, p in trades if p > 0)
+        gl = -sum(p for _, p in trades if p < 0)
+        cum = peak = depth = 0.0
+        for _, p in trades:
+            cum += p
+            peak = max(peak, cum)
+            depth = max(depth, peak - cum)
+        out[sym] = {
+            "trades": n,
+            "win_rate": wins / n * 100.0 if n else None,
+            "profit_factor": gp / gl if gl > 0 else None,
+            "max_drawdown_pct": depth / capital * 100.0 if capital and capital > 0 else None,
+        }
+    return out
+
+
+def pair_stats_table(data_dir: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """{bot code: {pair: {trades, win_rate, profit_factor, max_drawdown_pct}}}
+    for every bot with a stored ledger. Each ledger's figures are reused
+    while its file (and that bot's capital) is unchanged, so a bot analysed a
+    minute ago is in the table on the next request -- the old whole-table
+    one-hour cache could leave it out for up to an hour."""
+    key = str(data_dir)
+    now = time.time()
+    capital: Dict[str, float] = {}
+    for doc in list_scored_bots(data_dir):
+        bot = doc.get("bot") if isinstance(doc.get("bot"), dict) else {}
+        ev = doc.get("evidence") if isinstance(doc.get("evidence"), dict) else {}
+        code = bot.get("unique_code")
+        if isinstance(code, str) and _is_finite_number(ev.get("capital_at_risk")):
+            capital[code] = float(ev["capital_at_risk"])
+    table: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    root = Path(data_dir) / "trade"
+    if root.is_dir():
+        for path in root.glob("bot_*/trade_list.json"):
+            code = path.parent.name[len("bot_"):]
+            sig = _file_signature(path)
+            ckey = (str(path), sig, capital.get(code))
+            with _PAIR_STATS_LOCK:
+                hit = _PAIR_STATS_BY_FILE.get(str(path))
+            if sig is not None and hit is not None and hit[0] == ckey:
+                if hit[1]:
+                    table[code] = hit[1]
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            rows = payload.get("closed_trades") if isinstance(payload, dict) else None
+            stats = _pair_stats_from_ledger(rows, capital.get(code)) if isinstance(rows, list) and rows else {}
+            if stats:
+                table[code] = stats
+            if sig is not None and _file_signature(path) == sig:
+                with _PAIR_STATS_LOCK:
+                    _PAIR_STATS_BY_FILE[str(path)] = (ckey, stats)
+    with _PAIR_STATS_LOCK:
+        _PAIR_STATS_CACHE[key] = (now, table)
+    return table
+
+
+def _half_unit(raw: Any) -> Optional[float]:
+    """Rounding half-unit of a published decimal ("0.0002" -> 0.00005)."""
+    txt = str(raw).strip()
+    if not txt or "e" in txt.lower():
+        return None
+    return 0.5 * 10.0 ** -(len(txt.split(".", 1)[1]) if "." in txt else 0)
+
+
+def _weekly_rows(overview: Mapping[str, Any]) -> List[Tuple[int, float, float, Optional[float]]]:
+    """(week start ms, pnl, pnlRatio, ratio rounding half-unit), oldest first.
+    OKX trims trailing zeros ("0.125" is "0.1250"), so one precision -- the
+    most decimals any week shows -- applies to every week; a week with no
+    PnL and a zero ratio is exact."""
+    raw = []
+    for w in overview.get("weekly_pnl_history") or []:
+        try:
+            raw.append((int(float(w["beginTs"])), float(w["pnl"]), float(w["pnlRatio"]), _half_unit(w["pnlRatio"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    units = [h for _, _, _, h in raw if h is not None]
+    unit = min(units) if units else None
+    return sorted((t, p, r, 0.0 if p == 0 and r == 0 else unit) for t, p, r, _ in raw)
+
+
+def _aggregate_equity(weeks: Sequence[Tuple[int, float, float, Optional[float]]]) -> Optional[Dict[str, float]]:
+    """Account equity when no single week is precise enough for the engine's
+    per-week rule (|pnlRatio| >= 0.01). Every week with both a PnL and a
+    ratio says equity ~= pnl / ratio; pooling them,
+        E = Σ|pnl| / Σ|ratio|,
+    and because each ratio is published rounded, the worst-case relative
+    error is Σ(half-unit) / Σ|ratio|. Used only when that bound is <= 15%."""
+    use = [(p, r, h) for _, p, r, h in weeks if p != 0 and r != 0 and h is not None and (p > 0) == (r > 0)]
+    if not use:
+        return None
+    sp, sr, sh = sum(abs(p) for p, _, _ in use), sum(abs(r) for _, r, _ in use), sum(h for _, _, h in use)
+    if sr <= 0 or sp <= 0:
+        return None
+    err = sh / sr
+    if err > 0.15:
+        return None
+    return {"equity": sp / sr, "rel_error": err, "weeks": len(use)}
+
+
+def _margin_floor(rows: Sequence[Mapping[str, Any]], open_rows: Sequence[Mapping[str, Any]]) -> Optional[float]:
+    """Smallest starting capital that could have funded every position the
+    ledger shows: at each moment, capital + realised PnL so far must cover
+    the margin then in use. C0 = max_t (margin_open(t) - realised(t))."""
+    events: List[Tuple[float, int, float, float]] = []
+    for r in rows:
+        try:
+            o, c, m, pnl = float(r["openTime"]), float(r["closeTime"]), float(r.get("margin") or 0), float(r["pnl"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        events.append((o, 1, m, 0.0))
+        events.append((c, 0, -m, pnl))
+    for r in open_rows:
+        try:
+            events.append((float(r["openTime"]), 1, float(r.get("margin") or 0), 0.0))
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not events:
+        return None
+    events.sort()
+    margin = realised = need = 0.0
+    for _, _, dm, pnl in events:
+        margin += dm
+        realised += pnl
+        need = max(need, margin - realised)
+    return need if need > 0 else None
+
+
+def _risk_fallbacks(bot: Any, overview: Mapping[str, Any], trade_payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Max / current drawdown and Calmar for bots where the engine cannot
+    express drawdown as a percentage (no weekly equity week passes its
+    precision rule) or has no OKX ROI for Calmar. Layers, most direct first:
+
+    1. engine values (equity in force at each trade)          -> unchanged
+    2. no closed trades, usable weekly equity                   -> drawdown of
+       OKX's weekly equity curve itself
+    3. closed trades, no usable week                            -> ledger
+       drawdown amount / pooled weekly equity (`_aggregate_equity`), else /
+       the margin-funding floor (`_margin_floor`, peak-based, an upper bound)
+    Calmar: OKX ROI (engine) -> compounded weekly returns -> reconstructed
+    equity; denominator = the largest max drawdown available (conservative);
+    zero drawdown with a positive return is reported as such, not as a number.
+    """
+    from Agent.backend.bot.mcp.capital.equity_curve import EquityCurveBuilder
+
+    perf = bot.performance
+    out: Dict[str, Any] = {}
+    pnls: List[float] = []
+    for t in sorted(bot.trade_ledger_summary or [], key=lambda t: (t.close_time, t.open_time)):
+        pnls.append(float(t.realized_pnl))
+    cum, peak, dd_amt = [0.0], 0.0, [0.0]
+    for v in pnls:
+        cum.append(cum[-1] + v)
+        peak = max(peak, cum[-1])
+        dd_amt.append(peak - cum[-1])
+    weeks = _weekly_rows(overview)
+    curve = EquityCurveBuilder.build(overview.get("weekly_pnl_history"))
+
+    max_dd, cur_dd, basis, detail = perf.max_drawdown_pct, perf.current_drawdown_pct, "EQUITY_AT_TRADE", {}
+    if cur_dd is None:
+        if not pnls and curve.is_usable:
+            series: List[float] = []
+            for pt in (p for p in curve.points if p.usable and p.start_equity):
+                series.append(float(pt.start_equity))
+                if pt.end_equity is not None:
+                    series.append(float(pt.end_equity))
+            top = max(series)
+            max_dd, cur_dd, basis = curve.max_drawdown_pct, (top - series[-1]) / top * 100.0 if top > 0 else None, "WEEKLY_EQUITY"
+            detail = {"weeks": curve.usable_points}
+        elif not pnls and weeks and _aggregate_equity(weeks):
+            # No trade and no single precise week: the weekly PnL itself,
+            # over the pooled equity estimate.
+            agg = _aggregate_equity(weeks)
+            wc, wpk, wdd = 0.0, 0.0, [0.0]
+            for _, wp, _, _ in weeks:
+                wc += wp
+                wpk = max(wpk, wc)
+                wdd.append(wpk - wc)
+            max_dd, cur_dd, basis, detail = max(wdd) / agg["equity"] * 100.0, wdd[-1] / agg["equity"] * 100.0, "POOLED_WEEKLY_EQUITY", agg
+        elif pnls:
+            agg = _aggregate_equity(weeks)
+            if agg:
+                e = agg["equity"]
+                max_dd, cur_dd, basis, detail = max(dd_amt) / e * 100.0, dd_amt[-1] / e * 100.0, "POOLED_WEEKLY_EQUITY", agg
+            else:
+                c0 = _margin_floor(trade_payload.get("closed_trades") or [], trade_payload.get("open_positions") or [])
+                if c0:
+                    eq = [c0 + c for c in cum]
+                    pk, mdd = eq[0], 0.0
+                    for v in eq:
+                        pk = max(pk, v)
+                        mdd = max(mdd, (pk - v) / pk if pk > 0 else 0.0)
+                    max_dd, cur_dd, basis, detail = mdd * 100.0, (pk - eq[-1]) / pk * 100.0 if pk > 0 else None, "MARGIN_FLOOR", {"capital": c0}
+        if cur_dd is not None:
+            out.update(max_drawdown_pct=max_dd, current_drawdown_pct=cur_dd, drawdown_basis=basis, drawdown_detail=detail)
+
+    calmar, cbasis, cdetail = perf.calmar_ratio, ("OKX_ROI" if perf.calmar_ratio is not None else None), {}
+    if calmar is None:
+        dens = [x for x in (max_dd, curve.max_drawdown_pct if curve.is_usable else None) if x is not None]
+        if weeks:
+            # Drawdown of the compounded weekly return index I = Π(1 + r):
+            # the same weekly returns as the numerator, free of deposits and
+            # withdrawals, and it needs no capital figure.
+            idx, ipk, idd = 1.0, 1.0, 0.0
+            for _, _, r, _ in weeks:
+                idx *= 1.0 + r
+                ipk = max(ipk, idx)
+                if ipk > 0:
+                    idd = max(idd, (ipk - idx) / ipk)
+            dens.append(min(idd, 1.0) * 100.0)
+        den = max(dens) if dens else None
+        days = (weeks[-1][0] + 7 * 86_400_000 - weeks[0][0]) / 86_400_000.0 if weeks else 0.0
+        growth = None
+        wiped = curve.wiped_out or any(r <= -1.0 for _, _, r, _ in weeks)
+        if wiped:
+            cbasis, cdetail = "WIPED_OUT", {}
+        elif weeks and days >= 30.0:
+            g = 1.0
+            for _, _, r, _ in weeks:
+                g *= 1.0 + r
+            # Published ratios are rounded; use the compounded return only
+            # when that rounding moves it by at most a quarter.
+            err = sum(h or 0.0 for _, _, _, h in weeks)
+            if g > 0 and abs(g - 1.0) > 0 and err / abs(g - 1.0) <= 0.25:
+                growth, cbasis, cdetail = g, "WEEKLY_RETURNS", {"weeks": len(weeks), "days": days, "rel_error": err / abs(g - 1.0)}
+        if growth is None and not wiped and pnls and basis in ("POOLED_WEEKLY_EQUITY", "MARGIN_FLOOR"):
+            e = detail.get("equity") or detail.get("capital")
+            span = (max(t.close_time for t in bot.trade_ledger_summary) - min(t.open_time for t in bot.trade_ledger_summary)) / 86_400_000.0
+            if e and span >= 30.0:
+                growth, days, cbasis, cdetail = (e + cum[-1]) / e, span, basis, {"days": span}
+        if growth is not None and growth > 0 and den is not None:
+            annual = (growth ** (365.25 / days) - 1.0) * 100.0
+            cdetail.update(roi_pct=(growth - 1.0) * 100.0, annualised_pct=annual, max_dd_pct=den)
+            if den > 0:
+                calmar = annual / den
+            elif annual > 0:
+                cbasis = "NO_DRAWDOWN"
+    out.update(calmar_ratio=calmar, calmar_basis=cbasis, calmar_detail=cdetail)
+    return out
+
+
+_OFFLINE_CACHE: Dict[Tuple[str, float, float], Tuple[float, Dict[str, Any]]] = {}
+
+
+def offline_bot_metrics(data_dir: Path, code: str) -> Dict[str, Any]:
+    """Figures a saved report does not store, recomputed from the bot's own
+    files on disk with the engine's own code (no network):
+    `BotObservationService.get_bot_result` (FileBotDataSource) for current
+    drawdown / Calmar and the per-trade market phase, then
+    `build_scenario_laboratory` on that result; `_risk_fallbacks` where the
+    engine has no percentage basis. `trade_count` / `max_drawdown_pct` /
+    `total_pnl` come along so the page can check the files still match the
+    saved report before using anything. Cached per file version."""
+    bot_dir = Path(data_dir) / "trade" / f"bot_{code}"
+    try:
+        stamp = ((bot_dir / "trade_list.json").stat().st_mtime, (bot_dir / "overview.json").stat().st_mtime)
+        slot = json.loads((bot_dir / "crawl_slot.json").read_text(encoding="utf-8"))
+        overview = json.loads((bot_dir / "overview.json").read_text(encoding="utf-8"))
+        trade_payload = json.loads((bot_dir / "trade_list.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+    key = (code, stamp[0], stamp[1])
+    hit = _OFFLINE_CACHE.get(key)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    from Agent.backend.report.qc.reporting.scenarios import build_scenario_laboratory
+
+    bot = BotObservationService(Path(data_dir)).get_bot_result(
+        str(slot.get("asset") or ""), f"bot_{code}", venue_type=slot.get("venue"),
+        seed=42, simulation_iterations=200, simulation_horizon=None,
+    )
+    perf = bot.performance
+    out: Dict[str, Any] = {
+        "trade_count": perf.trade_count,
+        # The engine's own max drawdown: the page compares it with the saved
+        # report before using anything below.
+        "engine_max_drawdown_pct": perf.max_drawdown_pct,
+        "max_drawdown_pct": perf.max_drawdown_pct,
+        "current_drawdown_pct": perf.current_drawdown_pct,
+        "drawdown_basis": "EQUITY_AT_TRADE" if perf.current_drawdown_pct is not None else None,
+        "total_pnl": perf.total_pnl,
+        "profit_factor": perf.profit_factor,
+        "win_rate": perf.win_rate,
+        "sharpe_ratio": perf.sharpe_ratio,
+        "sortino_ratio": perf.sortino_ratio,
+    }
+    out.update(_risk_fallbacks(bot, overview if isinstance(overview, dict) else {},
+                               trade_payload if isinstance(trade_payload, dict) else {}))
+    out["scenario_laboratory"] = build_scenario_laboratory(bot, None).model_dump(mode="json")
+    _OFFLINE_CACHE[key] = (time.time(), out)
+    return out
+
+
+def portfolio_render_context(data_dir: Path, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """What `GET /portfolio/<id>` hands the page renderer beyond the payload,
+    mirroring the single-bot route: analysis time, peer ranks, regime
+    timelines and the same-market comparison.
+
+    The portfolio's own members are removed from both comparison sets: their
+    trades ARE the merged book, so ranking the book against them would
+    compare it with itself. The merged book's per-pair figures come from its
+    own closed-trade series (`symbol` on every row), on its combined capital.
+    Every part is optional and fails on its own.
+    """
+    portfolio = payload.get("portfolio") if isinstance(payload.get("portfolio"), Mapping) else {}
+    own_codes = {
+        str(m.get("unique_code"))
+        for m in (portfolio.get("members") or [])
+        if isinstance(m, Mapping) and m.get("unique_code")
+    }
+    own_codes.update(str(c) for c in (payload.get("member_codes") or []) if c)
+    out: Dict[str, Any] = {}
+    as_of = portfolio.get("as_of_ms") or portfolio.get("timestamp")
+    out["snapshot_at_ms"] = int(float(as_of)) if _is_finite_number(as_of) else None
+    try:
+        out["peer_rows"] = [r for r in list_peer_rows(data_dir) if str(r.get("code")) not in own_codes]
+    except Exception:  # noqa: BLE001 - optional
+        out["peer_rows"] = None
+    try:
+        out["regime_timelines"] = regime_timelines(data_dir, payload)
+    except Exception:  # noqa: BLE001 - optional
+        out["regime_timelines"] = None
+    try:
+        table = {c: s for c, s in pair_stats_table(data_dir).items() if c not in own_codes}
+        evidence = payload.get("evidence") if isinstance(payload.get("evidence"), Mapping) else {}
+        state = evidence.get("current_state") if isinstance(evidence.get("current_state"), Mapping) else {}
+        perf = evidence.get("performance") if isinstance(evidence.get("performance"), Mapping) else {}
+        capital = state.get("reference_capital") if _is_finite_number(state.get("reference_capital")) else perf.get("capital_at_risk")
+        series = [r for r in (evidence.get("closed_trade_series") or []) if isinstance(r, Mapping) and r.get("symbol")]
+        code = str(payload.get("code") or "")
+        if code and series:
+            table[code] = _pair_stats_from_ledger(
+                series, float(capital) if _is_finite_number(capital) else None
+            )
+        out["pair_stats"] = table
+    except Exception:  # noqa: BLE001 - optional
+        out["pair_stats"] = None
+    return out
+
+
+def bot_ledger(data_dir: Path, code: str) -> List[Dict[str, Any]]:
+    """This bot's stored closed trades with their pair, oldest first:
+    [{"close_ms", "open_ms", "pnl", "pair"}] -- the same rows ledger.py reads
+    (`closeTime`, `openTime`, `pnl`, `instId`). Empty when not on disk."""
+    path = Path(data_dir) / "trade" / f"bot_{code}" / "trade_list.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return []
+    rows = payload.get("closed_trades") if isinstance(payload, dict) else None
+    out: List[Dict[str, Any]] = []
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, Mapping):
+            continue
+        try:
+            close_ms = float(r.get("closeTime", r.get("uTime", r.get("close_time"))))
+            pnl = float(r.get("pnl", r.get("pnl_usdt", r.get("realized_pnl"))))
+        except (TypeError, ValueError):
+            continue
+        try:
+            open_ms: Optional[float] = float(r.get("openTime", r.get("cTime", r.get("open_time"))))
+        except (TypeError, ValueError):
+            open_ms = None
+        inst = str(r.get("instId") or r.get("symbol") or "").upper()
+        out.append({"close_ms": close_ms, "open_ms": open_ms, "pnl": pnl, "pair": inst.split("-")[0] if inst else None,
+                    "inst": "-".join(inst.split("-")[:2]) if inst.count("-") >= 1 else None})
+    out.sort(key=lambda x: x["close_ms"])
+    return out

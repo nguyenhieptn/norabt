@@ -165,7 +165,7 @@ def test_bots_that_never_trade_together_are_flagged() -> None:
     odd = make_trades(_SERIES[:30], start_ms=BASE_MS + DAY_MS, step_ms=2 * DAY_MS)
     _, matrix = _analyze([make_bot("AAA", even), make_bot("BBB", odd)])
     assert matrix.pairs[0].co_active_buckets == 0
-    assert any("same bucket" in warning for warning in matrix.warnings)
+    assert any("same period" in warning for warning in matrix.warnings)
 
 
 def test_p_value_marks_a_short_window_as_not_significant() -> None:
@@ -290,3 +290,147 @@ def test_same_seed_reproduces_the_same_numbers() -> None:
     assert first.var_95_pct == second.var_95_pct
     assert first.diversification_ratio == second.diversification_ratio
     assert math.isfinite(first.var_95_pct)
+
+
+# --------------------------------------------------------------------------- #
+# Verdict: một hệ số nhiễu (không có ý nghĩa thống kê) không được phép quyết
+# định "DIVERSIFIED" hay "HIGH_CORRELATION_CLUSTER" -- chỉ cặp SIGNIFICANT mới
+# đủ tư cách. `CorrelationAnalyzer` đã tự gắn cờ này vào từng cặp
+# (`is_significant`/`note`); `_verdict` phải tôn trọng cờ đó thay vì lấy
+# thẳng `average_pearson`/`max_pearson` (trung bình trên MỌI cặp có số, bất
+# kể có ý nghĩa hay không).
+# --------------------------------------------------------------------------- #
+
+
+def test_verdict_downgrades_to_insufficient_evidence_when_no_pair_is_significant() -> None:
+    from Agent.backend.report.qc.portfolio.schemas import PortfolioVerdict
+    from Agent.backend.report.qc.portfolio.service import PortfolioQCService
+
+    rng = np.random.default_rng(11)
+    bots = [
+        make_bot("AAA", make_trades(list(rng.normal(0, 1, 21)))),
+        make_bot("BBB", make_trades(list(rng.normal(0, 1, 21)))),
+    ]
+    _, matrix = _analyze(bots)
+    assert matrix.pairs[0].is_significant is False
+
+    verdict, reason = PortfolioQCService._verdict(matrix)
+    assert verdict is PortfolioVerdict.INSUFFICIENT_EVIDENCE
+    assert "not enough evidence" in reason
+
+
+def test_verdict_uses_the_significant_pair_even_when_the_matrix_average_would_not() -> None:
+    """r cao nhưng KHÔNG significant phải bị loại khỏi phép tính verdict, và
+    một cặp thật sự significant ở gần đó thì vẫn phải quyết định được verdict."""
+    from Agent.backend.report.qc.portfolio.schemas import (
+        AlignmentDiagnostics,
+        CorrelationMatrix,
+        PairCorrelation,
+        PairRelationship,
+        PortfolioVerdict,
+    )
+    from Agent.backend.report.qc.portfolio.service import PortfolioQCService
+
+    align = AlignmentDiagnostics(
+        bucket_label="1d",
+        bucket_ms=DAY_MS,
+        bucket_reason="daily",
+        overlap_start_ms=BASE_MS,
+        overlap_end_ms=BASE_MS + 60 * DAY_MS,
+        overlap_days=60.0,
+        span_buckets=60,
+        evaluated_buckets=60,
+        dropped_idle_buckets=0,
+        active_buckets={"A": 60, "B": 60, "C": 60},
+        active_share={"A": 1.0, "B": 1.0, "C": 1.0},
+        included_labels=["A", "B", "C"],
+        excluded={},
+        is_valid=True,
+        warnings=[],
+    )
+    noisy = PairCorrelation(
+        label_a="A", label_b="B", code_a="A", code_b="B",
+        pearson=0.9, spearman=0.9, observations=5, co_active_buckets=5,
+        p_value=0.3, is_significant=False, shared_symbols=[], exposure_overlap=None,
+        relationship=PairRelationship.HIGH, note="r high but noisy",
+    )
+    real = PairCorrelation(
+        label_a="A", label_b="C", code_a="A", code_b="C",
+        pearson=0.05, spearman=0.05, observations=200, co_active_buckets=80,
+        p_value=0.01, is_significant=True, shared_symbols=[], exposure_overlap=None,
+        relationship=PairRelationship.LOW, note="low, but real",
+    )
+    matrix = CorrelationMatrix(
+        labels=["A", "B", "C"], codes=["A", "B", "C"],
+        pearson=[[1.0, 0.9, 0.05], [0.9, 1.0, 0.0], [0.05, 0.0, 1.0]],
+        spearman=[[1.0, 0.9, 0.05], [0.9, 1.0, 0.0], [0.05, 0.0, 1.0]],
+        pairs=[noisy, real],
+        average_pearson=float(np.mean([0.9, 0.05])),  # số thô, bao gồm cả cặp nhiễu
+        max_pearson=0.9,
+        max_pearson_pair=["A", "B"],
+        min_pearson=0.05,
+        average_exposure_overlap=None,
+        alignment=align,
+        is_valid=True,
+        warnings=[],
+    )
+    # Số thô (0.9) sẽ ra HIGH_CORRELATION_CLUSTER nếu không lọc; số đã lọc
+    # (chỉ còn cặp [A,C] ở r=0.05) phải ra DIVERSIFIED.
+    verdict, reason = PortfolioQCService._verdict(matrix)
+    assert verdict is PortfolioVerdict.DIVERSIFIED
+    assert "excluded as not statistically significant" in reason
+    # Con số thô trên model không bị đổi -- vẫn là 0.9, cho bảng/biểu đồ.
+    assert matrix.max_pearson == 0.9
+
+
+def test_two_bots_at_r065_p012_is_insufficient_evidence_not_high_correlation() -> None:
+    """Kịch bản đúng như sếp nêu (2026-09-23, M1): danh mục 2 bot, r=0.65 --
+    trên ngưỡng HIGH_AVG_PEARSON (0.6) nếu đọc thẳng -- nhưng p=0.12, KHÔNG
+    có ý nghĩa thống kê ở mẫu này. 2 bot chỉ có đúng 1 cặp, nên 0 cặp có ý
+    nghĩa / 1 cặp đo được = 0%, dưới ngưỡng 50% -> verdict phải là
+    INSUFFICIENT_EVIDENCE, không phải HIGH_CORRELATION_CLUSTER."""
+    from Agent.backend.report.qc.portfolio.schemas import (
+        AlignmentDiagnostics,
+        CorrelationMatrix,
+        PairCorrelation,
+        PairRelationship,
+        PortfolioVerdict,
+    )
+    from Agent.backend.report.qc.portfolio.service import PortfolioQCService
+
+    align = AlignmentDiagnostics(
+        bucket_label="1d",
+        bucket_ms=DAY_MS,
+        bucket_reason="daily",
+        overlap_start_ms=BASE_MS,
+        overlap_end_ms=BASE_MS + 21 * DAY_MS,
+        overlap_days=21.0,
+        span_buckets=21,
+        evaluated_buckets=21,
+        dropped_idle_buckets=0,
+        active_buckets={"A": 21, "B": 21},
+        active_share={"A": 1.0, "B": 1.0},
+        included_labels=["A", "B"],
+        excluded={},
+        is_valid=True,
+        warnings=[],
+    )
+    pair = PairCorrelation(
+        label_a="A", label_b="B", code_a="A", code_b="B",
+        pearson=0.65, spearman=0.65, observations=21, co_active_buckets=15,
+        p_value=0.12, is_significant=False, shared_symbols=[], exposure_overlap=None,
+        relationship=PairRelationship.HIGH,
+        note="r = +0.65, but not distinguishable from zero at this sample size",
+    )
+    matrix = CorrelationMatrix(
+        labels=["A", "B"], codes=["A", "B"],
+        pearson=[[1.0, 0.65], [0.65, 1.0]], spearman=[[1.0, 0.65], [0.65, 1.0]],
+        pairs=[pair], average_pearson=0.65, max_pearson=0.65, max_pearson_pair=["A", "B"],
+        min_pearson=0.65, average_exposure_overlap=None, alignment=align,
+        is_valid=True, warnings=[],
+    )
+    verdict, reason = PortfolioQCService._verdict(matrix)
+    assert verdict is PortfolioVerdict.INSUFFICIENT_EVIDENCE
+    assert "Only 0 of 1 pair(s)" in reason
+    # Con số thô 0.65 tren model khong doi -- van la du lieu that da do.
+    assert matrix.average_pearson == 0.65

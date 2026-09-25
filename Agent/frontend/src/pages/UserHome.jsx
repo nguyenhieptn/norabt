@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { useSearchParams } from "react-router-dom";
 import AnalyzeFlow from "../components/AnalyzeFlow.jsx";
 import BotDetailView from "../components/BotDetailView.jsx";
@@ -20,7 +20,6 @@ export default function UserHome() {
     searchParams.get("uniqueCode") ||
     searchParams.get("unique_code");
   const portfolioId = searchParams.get("id") || searchParams.get("portfolio_id");
-  const [portfolioData, setPortfolioData] = useState(null);
 
   if (botCode) {
     return (
@@ -35,19 +34,17 @@ export default function UserHome() {
   }
 
   // Điều kiện đọc thẳng từ thứ màn hình này thực sự cần để render: một id tổ
-  // hợp trên URL, hoặc kết quả vừa chạy xong còn giữ trong state. Biến
-  // `currentTab` cũ đã bị bỏ khi `botCode` chuyển sang dò nhiều tham số, nên
-  // nhánh này ném ReferenceError mọi lần `botCode` rỗng.
-  if (portfolioId || portfolioData) {
+  // hợp trên URL. Biến `currentTab` cũ đã bị bỏ khi `botCode` chuyển sang dò
+  // nhiều tham số, nên nhánh này từng ném ReferenceError mọi lần `botCode`
+  // rỗng. Không còn giữ payload trong state: trang tự nạp từ `/portfolio/<id>`,
+  // vốn đã được ghi xuống đĩa TRƯỚC khi `analyze_portfolio` trả về, nên bản
+  // sao trong bộ nhớ chỉ là một nguồn sự thật thứ hai chờ lệch pha.
+  if (portfolioId) {
     return (
       <div className="page">
         <PortfolioDetailView
           portfolioId={portfolioId}
-          initialData={portfolioData}
-          onBack={() => {
-            setPortfolioData(null);
-            setSearchParams({});
-          }}
+          onBack={() => setSearchParams({})}
           onOpenBot={(c) => setSearchParams({ tab: "bot", code: c })}
           isUser={true}
         />
@@ -73,10 +70,9 @@ export default function UserHome() {
       >
         <AnalyzeFlow
           onOpenBot={(targetCode) => setSearchParams({ tab: "bot", code: targetCode, from: "search" })}
-          onOpenPortfolio={(targetId, data) => {
-            setPortfolioData(data);
-            setSearchParams({ tab: "portfolio", id: targetId });
-          }}
+          onOpenPortfolio={(targetId) =>
+            setSearchParams({ tab: "portfolio", id: targetId })
+          }
         />
       </Block>
     </div>

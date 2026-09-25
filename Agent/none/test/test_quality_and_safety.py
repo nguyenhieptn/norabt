@@ -1518,16 +1518,44 @@ def test_material_unbooked_loss_floors_the_risk_score(bot_deferred):
 
 
 def test_venue_label_follows_the_traded_market_not_the_folder():
+    """Regression coverage for a real incident (boss's S1 verdict, 2026-09-23):
+    `crawl_slot.json` had gone stale for 3 production bots, claiming DEX for
+    bots that only ever traded OKX CEX swaps -- read as the "official" venue
+    by 5 other modules. Those 3 sidecars are now fixed to the correct CEX
+    label (see Agent/data/trade/bot_*/crawl_slot.json), which is the right
+    outcome but means the real dataset no longer contains a stale DEX label
+    to exercise this test against. Rather than depend on production data
+    currently containing a bug for coverage, this temporarily reintroduces
+    the exact stale label one bot used to have (verified CEX/BTC-USDT-SWAP
+    underneath) and restores it afterwards, so the override -- the label
+    must follow the market actually traded, not whatever the folder claims
+    -- stays proven regardless of whether today's dataset happens to have a
+    mislabeled bot in it.
+    """
+    import json
+
+    from Agent.backend.infra.config import config
     from Agent.backend.report.qc.reporting.cohort import CohortAssessmentService
 
-    report = CohortAssessmentService(persist_history=False).scan(
-        simulation_iterations=50, simulation_horizon=30
+    slot_path = (
+        Path(config.DATA_DIR) / "trade" / "bot_58D7D205FB591484" / "crawl_slot.json"
     )
+    original = slot_path.read_text(encoding="utf-8")
+    try:
+        slot_path.write_text(
+            json.dumps({"venue": "DEX", "asset": "WBTC"}), encoding="utf-8"
+        )
+        report = CohortAssessmentService(persist_history=False).scan(
+            simulation_iterations=50, simulation_horizon=30
+        )
+    finally:
+        slot_path.write_text(original, encoding="utf-8")
+
     filed_in_dex = [r for r in report.rows if r.snapshot_venue == "DEX"]
     assert filed_in_dex, "dataset must still contain dex-filed snapshots"
     for row in filed_in_dex:
         if row.market_available:
-            # These are OKX swaps filed under dex/ folders; the label must not lie.
+            # This is an OKX swap filed under a dex/ folder; the label must not lie.
             assert row.venue_type == row.market.venue_type
 
 

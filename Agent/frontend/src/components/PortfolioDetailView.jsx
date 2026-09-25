@@ -19,7 +19,7 @@ import BotDetailView from "./BotDetailView.jsx";
  * `portfolioId` is a PORT_… digest of the member set, produced by the backend
  * and shown in place of a bot code.
  */
-export default function PortfolioDetailView({ portfolioId, onBack, isUser = false }) {
+export default function PortfolioDetailView({ portfolioId, onBack, onOpenBot, onReanalyze = null, isUser = false }) {
   if (!portfolioId) {
     return (
       <div className="report-spa-error">
@@ -42,8 +42,17 @@ export default function PortfolioDetailView({ portfolioId, onBack, isUser = fals
   return (
     <BotDetailView
       code={portfolioId}
-      reportPath={`/portfolio/${encodeURIComponent(portfolioId)}`}
+      // Nạp qua `/api/...` chứ không phải `/portfolio/...`: vhost nginx của
+      // môi trường này kết bằng `location / { return 404; }`, nên mọi tuyến
+      // Starlette mới cần một `location` tương ứng, còn mọi thứ dưới `/api/`
+      // thì đã được proxy sẵn. Hai đường trỏ về CÙNG một handler, nên đây
+      // không phải bản sao thứ hai của trang. `/portfolio/<id>` vẫn là URL
+      // chia sẻ chính thức và là thứ `report_url` phát ra.
+      reportPath={`/api/portfolio/page/${encodeURIComponent(portfolioId)}`}
       onBack={onBack}
+      backLabel={isUser ? null : "Back to portfolio runs"}
+      onReanalyze={isUser || !onReanalyze ? null : () => onReanalyze(portfolioId)}
+      onOpenBot={onOpenBot}
       isUser={isUser}
     />
   );

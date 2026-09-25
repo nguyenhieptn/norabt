@@ -25,6 +25,8 @@ from Agent.backend.external.okx.client import OkxApiError, OkxTransportError
 from Agent.backend.external.sources.bot_source import (
     HISTORY_PATH,
     LEAD_TRADERS_PATH,
+    PREFERENCE_PATH,
+    PUBLIC_PNL_PATH,
     LEADERBOARD_PAGE_SIZE,
     MAX_PAGES,
     PAGE_SIZE,
@@ -175,8 +177,12 @@ class FakeOkxClient:
         fail_paths: Optional[Dict[str, Exception]] = None,
         leaderboard_rows: Optional[List[Dict[str, Any]]] = None,
         stats: Optional[Dict[str, Any]] = None,
+        public_pnl: Optional[List[Dict[str, Any]]] = None,
+        preference: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         self.base_url = "https://www.okx.com"
+        self.public_pnl = public_pnl
+        self.preference = preference
         self.history_rows = history_rows or []
         self.positions = positions if positions is not None else []
         self.weekly = weekly if weekly is not None else []
@@ -207,6 +213,11 @@ class FakeOkxClient:
         if request_path == STATS_PATH:
             assert params.get("lastDays") == STATS_LAST_DAYS
             return [self.stats] if self.stats is not None else []
+        if request_path == PUBLIC_PNL_PATH:
+            assert params.get("lastDays") == STATS_LAST_DAYS
+            return list(self.public_pnl or [])
+        if request_path == PREFERENCE_PATH:
+            return list(self.preference or [])
         raise AssertionError(f"unexpected path {request_path}")
 
     def _page_leaderboard(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1116,3 +1127,237 @@ def test_other_okx_api_errors_on_ledger_endpoints_still_raise_plainly():
     with pytest.raises(BotSourceError) as excinfo:
         source.get_ledger("CODE1")
     assert not isinstance(excinfo.value, LedgerUnavailableError)
+
+
+# ---------------------------------------------------------------------- #
+# FileBotDataSource: a snapshot must say WHY its ledger is empty.
+#
+# The live source tells "this trader hides its order book" (OKX 60004) from
+# "there are simply no trades" by the error code on the wire. A snapshot has
+# no wire. Until the crawler persisted the reason, both produced an identical
+# `closed_trades: []` on disk, which collapsed a finding about the bot into an
+# ordinary data gap -- the exact collapse LedgerUnavailableError exists to
+# prevent, and the one that let a concealing bot drop silently out of a
+# portfolio and make the survivors' correlation look better than the book.
+# ---------------------------------------------------------------------- #
+
+
+def _snapshot(tmp_path: Path, ledger: Dict[str, Any], overview: Dict[str, Any]) -> Path:
+    bot_dir = tmp_path / "bot_CODE1"
+    bot_dir.mkdir(parents=True, exist_ok=True)
+    (bot_dir / "trade_list.json").write_text(json.dumps(ledger), encoding="utf-8")
+    (bot_dir / "overview.json").write_text(json.dumps(overview), encoding="utf-8")
+    return bot_dir
+
+
+_LEDGER_BLOCKED = {
+    "fetch_failures": [f"history_page_0: {TRADER_NOT_EXIST_CODE} Trader doesn't exist"]
+}
+
+
+def test_snapshot_with_blocked_ledger_and_surviving_profile_is_limited(tmp_path):
+    bot_dir = _snapshot(
+        tmp_path,
+        {"closed_trades": [], "open_positions": [], "provenance": _LEDGER_BLOCKED},
+        {"weekly_pnl_history": [{"pnl": 1.0}] * 12, "winRatio": 0.6, "leadDays": 30},
+    )
+    with pytest.raises(LedgerUnavailableError) as excinfo:
+        FileBotDataSource(tmp_path).get_ledger("CODE1", bot_dir)
+    error = excinfo.value
+    assert error.status == STATUS_LIMITED
+    # The verdict alone is useless to the LIMITED path -- limited.py computes
+    # its whole assessment from these, so they have to come back with it.
+    assert len(error.weekly or []) == 12
+    assert (error.profile or {}).get("winRatio") == 0.6
+
+
+def test_snapshot_with_blocked_ledger_and_nothing_else_is_not_found(tmp_path):
+    bot_dir = _snapshot(
+        tmp_path,
+        {"closed_trades": [], "open_positions": [], "provenance": _LEDGER_BLOCKED},
+        {},
+    )
+    with pytest.raises(LedgerUnavailableError) as excinfo:
+        FileBotDataSource(tmp_path).get_ledger("CODE1", bot_dir)
+    assert excinfo.value.status == STATUS_NOT_FOUND
+
+
+def test_empty_snapshot_without_a_recorded_reason_stays_ordinary(tmp_path):
+    """Silence is not evidence of concealment.
+
+    Every snapshot crawled before the reason was persisted looks like this.
+    Treating them as concealed would penalise traders for the age of the
+    crawl, so they have to keep reading as an ordinary empty ledger.
+    """
+    bot_dir = _snapshot(
+        tmp_path,
+        {"closed_trades": [], "open_positions": [], "provenance": {"crawled_at_ms": 1}},
+        {"weekly_pnl_history": [{"pnl": 1.0}] * 12},
+    )
+    assert FileBotDataSource(tmp_path).get_ledger("CODE1", bot_dir) is not None
+
+
+def test_a_60004_on_weekly_pnl_alone_does_not_mean_the_ledger_was_blocked(tmp_path):
+    """Only a failure on a LEDGER endpoint says anything about the ledger."""
+    bot_dir = _snapshot(
+        tmp_path,
+        {
+            "closed_trades": [],
+            "open_positions": [],
+            "provenance": {
+                "fetch_failures": [f"weekly_pnl: {TRADER_NOT_EXIST_CODE} x"]
+            },
+        },
+        {},
+    )
+    assert FileBotDataSource(tmp_path).get_ledger("CODE1", bot_dir) is not None
+
+
+@pytest.mark.parametrize(
+    "ledger",
+    [
+        {"closed_trades": [{"subPosId": "1"}], "open_positions": []},
+        {"closed_trades": [], "open_positions": [{"instId": "BTC-USDT-SWAP"}]},
+    ],
+)
+def test_a_snapshot_that_holds_positions_is_never_concealed(tmp_path, ledger):
+    """A recorded failure on one page cannot unsay the rows on another.
+
+    `crawl_history` pages, so a 60004 on a later page sits in the same list
+    as the rows an earlier page returned. Reading that as concealment would
+    throw away a ledger that is present.
+    """
+    bot_dir = _snapshot(tmp_path, {**ledger, "provenance": _LEDGER_BLOCKED}, {})
+    assert FileBotDataSource(tmp_path).get_ledger("CODE1", bot_dir) is not None
+
+
+# ---------------------------------------------------------------------- #
+# `_phase_timelines`: khoá phải được lấy theo một THỨ TỰ CỐ ĐỊNH, không phải
+# theo thứ tự bên trong một `set`.
+#
+# Trước fix: `for symbol in missing:` lặp trên `missing`, một list được điền
+# theo thứ tự lặp của `wanted = {...}` -- một `set`. Hai bot khác nhau về
+# tổng số symbol (một bot chỉ trade 2 mã, một bot khác trade hàng chục mã)
+# dựng `set` với kích thước bảng băm khác nhau, nên CÙNG hai chuỗi ("BTC",
+# "ETH") có thể rơi vào thứ tự lặp NGƯỢC NHAU giữa hai `set`. Vòng lặp lại
+# giữ khoá đã lấy (chỉ release ở cuối), nên hai luồng lấy khoá theo hai thứ
+# tự ngược nhau là kẹt chéo AB-BA kinh điển: luồng 1 giữ BTC, chờ ETH; luồng
+# 2 giữ ETH, chờ BTC -- cả hai chờ mãi mãi. `fetch_members` của portfolio
+# chạy đúng kiểu nhiều luồng cùng gọi vào khoá này.
+#
+# Sau fix: `for symbol in sorted(missing):` -- thứ tự chỉ phụ thuộc bảng chữ
+# cái, không phụ thuộc set nào sinh ra `missing`, nên mọi luồng luôn lấy BTC
+# trước ETH bất kể phần còn lại trong sổ của luồng đó là gì.
+# ---------------------------------------------------------------------- #
+
+
+def test_phase_timeline_locks_are_claimed_in_sorted_order(tmp_path, monkeypatch):
+    service = BotObservationService(tmp_path)
+    seen_order: List[str] = []
+
+    def _fake_build(symbols):
+        seen_order.extend(symbols)
+        return {sym: object() for sym in symbols}
+
+    monkeypatch.setattr(service, "_build_phase_timelines", _fake_build)
+
+    # Cố ý đưa vào theo thứ tự KHÔNG phải alphabet, và cố ý đủ nhiều symbol
+    # để set nội bộ khác kích thước bảng băm so với truy vấn 2-symbol dưới
+    # đây -- đúng điều kiện làm hai set lặp khác thứ tự nhau trước fix.
+    service._phase_timelines(["ZETA", "ETH", "BTC", "MID1", "MID2", "MID3", "MID4"])
+    assert seen_order == sorted(seen_order)
+
+    seen_order.clear()
+    service._phase_timelines(["ETH", "BTC"])
+    assert seen_order == ["BTC", "ETH"]
+
+
+def test_phase_timeline_lock_order_is_stable_across_differently_sized_requests(
+    tmp_path, monkeypatch
+):
+    """Đúng kịch bản deadlock: hai lượt gọi với TẬP symbol khác kích cỡ hẳn
+    nhau (mô phỏng hai bot khác nhau trong `fetch_members`) phải lấy khoá
+    theo CÙNG một thứ tự tương đối cho hai symbol chung."""
+    orders: List[List[str]] = []
+
+    def _tracked(service):
+        def _fake_build(symbols):
+            orders.append(list(symbols))
+            return {sym: object() for sym in symbols}
+
+        monkeypatch.setattr(service, "_build_phase_timelines", _fake_build)
+        return service
+
+    # Bot nhỏ: chỉ 2 symbol -- một service riêng, cache riêng, giống hệt hai
+    # luồng khác nhau trong `fetch_members` không chia sẻ trạng thái ngoài
+    # cùng một `BotObservationService` (điều mà bản thân bug thật sự cần:
+    # CÙNG một service, hai luồng, hai `wanted` set có kích thước khác nhau
+    # -- nhưng so sánh thứ tự tương đối giữa hai lượt gọi độc lập đã đủ để
+    # chứng minh thứ tự không còn phụ thuộc kích thước tập).
+    _tracked(BotObservationService(tmp_path))._phase_timelines(["ETH", "BTC"])
+    _tracked(BotObservationService(tmp_path))._phase_timelines(
+        ["ETH", "BTC", "SOL", "DOGE", "ADA", "XRP", "LTC", "BCH", "DOT", "LINK"]
+    )
+
+    def relative_order(order: List[str]) -> tuple:
+        return tuple(s for s in order if s in ("BTC", "ETH"))
+
+    assert relative_order(orders[0]) == relative_order(orders[1]) == ("BTC", "ETH")
+
+
+
+# ---------------------------------------------------------------------- #
+# Public aggregates: the layer OKX keeps publishing after it withholds an
+# order book (60004). Daily PnL for a concealed bot is what lets the
+# portfolio layer measure it instead of dropping it (2026-09-24).
+# ---------------------------------------------------------------------- #
+
+_PNL_ROWS = [  # newest first, cumulative, oldest row 0 -- OKX's own shape
+    {"beginTs": "1790179200000", "pnl": "30", "pnlRatio": "0.03"},
+    {"beginTs": "1790092800000", "pnl": "10", "pnlRatio": "0.01"},
+    {"beginTs": "1790006400000", "pnl": "0", "pnlRatio": "0"},
+]
+
+
+def test_live_source_returns_public_aggregates_even_for_a_concealed_bot():
+    client = FakeOkxClient(
+        fail_paths={
+            HISTORY_PATH: OkxApiError(TRADER_NOT_EXIST_CODE, "Trader doesn't exist"),
+            POSITIONS_PATH: OkxApiError(TRADER_NOT_EXIST_CODE, "Trader doesn't exist"),
+        },
+        public_pnl=_PNL_ROWS,
+        preference=[{"ccy": "ETH", "ratio": "0.6"}, {"ccy": "BTC", "ratio": "0.4"}],
+        stats={"investAmt": "5000", "winRatio": "0.6"},
+        leaderboard_rows=[{"uniqueCode": "CODE1", "nickName": "Hidden Whale"}],
+    )
+    source = LiveBotDataSource(client=client, rate_limiter=fast_bucket())
+    raw = source.get_public_profile("CODE1", include_name=True)
+    assert raw is not None
+    assert raw["pnl"] == _PNL_ROWS
+    assert raw["stats"]["investAmt"] == "5000"
+    assert raw["nickName"] == "Hidden Whale"
+    assert len(raw["preference"]) == 2
+
+
+def test_live_source_skips_the_ranking_unless_asked_for_a_name():
+    client = FakeOkxClient(public_pnl=_PNL_ROWS)
+    source = LiveBotDataSource(client=client, rate_limiter=fast_bucket())
+    source.get_public_profile("CODE1")
+    assert not any(path == LEAD_TRADERS_PATH for path, _ in client.calls)
+
+
+def test_live_source_answers_none_without_a_daily_series():
+    client = FakeOkxClient(public_pnl=[])
+    source = LiveBotDataSource(client=client, rate_limiter=fast_bucket())
+    assert source.get_public_profile("CODE1") is None
+
+
+def test_file_source_reads_the_crawled_public_profile(tmp_path):
+    bot_dir = tmp_path / "bot_CODE1"
+    bot_dir.mkdir()
+    (bot_dir / "public_profile.json").write_text(
+        json.dumps({"uniqueCode": "CODE1", "pnl": _PNL_ROWS}), encoding="utf-8"
+    )
+    raw = FileBotDataSource(tmp_path).get_public_profile("CODE1", bot_dir)
+    assert raw is not None and raw["pnl"] == _PNL_ROWS
+    assert FileBotDataSource(tmp_path).get_public_profile("CODE1", tmp_path / "nope") is None

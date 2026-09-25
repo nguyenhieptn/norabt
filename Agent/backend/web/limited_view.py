@@ -302,10 +302,10 @@ def narrative_paragraph(result: Any) -> Optional[str]:
     dd = drawdown_summary(evidence)
     if dd is not None:
         clauses.append(
-            "The inferred weekly equity curve shows a max drawdown of "
-            f"{dd['max_dd_pct']:.1f}% (over {dd['usable_weeks']}/{dd['total_weeks']} "
-            "weeks with usable data) -- a DIFFERENT denominator from the per-trade "
-            "drawdown only a bot with a public ledger can provide"
+            "Inferred weekly max drawdown "
+            f"{dd['max_dd_pct']:.1f}% ({dd['usable_weeks']}/{dd['total_weeks']} usable "
+            "weeks) -- not directly comparable to a per-trade drawdown, which needs a "
+            "public ledger this bot does not have"
         )
 
     copy_num = _finite_int(profile.get("copyTraderNum"))
@@ -320,9 +320,8 @@ def narrative_paragraph(result: Any) -> Optional[str]:
             clauses.append(gap)
 
     clauses.append(
-        "Every assessment above is based only on what OKX still publishes for this "
-        "bot; the trade-level data (profit factor, deferred loss, phase analysis, "
-        "PSR/DSR) still cannot be read because the bot does not publish its ledger"
+        "Ledger withheld: per-trade metrics (profit factor, deferred loss, phase "
+        "analysis, PSR/DSR) are unavailable"
     )
 
     if not clauses:

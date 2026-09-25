@@ -41,6 +41,14 @@ WEEKLY_PNL_PATH = "/api/v5/copytrading/public-weekly-pnl"
 # this group.
 STATS_PATH = "/api/v5/copytrading/public-stats"
 
+# OKX's public DAILY PnL and currency preference. Both keep answering for a
+# bot whose order book OKX withholds (60004) -- measured live on three such
+# bots, 285-366 daily points each -- which is what lets the portfolio layer
+# measure co-movement for a concealed member instead of dropping it. See
+# Agent/backend/report/qc/portfolio/public_series.py for what the rows mean.
+PUBLIC_PNL_PATH = "/api/v5/copytrading/public-pnl"
+PREFERENCE_PATH = "/api/v5/copytrading/public-preference-currency"
+
 # The lead-trader ranking. NEVER call this with a `uniqueCode` filter expecting
 # it to narrow the result: confirmed against the real endpoint that OKX
 # ignores that parameter here and returns the top of its own ranking instead
@@ -245,6 +253,24 @@ class BotDataSource(ABC):
     ) -> Optional[Dict[str, Any]]:
         raise NotImplementedError
 
+    def get_public_profile(
+        self,
+        unique_code: str,
+        bot_dir: Optional[Path] = None,
+        include_name: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """OKX's public aggregates for this bot: daily PnL, currency
+        preference, stats -- the layer that survives 60004. Shape:
+        `{"pnl": [...], "preference": [...], "stats": {...}|None,
+        "nickName": str|None}` (endpoint rows unmodified; parsed by
+        `report.qc.portfolio.public_series.parse_public_profile`).
+
+        Not abstract: a source with no such data (a test stub, an older
+        snapshot) simply answers None, and the portfolio layer then keeps the
+        realized-ledger basis for everyone rather than mixing rulers.
+        """
+        return None
+
 
 class FileBotDataSource(BotDataSource):
     """Read overview.json/trade_list.json off disk -- the historical behaviour.
@@ -266,7 +292,120 @@ class FileBotDataSource(BotDataSource):
     def get_ledger(
         self, unique_code: str, bot_dir: Optional[Path] = None
     ) -> Optional[Dict[str, Any]]:
-        return self._read(bot_dir, "trade_list.json")
+        payload = self._read(bot_dir, "trade_list.json")
+        if payload is not None and self._is_concealed(payload):
+            raise self._classify_blocked_snapshot(unique_code, bot_dir)
+        return payload
+
+    def _classify_blocked_snapshot(
+        self, unique_code: str, bot_dir: Optional[Path]
+    ) -> "LedgerUnavailableError":
+        """LIMITED vs NOT_FOUND for a snapshot, on the same test as live.
+
+        `LiveBotDataSource._classify_blocked_ledger` decides this by asking
+        three endpoints that do not depend on the withheld ledger -- the
+        ranking row, public-stats and weekly-pnl -- and calling the bot
+        LIMITED if any of them still knows it, NOT_FOUND if none does. The
+        crawler writes all three into overview.json, so the same question is
+        answerable here without a network call, and is asked the same way.
+
+        The `weekly`/`profile` payload matters as much as the verdict:
+        Agent/backend/bot/analysis/limited.py builds its whole assessment out
+        of exactly those fields, so handing back a bare exception would give
+        the LIMITED path a verdict it cannot act on.
+        """
+        overview = None
+        try:
+            overview = self._read(bot_dir, "overview.json")
+        except BotSourceError:
+            overview = None
+        overview = overview or {}
+        weekly = overview.get("weekly_pnl_history")
+        weekly = list(weekly) if isinstance(weekly, list) and weekly else None
+        profile = {
+            key: overview.get(key)
+            for key in ("nickName", "aum", "pnl", "pnlRatio", "winRatio", "leadDays")
+            if overview.get(key) not in (None, "")
+        }
+        rank = overview.get("okx_rank")
+        if rank not in (None, ""):
+            profile["rank"] = rank
+
+        if weekly or profile:
+            return LedgerUnavailableError(
+                status=STATUS_LIMITED,
+                code=unique_code,
+                reason=(
+                    "This bot does not expose its order book (OKX returned error "
+                    f"{TRADER_NOT_EXIST_CODE} on the ledger endpoint for code "
+                    f"{unique_code} when this snapshot was crawled), but its "
+                    "profile/weekly equity survived, so a limited assessment is "
+                    "still possible"
+                ),
+                profile=profile or None,
+                weekly=weekly,
+            )
+        return LedgerUnavailableError(
+            status=STATUS_NOT_FOUND,
+            code=unique_code,
+            reason=(
+                f"Code {unique_code} answered {TRADER_NOT_EXIST_CODE} on the "
+                "ledger endpoint when this snapshot was crawled and the "
+                "snapshot holds no profile or weekly equity for it either"
+            ),
+        )
+
+    def get_public_profile(
+        self,
+        unique_code: str,
+        bot_dir: Optional[Path] = None,
+        include_name: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """`public_profile.json`, written by the crawler beside the ledger.
+        Absent on snapshots crawled before it existed -- None, not an error."""
+        if bot_dir is None:
+            return None
+        return self._read(bot_dir, "public_profile.json")
+
+    @staticmethod
+    def _is_concealed(payload: Dict[str, Any]) -> bool:
+        """True when this snapshot is empty BECAUSE the trader hid its book.
+
+        The live source tells "hides its order book" (60004) apart from "OKX
+        is down" by the error code on the wire. A snapshot has no wire, so it
+        has to be told, and until the crawler started recording it the answer
+        was simply gone: `note_failure` collected the exact OKX reply and
+        nothing ever read the result, while `rows()` turned the same reply
+        into an empty list. Both a concealing trader and a genuinely
+        trade-less one produced `closed_trades: []` and nothing else.
+
+        That is the one collapse LedgerUnavailableError exists to prevent, so
+        the two are separated here on the evidence the crawler now leaves
+        behind, and ONLY on that evidence:
+
+          - a snapshot with trades is never concealed, whatever else was
+            recorded (a weekly-PnL hiccup says nothing about the ledger);
+          - an empty snapshot whose provenance names 60004 on a ledger
+            endpoint is concealed, and the caller gets the same exception the
+            live source raises, so the LIMITED path handles both identically;
+          - an empty snapshot with no such record stays empty and ordinary.
+            Older snapshots, crawled before the reason was persisted, all
+            land here. That is deliberate: inventing concealment from silence
+            would penalise a trader for a crawl that predates the evidence.
+        """
+        if payload.get("closed_trades") or payload.get("open_positions"):
+            return False
+        provenance = payload.get("provenance")
+        if not isinstance(provenance, dict):
+            return False
+        recorded = provenance.get("fetch_failures")
+        if not isinstance(recorded, (list, tuple)):
+            return False
+        return any(
+            TRADER_NOT_EXIST_CODE in str(entry)
+            and ("history" in str(entry) or "positions" in str(entry))
+            for entry in recorded
+        )
 
     @staticmethod
     def _read(bot_dir: Optional[Path], filename: str) -> Optional[Dict[str, Any]]:
@@ -638,6 +777,56 @@ class LiveBotDataSource(BotDataSource):
                 f"(page {page}): expected an object with a 'ranks' key"
             )
         return block["ranks"]
+
+    def _public_rows(self, path: str, params: Dict[str, Any]) -> Optional[List[Any]]:
+        """One public read, best-effort: an OKX error is "no evidence from
+        this endpoint", never an exception -- same contract as
+        `_fetch_public_stats`, and for the same reason: this runs for bots
+        whose ledger may already have been refused."""
+        self._rate_limiter.acquire()
+        try:
+            data = self._client.public_get(path, params)
+        except OkxError:
+            return None
+        return data if isinstance(data, list) else None
+
+    def get_public_profile(
+        self,
+        unique_code: str,
+        bot_dir: Optional[Path] = None,
+        include_name: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        code = str(unique_code)
+        pnl = self._public_rows(
+            PUBLIC_PNL_PATH,
+            {"uniqueCode": code, "instType": "SWAP", "lastDays": STATS_LAST_DAYS},
+        )
+        if not pnl:
+            return None
+        preference = self._public_rows(
+            PREFERENCE_PATH, {"uniqueCode": code, "instType": "SWAP"}
+        ) or []
+        # The ranking is paged and slow to build; a member whose ledger loaded
+        # already has its name, so only a concealed one asks for it.
+        board_row = None
+        if include_name:
+            try:
+                board_row = self._leaderboard_map().get(code)
+            except BotSourceError:
+                board_row = None
+        return {
+            "uniqueCode": code,
+            "nickName": (board_row or {}).get("nickName"),
+            "pnl": pnl,
+            "preference": preference,
+            "stats": self._fetch_public_stats(code),
+            "provenance": {
+                "pnl": f"{self._client.base_url}{PUBLIC_PNL_PATH}",
+                "preference": f"{self._client.base_url}{PREFERENCE_PATH}",
+                "stats": f"{self._client.base_url}{STATS_PATH}",
+                "last_days": STATS_LAST_DAYS,
+            },
+        }
 
     def _fetch_public_stats(self, code: str) -> Optional[Dict[str, Any]]:
         """Best-effort per-bot stats fetch (winRatio/investAmt).

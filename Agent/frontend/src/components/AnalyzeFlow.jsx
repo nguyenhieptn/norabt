@@ -314,7 +314,7 @@ export default function AnalyzeFlow({ onOpenBot, onOpenPortfolio }) {
         <form onSubmit={handleLookupSubmit} className="analyze-search-form">
           <div className="analyze-search-bar">
             <div className="analyze-search-input-wrap">
-              <span className="analyze-search-icon">🔍</span>
+              <svg className="analyze-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><line x1="20" y1="20" x2="16.2" y2="16.2" /></svg>
               <input
                 id="bot-code"
                 type="text"
@@ -365,22 +365,10 @@ export default function AnalyzeFlow({ onOpenBot, onOpenPortfolio }) {
 
           {/* PORTFOLIO GUIDANCE & NOTICE */}
           {isMulti ? (
-            <div
-              style={{
-                marginTop: 12,
-                padding: "12px 16px",
-                borderRadius: 8,
-                background: "rgba(56, 189, 248, 0.08)",
-                border: "1px solid rgba(56, 189, 248, 0.25)",
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 12,
-              }}
-            >
-              <span style={{ fontSize: 20 }}>🔮</span>
+            <div className="af-note">
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#38bdf8" }}>
-                  PORTFOLIO MODE DETECTED ({detectedCodes.length} BOTS)
+                <div className="af-note-title">
+                  Portfolio mode · {detectedCodes.length} bots
                 </div>
                 <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}>
                   You entered multiple IDs separated by commas or spaces. Clicking Look Up will switch to <strong>Portfolio Analysis</strong> mode to measure strategy correlation and joint portfolio risk.
@@ -389,15 +377,7 @@ export default function AnalyzeFlow({ onOpenBot, onOpenPortfolio }) {
                   {detectedCodes.map((c, i) => (
                     <span
                       key={i}
-                      className="mono"
-                      style={{
-                        fontSize: 11,
-                        padding: "3px 8px",
-                        borderRadius: 4,
-                        background: "rgba(255, 255, 255, 0.08)",
-                        color: "var(--amber)",
-                        border: "1px solid rgba(255, 255, 255, 0.12)",
-                      }}
+                      className="mono af-code-chip"
                     >
                       #{i + 1}: {c}
                     </span>
@@ -457,7 +437,7 @@ export default function AnalyzeFlow({ onOpenBot, onOpenPortfolio }) {
                 }
               }}
             >
-              {preAnalyzed === true ? "⚡ Analyze this bot" : "🚀 Start analyzing this bot"}
+              {preAnalyzed === true ? "Analyze this bot" : "Start analyzing this bot"}
             </button>
             <button type="button" className="btn" onClick={reset}>
               Enter a different code
@@ -469,24 +449,15 @@ export default function AnalyzeFlow({ onOpenBot, onOpenPortfolio }) {
       {/* MODE 2: MULTI-BOT PORTFOLIO SUMMARY */}
       {step === STEP.PORTFOLIO_SUMMARY && (
         <div className="portfolio-summary-block">
-          <div
-            style={{
-              padding: "20px 24px",
-              borderRadius: 10,
-              background: "linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(20, 20, 24, 0.8) 100%)",
-              border: "1px solid rgba(56, 189, 248, 0.35)",
-              marginBottom: 24,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-              <span style={{ fontSize: 24 }}>🔮</span>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#38bdf8" }}>
-                CONFIRM {portfolioLookups.length}-BOT PORTFOLIO RUN
+          <div className="af-note af-note-lg" style={{ marginBottom: 24 }}>
+            <div>
+              <h3 className="af-note-title" style={{ margin: "0 0 6px", fontSize: 16 }}>
+                Confirm {portfolioLookups.length}-bot portfolio run
               </h3>
-            </div>
             <p style={{ margin: 0, fontSize: 14, color: "var(--ink)", lineHeight: 1.6 }}>
               The system found <strong>{portfolioLookups.filter((b) => b.ok).length}</strong> / {portfolioLookups.length} valid bots on OKX. Click the button below to align time series, compute the multi-dimensional correlation matrix (Pearson &amp; Spearman), and run the joint portfolio Monte Carlo simulation.
             </p>
+            </div>
           </div>
 
           <div
@@ -546,7 +517,7 @@ export default function AnalyzeFlow({ onOpenBot, onOpenPortfolio }) {
               disabled={portfolioLookups.filter((b) => b.ok).length < 2}
               onClick={handleConfirmAnalyzePortfolio}
             >
-              🚀 Run portfolio analysis ({portfolioLookups.filter((b) => b.ok).length} bots)
+              Run portfolio analysis ({portfolioLookups.filter((b) => b.ok).length} bots)
             </button>
             <button type="button" className="btn" onClick={reset}>
               Enter a different list
@@ -622,7 +593,7 @@ export default function AnalyzeFlow({ onOpenBot, onOpenPortfolio }) {
 
             <div className="analyze-confirm-body">
               <div className="analyze-confirm-alert">
-                <div className="alert-icon">🕒</div>
+                <div className="alert-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></svg></div>
                 <div className="alert-text">
                   <div className="alert-title">This bot has already been analyzed</div>
                   <div className="alert-desc">
@@ -645,14 +616,14 @@ export default function AnalyzeFlow({ onOpenBot, onOpenPortfolio }) {
                   handleDoneNavigation(lookup.code, buildFallbackDetailUrl(session, lookup.code));
                 }}
               >
-                👁️ View existing result
+                View existing result
               </button>
               <button
                 type="button"
                 className="btn btn-warning"
                 onClick={() => handleConfirmAnalyze(true)}
               >
-                🔄 Re-run analysis
+                Re-run analysis
               </button>
               <button
                 type="button"

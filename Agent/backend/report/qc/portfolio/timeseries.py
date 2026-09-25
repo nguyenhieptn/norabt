@@ -278,6 +278,143 @@ class TimeSeriesMerger:
             diagnostics=diagnostics,
         )
 
+    @classmethod
+    def merge_daily(
+        cls,
+        members: Sequence[Tuple[str, str, Sequence[Tuple[int, float]]]],
+    ) -> AlignedSeries:
+        """Align OKX public DAILY PnL -- `(label, code, [(day_ms, pnl), ...])`.
+
+        The mark-to-market counterpart of `merge`, and the one that can take a
+        bot whose order book OKX withholds: every member here is on the same
+        ruler (see `public_series`). The window, the idle-bucket rule and the
+        thin-sample warnings are `merge`'s own, so the two bases differ in
+        WHAT is measured and nothing else. The bucket is fixed at one day --
+        OKX publishes nothing finer.
+        """
+        excluded: Dict[str, str] = {}
+        warnings: List[str] = []
+        usable: List[Tuple[str, str, Dict[int, float]]] = []
+        for label, code, points in members:
+            series = {int(day): float(pnl) for day, pnl in points}
+            if len(series) < cls.MIN_BUCKETS:
+                excluded[label] = (
+                    f"only {len(series)} days of public daily PnL "
+                    f"(needs {cls.MIN_BUCKETS})"
+                )
+                continue
+            usable.append((label, code, series))
+
+        if len(usable) < 2:
+            for label, _, _ in usable:
+                excluded[label] = "no other bot has enough daily PnL to correlate against"
+            return cls._daily_empty(
+                members,
+                excluded,
+                warnings
+                + ["Fewer than two bots have enough daily PnL; no cross-bot measurement is possible"],
+            )
+
+        overlap_start = max(min(series) for _, _, series in usable)
+        overlap_end = min(max(series) for _, _, series in usable)
+        if overlap_end <= overlap_start:
+            for label, _, _ in usable:
+                excluded[label] = "its daily PnL history does not overlap the other members'"
+            return cls._daily_empty(
+                members,
+                excluded,
+                warnings
+                + ["The bots' daily PnL histories do not overlap, so they were never running at the same time"],
+            )
+
+        days = sorted(
+            {
+                day
+                for _, _, series in usable
+                for day in series
+                if overlap_start <= day <= overlap_end
+            }
+        )
+        span_buckets = len(days)
+        matrix = np.array(
+            [[series.get(day, 0.0) for day in days] for _, _, series in usable],
+            dtype=np.float64,
+        )
+        # Same rule as `merge`: a day on which no member's PnL moved at all
+        # says nothing about co-movement and would only inflate n.
+        moved = np.any(matrix != 0.0, axis=0)
+        dropped = int(span_buckets - int(np.count_nonzero(moved)))
+        matrix = matrix[:, moved]
+        bucket_starts = np.array(days, dtype=np.int64)[moved]
+
+        evaluated = int(matrix.shape[1])
+        active_counts = {
+            label: int(np.count_nonzero(matrix[row]))
+            for row, (label, _, _) in enumerate(usable)
+        }
+        active_share = {
+            label: (count / evaluated if evaluated else 0.0)
+            for label, count in active_counts.items()
+        }
+        if evaluated < cls.MIN_BUCKETS:
+            warnings.append(
+                f"Only {evaluated} shared days show any PnL movement (needs "
+                f"{cls.MIN_BUCKETS}); correlations over this window are not interpretable"
+            )
+        elif evaluated < cls.THIN_BUCKETS:
+            warnings.append(
+                f"Thin sample: {evaluated} shared days. The coefficients are "
+                "computable but carry a wide confidence interval -- read the "
+                "p-value on each pair before acting"
+            )
+        for label, share in active_share.items():
+            if share < 0.2:
+                warnings.append(
+                    f"[{label}] had a PnL move on only {share:.0%} of the shared "
+                    "days, so most of its series is zeros"
+                )
+
+        span_ms = overlap_end - overlap_start
+        diagnostics = AlignmentDiagnostics(
+            bucket_label="1d",
+            bucket_ms=_DAY_MS,
+            bucket_reason=(
+                "OKX public daily PnL (mark-to-market): the one series OKX "
+                "publishes for every lead trader, order book or not"
+            ),
+            overlap_start_ms=overlap_start,
+            overlap_end_ms=overlap_end,
+            # Each point is a WHOLE day starting at its timestamp, so N daily
+            # points cover N days -- not the N-1 between the first and last
+            # start (the page read "129.0 d" beside "130 × 1d").
+            overlap_days=round((span_ms + _DAY_MS) / _DAY_MS, 3),
+            span_buckets=span_buckets,
+            evaluated_buckets=evaluated,
+            dropped_idle_buckets=dropped,
+            active_buckets=active_counts,
+            active_share={k: round(v, 4) for k, v in active_share.items()},
+            included_labels=[label for label, _, _ in usable],
+            excluded=excluded,
+            is_valid=evaluated >= cls.MIN_BUCKETS,
+            warnings=warnings,
+            pnl_basis="MARK_TO_MARKET_DAILY",
+        )
+        return AlignedSeries(
+            labels=[label for label, _, _ in usable],
+            codes=[code for _, code, _ in usable],
+            matrix=matrix,
+            bucket_starts=bucket_starts,
+            bucket_ms=_DAY_MS,
+            diagnostics=diagnostics,
+        )
+
+    @classmethod
+    def _daily_empty(cls, members, excluded, warnings) -> AlignedSeries:
+        """`_empty`, but still saying WHICH ruler failed to align."""
+        empty = cls._empty([label for label, _, _ in members], [], excluded, warnings)
+        empty.diagnostics.pnl_basis = "MARK_TO_MARKET_DAILY"
+        return empty
+
     @staticmethod
     def _empty(
         labels: Sequence[str],

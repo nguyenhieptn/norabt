@@ -203,7 +203,6 @@ class RiskSupervisionPipeline:
             simulation_iterations=simulation_iterations,
             simulation_horizon=simulation_horizon,
         )
-        traded_symbol = bot.identity.symbol
         if speculative_market is not None:
             # Cache ấm hay không thì luồng này cũng phải join trước khi tiếp
             # tục -- không để nó rơi vào nền qua khỏi đời `run()`.

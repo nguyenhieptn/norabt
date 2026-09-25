@@ -73,6 +73,30 @@ class PortfolioMember(BaseModel):
     # member list -- a bot silently vanishing from its own portfolio report is
     # worse than one shown with the reason it was left out.
     excluded_reason: Optional[str] = None
+    # OKX withholds this bot's order book (60004), so it has no trades, no
+    # open positions and no exit-rule fingerprint -- but it IS measured for
+    # co-movement and joint risk, from OKX's public daily PnL (see
+    # `AlignmentDiagnostics.pnl_basis`). Distinct from `excluded_reason`: a
+    # ledger-hidden member is inside the matrix, just not inside the
+    # behaviour comparison or the merged ledger.
+    ledger_hidden: bool = False
+    # Where `capital_at_risk` came from: "LEDGER_MODEL" (this bot's own
+    # equity-curve capital, what its merged-book figures are measured on) or
+    # "OKX_INVEST_AMT" (OKX's public `investAmt`, used for every member at
+    # once when the matrix runs on the public daily-PnL basis). The ledger
+    # model is kept in `ledger_capital` either way, so per-bot drawdowns on
+    # the Positions tab stay on the same basis as the merged book's.
+    capital_source: str = "LEDGER_MODEL"
+    ledger_capital: Optional[float] = Field(default=None, gt=0.0)
+    # What `realized_pnl` is: closed-trade PnL from the order book
+    # ("REALIZED"), or -- for a ledger-hidden member -- OKX's public
+    # mark-to-market PnL summed over `public_window_days`. Two different
+    # quantities over two different windows; the page labels them apart.
+    pnl_basis: str = "REALIZED"
+    public_window_days: Optional[int] = Field(default=None, ge=0)
+    # The open book at analysis time (ledger members only).
+    open_positions: Optional[int] = Field(default=None, ge=0)
+    unrealized_pnl: Optional[float] = None
 
     @property
     def is_measurable(self) -> bool:
@@ -113,6 +137,18 @@ class AlignmentDiagnostics(BaseModel):
     excluded: Dict[str, str] = Field(default_factory=dict)
     is_valid: bool = False
     warnings: List[str] = Field(default_factory=list)
+    # WHICH PnL every row of the matrix is. One value for the whole matrix,
+    # never per row: a correlation between a realized-at-close series and a
+    # mark-to-market series measures the ruler as much as the bots.
+    #   REALIZED_LEDGER      -- closed-trade PnL bucketed by close time, from
+    #                           each bot's own order book (needs a ledger).
+    #   MARK_TO_MARKET_DAILY -- OKX's public daily PnL (`public-pnl`), which
+    #                           OKX keeps publishing even for a bot whose
+    #                           order book it withholds (60004). Validated
+    #                           against 14 ledgers: same money over the same
+    #                           window, booked when marked rather than when
+    #                           closed (cumulative-curve r 0.85).
+    pnl_basis: str = "REALIZED_LEDGER"
 
 
 class StyleVerdict(str, Enum):
@@ -245,6 +281,17 @@ class JointSimulationResult(BaseModel):
 
     sum_individual_var_95_pct: Optional[float] = None
     independent_var_95_pct: Optional[float] = None
+
+    # What the page draws, from the SAME joint run (percent of
+    # `capital_at_risk`, x in calendar days): percentile checkpoints of the
+    # cumulative return, the terminal-return histogram, a few of the drawn
+    # paths for the band chart, and each member's median contribution (its
+    # PnL as % of the COMBINED capital). Empty on records written before
+    # these were kept.
+    path_checkpoints: List[Dict[str, float]] = Field(default_factory=list)
+    terminal_histogram: Optional[Dict[str, List[float]]] = None
+    sample_paths: List[List[List[float]]] = Field(default_factory=list)
+    member_median_paths: Dict[str, List[List[float]]] = Field(default_factory=dict)
     # 1 - joint/undiversified. ~0 means combining these bots bought nothing;
     # negative means the combination is worse than the parts. `None` when the
     # benchmark is not positive, where the ratio would be meaningless rather
@@ -281,6 +328,90 @@ class ExposureConcentration(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class SymbolExposure(BaseModel):
+    """One instrument, seen from BOTH sides at once.
+
+    The report has a market tab and a position tab, and a reader comparing
+    them has to hold one in their head while looking at the other. The two
+    belong together: "53% of the book is in ETH" means one thing when ETH is
+    trending and another when it is not, and neither tab can say both. This
+    is the row that does.
+
+    The market half is filled in by the presentation layer from the coverage
+    the pipeline resolved; the trading half is computed here, from the merged
+    ledger and the open book.
+    """
+
+    symbol: str
+    # --- what the portfolio DID here -----------------------------------
+    closed_trades: int = Field(default=0, ge=0)
+    realized_pnl: float = 0.0
+    win_rate: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    # Which members touched this instrument. Two bots in the same symbol is
+    # the concentration a per-bot view cannot show.
+    members: List[str] = Field(default_factory=list)
+    # --- what it HOLDS here now ----------------------------------------
+    open_notional: Optional[float] = Field(default=None, ge=0.0)
+    exposure_share: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    open_positions: int = Field(default=0, ge=0)
+
+
+class MemberRiskShare(BaseModel):
+    """One member's share of the book's capital versus its share of the book's RISK.
+
+    The two differ, and the difference is the portfolio question: a bot with
+    10% of the capital can carry 40% of the volatility if it is both volatile
+    and moving with everything else.
+    """
+
+    label: str
+    unique_code: str
+    capital_weight_pct: Optional[float] = None
+    # Annualised volatility of this member's own return on its own capital.
+    standalone_volatility_pct: Optional[float] = None
+    # Euler decomposition of portfolio volatility: w_i * (Cov w)_i / sigma_p.
+    # Sums to 100 across members. Can be negative for a true hedge.
+    risk_contribution_pct: Optional[float] = None
+    pnl: Optional[float] = None
+
+
+class PortfolioBookMetrics(BaseModel):
+    """The book as ONE account: N PnL series summed on the shared clock.
+
+    These are the portfolio-level versions of the headline numbers a single
+    bot report shows -- computed from the aligned member series (the same
+    ruler as the correlation matrix, see `AlignmentDiagnostics.pnl_basis`),
+    never from a pooled trade list. Pooling trades of bots with different
+    sizes answers "what did the average trade do", not "what did the account
+    do": measured on a live 4-bot book (2026-09-24) the pooled per-trade
+    Sharpe read 5.97 against a portfolio daily Sharpe of 2.06, and the pooled
+    profit factor 2.47 against 1.41.
+    """
+
+    pnl_basis: str = "REALIZED_LEDGER"
+    bucket_label: str = "1d"
+    periods: int = Field(default=0, ge=0)
+    periods_per_year: Optional[float] = None
+    capital: Optional[float] = Field(default=None, gt=0.0)
+
+    total_pnl: Optional[float] = None
+    return_pct: Optional[float] = None
+    max_drawdown_pct: Optional[float] = Field(default=None, ge=0.0)
+    max_drawdown_abs: Optional[float] = Field(default=None, ge=0.0)
+    current_drawdown_pct: Optional[float] = Field(default=None, ge=0.0)
+    # Share of periods in which the WHOLE book made money.
+    profitable_period_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    profit_factor: Optional[float] = Field(default=None, ge=0.0)
+    volatility_annual_pct: Optional[float] = Field(default=None, ge=0.0)
+    sharpe_annual: Optional[float] = None
+    sortino_annual: Optional[float] = None
+    # 1 - sigma_p / sum(w_i sigma_i): how much of the members' own volatility
+    # cancels out inside the book.
+    volatility_diversification_pct: Optional[float] = None
+    members: List[MemberRiskShare] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class PortfolioRiskAssessment(BaseModel):
     """The diversification section of a portfolio report -- not the report.
 
@@ -308,6 +439,12 @@ class PortfolioRiskAssessment(BaseModel):
     correlation: CorrelationMatrix
     joint_simulation: Optional[JointSimulationResult] = None
     concentration: ExposureConcentration
+    # Per-instrument, ordered by how much of the book sits there. The market
+    # side of each row is attached by the renderer -- see `SymbolExposure`.
+    symbol_breakdown: List[SymbolExposure] = Field(default_factory=list)
+    # The book as one account (see `PortfolioBookMetrics`): the portfolio
+    # versions of the headline numbers, on the matrix's own ruler.
+    book: Optional[PortfolioBookMetrics] = None
 
     # Pointers to the ONE assessment that carries the portfolio's risk score.
     #
@@ -331,6 +468,44 @@ class PortfolioRiskAssessment(BaseModel):
     # and individually excellent.
     verdict: PortfolioVerdict = PortfolioVerdict.INSUFFICIENT_EVIDENCE
     verdict_reason: str = ""
+    # How much of the SUBMITTED book (not just the measured one) this
+    # section's figures actually cover, 0-100. 100 when every submitted bot
+    # loaded; pulled down by each CONCEALED member, weighted by capital when
+    # every concealed member's AUM is known, by plain headcount otherwise
+    # (see `PortfolioQCService._measurement_coverage`). This is deliberately
+    # NOT a second risk score -- it says nothing about whether the book is
+    # risky, only how much of it correlation/joint-simulation/concentration
+    # above actually looked at. A reader trusting `verdict` at face value
+    # without checking this could be trusting a number computed over 60% of
+    # the capital they actually hold.
+    measurement_coverage_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    # How much of the submitted book the MERGED-BOOK figures describe: the
+    # headline risk/quality score, Monte Carlo, drawdown and every trade
+    # table are built from order books, so a member measured only from its
+    # public daily PnL (`PortfolioMember.ledger_hidden`) is inside the
+    # correlation matrix yet outside all of those. Capital-weighted when every
+    # member's capital is known, headcount otherwise; 0-100. Equal to
+    # `measurement_coverage_pct` when no member is ledger-hidden.
+    score_coverage_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    score_member_count: Optional[int] = Field(default=None, ge=0)
+    # How many bots were SUBMITTED, before any of them dropped out --
+    # `len(members)` alone cannot answer this, because a concealed or
+    # unreachable bot never becomes a `PortfolioMember` at all (see
+    # `PortfolioAggregator.combine`, which never sees its trades). Found
+    # live, 2026-09-24: a 4-code portfolio.analyze request persisted to
+    # history as "3 bots" with no trace anywhere in `/api/portfolios` that a
+    # 4th had ever been asked for -- the concealed-member fix from
+    # 2026-09-23 covered the full report document (`report/multi/<id>/
+    # latest.json`, which DOES carry `failures`) but not this lighter
+    # history index, which stores a bare `PortfolioRiskAssessment` and had
+    # nowhere to put the fact that one code never became a member.
+    submitted_member_count: int = Field(default=0, ge=0)
+    # Codes CONCEALED specifically -- kept separate from a generic "excluded"
+    # count because concealment is a finding about the bot (see
+    # `PortfolioMemberFailure.kind`'s own docstring) and a reader scanning
+    # history needs to see WHICH exclusion this was, not just that one
+    # happened.
+    concealed_member_codes: List[str] = Field(default_factory=list)
     style_verdict: StyleVerdict = StyleVerdict.INSUFFICIENT_EVIDENCE
     style_verdict_reason: str = ""
     # At least one pair whose results look independent while its trading does

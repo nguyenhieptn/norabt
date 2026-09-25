@@ -325,10 +325,12 @@ this module never re-wraps those as errors.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import ipaddress
 import logging
 import os
+import re
 import secrets
 import sys
 import threading
@@ -356,6 +358,7 @@ from Agent.backend.web import access, identity, snapshot, usage_ref
 from Agent.backend.web import progress as analyze_progress
 from Agent.backend.web.data import (
     InvalidCodeError,
+    build_portfolio_report_url,
     validate_portfolio_codes,
     find_assessment_document,
     PerIpRateLimiter,
@@ -364,16 +367,24 @@ from Agent.backend.web.data import (
     build_report_url,
     detail_link_line,
     pending_result,
+    regime_timelines,
+    list_peer_rows,
+    pair_stats_table,
+    portfolio_render_context,
+    bot_ledger,
+    offline_bot_metrics,
     report_base_url,
     report_url_is_usable,
     validate_unique_code,
 )
+from Agent.backend.bot.mcp.aggregate import PortfolioAggregator
 from Agent.backend.web.portfolio_section import inject_portfolio_section
-from Agent.backend.web.report_page import render_bot_report_html
+from Agent.backend.web.report_page import render_bot_report_html, report_stylesheet
 from Agent.backend.report.qc.reporting.contracts import ReportProduct
 from Agent.backend.report.qc.reporting.persisted import build_persisted_dossier_view
 from Agent.backend.report.qc.reporting.view_policy import (
     USER_HIDDEN_PANELS,
+    ROLE_GATING_ENABLED,
     ViewRole,
     apply_view_policy,
 )
@@ -397,6 +408,34 @@ logger = logging.getLogger(__name__)
 DEFAULT_DASHBOARD_PATH = Path(config.BASE_DIR) / "frontend" / "dist" / "index.html"
 
 # --------------------------------------------------------------------------- #
+class _HashedStaticFiles(StaticFiles):
+    """The SPA bundle. Vite names every built file after a hash of its
+    content (`index-p4gPGgnQ.js`), so such a file never changes under its
+    name: it may be cached for a year. Anything else is served as before."""
+
+    _HASHED = re.compile(r"-[A-Za-z0-9_-]{8,}\.(?:js|css|woff2?|ttf|svg|png|jpg|webp)$")
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == 200 and self._HASHED.search(path):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+def _revalidated_html(if_none_match: str, html_text: str) -> Response:
+    """A report page with a content hash as its ETag. The page is still
+    rendered on every request (`no-cache`: the browser must ask each time,
+    and always gets the current analysis), but when the result is the same
+    bytes the browser already holds, the answer is a 304 with no body
+    instead of the whole document again. `private`: the page can differ by
+    viewer (admin/user), so only the viewer's own browser keeps a copy."""
+    etag = 'W/"' + hashlib.sha1(html_text.encode("utf-8")).hexdigest()[:20] + '"'
+    headers = {"Cache-Control": "private, no-cache, must-revalidate", "ETag": etag}
+    if etag in [tag.strip() for tag in (if_none_match or "").split(",")]:
+        return Response(status_code=304, headers=headers)
+    return HTMLResponse(html_text, headers=headers)
+
+
 # Client IP resolution -- shared by every route that feeds `PerIpRateLimiter`
 # (api_analyze, bot_report, user_report/_bot_report_response below).
 #
@@ -979,6 +1018,18 @@ _REPORT_ERROR_HTML = """<!doctype html>
 <head><meta charset="utf-8"><title>Report could not be generated</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 640px; margin: 3rem auto; padding: 0 1rem;">
 <h1>Could not generate bot report</h1>
+<p>{message}</p>
+</body>
+</html>
+"""
+
+
+_REPORT_PENDING_HTML = """<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta http-equiv="refresh" content="15">
+<title>Report being prepared</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 640px; margin: 3rem auto; padding: 0 1rem;">
+<h1>Analysis in progress</h1>
 <p>{message}</p>
 </body>
 </html>
@@ -1998,6 +2049,153 @@ def _analyze_summary_for_wire(result: Dict[str, Any]) -> Dict[str, Any]:
     return summary
 
 
+# --------------------------------------------------------------------------- #
+# Several codes through /api/analyze (the OnchainOS entry point)
+# --------------------------------------------------------------------------- #
+#
+# The OKX Marketplace service (SID 40700) exposes ONE parameter, `code`, and
+# `run-nora.sh` forwards whatever the buyer typed into it. Before this, "A,B"
+# was rejected as a malformed code (the CLI then crashed looking for a
+# confirmationId) and "A B" through the script silently scored only A
+# (2026-09-25). Several codes in `code` now mean what the user meant: one
+# portfolio report, the same run `/api/portfolio/analyze` makes.
+
+ANALYZE_PORTFOLIO_PENDING_TEXT = (
+    "These bots are being analysed as ONE portfolio -- every member's OKX "
+    "ledger or public daily PnL, the correlation matrix and a 10,000-path "
+    "joint Monte Carlo are still running in the background. This is not the "
+    "final result; there is no score yet. The full report will be at "
+    "report_url, usually within one to two minutes -- reopen that link, or "
+    "send the same codes again for the finished JSON."
+)
+
+_CODE_LIST_SPLIT = re.compile(r"[\s,;]+")
+
+
+def _split_code_list(value: Any) -> Optional[List[str]]:
+    """The distinct codes in a `code` value, in the order typed.
+
+    `None` when `value` is not a string or list at all (the caller's own
+    missing-parameter branch handles that). One distinct code comes back as
+    a one-element list -- "A," and ["A"] are a single bot, not a portfolio.
+    Codes are NOT validated here: `validate_unique_code` /
+    `validate_portfolio_codes` do that, with their own error messages.
+    """
+    if isinstance(value, (list, tuple)):
+        parts = [str(part).strip() for part in value if str(part).strip()]
+    elif isinstance(value, str):
+        parts = [part for part in _CODE_LIST_SPLIT.split(value) if part]
+    else:
+        return None
+    return list(dict.fromkeys(parts))
+
+
+def _portfolio_summary_for_wire(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """The compact portfolio block of a multi-code `/api/analyze` answer.
+
+    The full `portfolio` object is ~60 KB of matrices and per-symbol rows,
+    written for the page. A caller reading JSON gets the findings: who is in
+    the book, whether they move together, what the whole book did and what
+    the joint simulation says -- each number the page shows under the same
+    name, never recomputed here.
+    """
+    portfolio = payload.get("portfolio") if isinstance(payload.get("portfolio"), dict) else {}
+    correlation = portfolio.get("correlation") or {}
+    alignment = correlation.get("alignment") or {}
+    pairs = [p for p in correlation.get("pairs") or [] if isinstance(p, dict)]
+    significant = [
+        float(p["pearson"]) for p in pairs
+        if p.get("is_significant") and isinstance(p.get("pearson"), (int, float))
+    ]
+    book = portfolio.get("book") or {}
+    shares = {m.get("label"): m for m in book.get("members") or [] if isinstance(m, dict)}
+    joint = portfolio.get("joint_simulation") or {}
+    ratio = joint.get("diversification_ratio")
+
+    def member_row(member: Dict[str, Any]) -> Dict[str, Any]:
+        share = shares.get(member.get("label")) or {}
+        return {
+            "code": member.get("unique_code"),
+            "name": member.get("label"),
+            "measured_from": (
+                "OKX public daily PnL (order book hidden)"
+                if member.get("ledger_hidden") else "closed-trade ledger"
+            ),
+            "capital_weight_pct": share.get("capital_weight_pct"),
+            "risk_contribution_pct": share.get("risk_contribution_pct"),
+        }
+
+    members = [m for m in portfolio.get("members") or [] if isinstance(m, dict)]
+    visible = sum(1 for m in members if not m.get("ledger_hidden"))
+    return {
+        "portfolio_id": payload.get("portfolio_id") or portfolio.get("portfolio_id"),
+        "submitted_member_count": portfolio.get("submitted_member_count") or len(members),
+        "members": [member_row(m) for m in members],
+        "not_measured": [
+            {
+                "code": str(f.get("bot_folder_name") or "").removeprefix("bot_"),
+                "reason": f.get("kind") or "error",
+            }
+            for f in payload.get("failures") or []
+            if isinstance(f, dict)
+            and str(f.get("bot_folder_name") or "").removeprefix("bot_")
+            not in {str(m.get("unique_code")) for m in members}
+        ],
+        "diversification_verdict": portfolio.get("verdict"),
+        "diversification_reason": portfolio.get("verdict_reason"),
+        "behaviour_verdict": portfolio.get("style_verdict"),
+        "correlation": {
+            "basis": alignment.get("pnl_basis"),
+            "shared_periods": alignment.get("evaluated_buckets"),
+            "period": alignment.get("bucket_label"),
+            "average_r_all_pairs": correlation.get("average_pearson"),
+            "average_r_significant_pairs": (
+                sum(significant) / len(significant) if significant else None
+            ),
+            "significant_pairs": len(significant),
+            "pairs": len(pairs),
+            "max_r": correlation.get("max_pearson"),
+            "max_r_pair": correlation.get("max_pearson_pair"),
+        },
+        # The book as ONE account: every member, on the matrix's ruler.
+        "book": {
+            key: book.get(key)
+            for key in (
+                "capital", "total_pnl", "return_pct", "max_drawdown_pct",
+                "sharpe_annual", "profitable_period_pct", "periods",
+            )
+        },
+        "joint_simulation": {
+            "horizon_days": joint.get("horizon_calendar_days"),
+            "var_95_pct": joint.get("var_95_pct"),
+            "undiversified_var_95_pct": joint.get("sum_individual_var_95_pct"),
+            "tail_removed_pct": ratio * 100.0 if isinstance(ratio, (int, float)) else None,
+            "probability_of_profit_pct": joint.get("probability_of_profit"),
+            "p95_max_drawdown_pct": joint.get("p95_max_drawdown"),
+            "p_ruin_pct": joint.get("p_ruin"),
+        },
+        "measurement_coverage_pct": portfolio.get("measurement_coverage_pct"),
+        "score_coverage_pct": portfolio.get("score_coverage_pct"),
+        # `risk`/`quality`/`key_metrics` at the top level are the merged
+        # order book's: say whose, so they are not read as the whole book.
+        "scores_cover": (
+            f"risk, quality and key_metrics: merged order book of the {visible} "
+            f"member(s) whose ledger is visible"
+        ),
+    }
+
+
+def _portfolio_wire(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """A portfolio payload in the `/api/analyze` wire shape."""
+    slim = {
+        key: value for key, value in payload.items()
+        if key not in ("portfolio", "formula_overrides", "headline", "headline_sim", "member_sources")
+    }
+    summary = _analyze_summary_for_wire(slim)
+    summary["portfolio"] = _portfolio_summary_for_wire(payload)
+    return summary
+
+
 def create_app(
     *,
     dashboard_path: Optional[Path] = None,
@@ -2058,6 +2256,12 @@ def create_app(
     # của CHÍNH NÓ (kiểm tra danh tính bằng `is`), không bao giờ xoá nhầm
     # task mới hơn.
     live_analyze_tasks: Dict[str, "asyncio.Task[Dict[str, Any]]"] = {}
+    # Portfolio runs started through `/api/analyze` with several codes, by the
+    # portfolio id their link points at. A second call with the same codes
+    # joins the running task instead of starting another N ledger fetches,
+    # and `/portfolio/<id>` answers "still running" instead of 404 while it
+    # is here. Removed by the task's own done-callback.
+    portfolio_wire_tasks: Dict[str, "asyncio.Task[Dict[str, Any]]"] = {}
     # Đếm số `_run_live_analyze` (OKX + Monte Carlo 10k, CPU-nặng) đang THẬT
     # SỰ chạy đồng thời, app-instance này -- xem
     # `ANALYZE_MAX_CONCURRENT_LIVE_ANALYSES`'s comment cho toàn bộ lý do
@@ -2794,6 +2998,42 @@ def create_app(
             media_type="application/json",
         )
 
+    async def _analyze_portfolio_wire(codes: List[str], *, refresh: bool) -> Response:
+        """Run (or join) the portfolio for `codes`; answer inside the same
+        hard deadline a single bot gets, PENDING with the link otherwise."""
+        requested_id = PortfolioAggregator.portfolio_id(codes)
+        task = portfolio_wire_tasks.get(requested_id)
+        if task is None or task.done():
+            task = asyncio.ensure_future(
+                run_in_threadpool(service.analyze_portfolio, codes, force=refresh)
+            )
+            portfolio_wire_tasks[requested_id] = task
+
+            def _forget(done: "asyncio.Task[Dict[str, Any]]", key: str = requested_id) -> None:
+                if portfolio_wire_tasks.get(key) is done:
+                    portfolio_wire_tasks.pop(key, None)
+                if not done.cancelled() and done.exception() is not None:
+                    _log_incident("/api/analyze (portfolio, background)", done.exception())
+
+            task.add_done_callback(_forget)
+        # Shielded: hitting the deadline stops the WAIT, never the run.
+        finished, _ = await asyncio.wait({task}, timeout=ANALYZE_SYNC_DEADLINE_SECONDS)
+        if not finished:
+            pending = pending_result(requested_id, [ANALYZE_PORTFOLIO_PENDING_TEXT])
+            pending["name"] = f"Portfolio of {len(codes)} bots"
+            pending["member_codes"] = list(codes)
+            if report_url_is_usable():
+                pending["report_url"] = build_portfolio_report_url(requested_id)
+            return JSONResponse(_analyze_summary_for_wire(pending))
+        try:
+            payload = task.result()
+        except InvalidCodeError as exc:
+            return _invalid_param_response(str(exc))
+        except Exception as exc:  # noqa: BLE001 - OKX/disk; never bubble a traceback
+            incident_code = _log_incident("/api/analyze (portfolio)", exc)
+            return _error_json(_generic_error_message(incident_code), 502)
+        return JSONResponse(_portfolio_wire(payload))
+
     async def api_analyze(request: Request) -> Response:
         # 1) Body-size guard FIRST, before anything reads/parses the body --
         # see ANALYZE_MAX_BODY_BYTES/_enforce_max_body_size above for why
@@ -2871,8 +3111,29 @@ def create_app(
         # Missing/null/wrong-type/blank `code` gets the structured 400 above
         # (Việc 4, "missing" branch) -- also free of charge against the rate
         # limiter, same reasoning as the conflict branch just above.
-        if not isinstance(code, str) or not code.strip():
+        codes = _split_code_list(code)
+        if not codes:
             return _missing_code_response()
+        if len(codes) >= 2:
+            # Several bots in one `code` -- the OnchainOS service has only
+            # this one parameter. Same gates as a single bot: validated
+            # before the limiter (free), charged once.
+            try:
+                codes = validate_portfolio_codes(codes)
+            except InvalidCodeError as exc:
+                return _invalid_param_response(str(exc))
+            active_limiter = admin_limiter if is_admin else limiter
+            if not active_limiter.allow(resolve_client_ip(request)):
+                return _error_json(
+                    "You are calling /api/analyze too fast. A portfolio run "
+                    "fetches every member's OKX ledger -- please wait a moment "
+                    "and try again.",
+                    429,
+                )
+            merged_params = await _merged_request_params(request)
+            refresh = str(merged_params.get("refresh", "")).lower() in ("1", "true", "yes")
+            return await _analyze_portfolio_wire(codes, refresh=refresh)
+        code = codes[0]
 
         # 3) Format-validate BEFORE the rate limiter (Lỗi 1's actual fix).
         #
@@ -3089,6 +3350,7 @@ def create_app(
         refresh: bool = False,
         self_path: str,
         hidden_panels: Sequence[str] = (),
+        if_none_match: str = "",
     ) -> Response:
         """Shared body for GET /bot/<code> and GET /<userref>_<code> below --
         both ultimately render the exact same HTML report for a `code` that
@@ -3335,7 +3597,33 @@ def create_app(
             and int(now_fn() * 1000) - snapshot_at_ms
             > snapshot.SNAPSHOT_TTL_SECONDS * 1000
         )
-        return HTMLResponse(
+        try:
+            peer_rows = await run_in_threadpool(list_peer_rows, service.data_dir)
+        except Exception:  # noqa: BLE001 - peer comparison is optional
+            peer_rows = None
+        try:
+            regimes = await run_in_threadpool(regime_timelines, service.data_dir, result)
+        except Exception:  # noqa: BLE001 - regime timelines are optional
+            regimes = None
+        try:
+            pair_stats = await run_in_threadpool(pair_stats_table, service.data_dir)
+        except Exception:  # noqa: BLE001 - same-market comparison is optional
+            pair_stats = None
+        try:
+            ledger = await run_in_threadpool(bot_ledger, service.data_dir, str(result.get("code") or code))
+        except Exception:  # noqa: BLE001 - the stored ledger only adds pair names
+            ledger = None
+        offline = None
+        perf_now = ((result.get("evidence") or {}).get("performance") or {}) if isinstance(result, dict) else {}
+        if isinstance(perf_now, dict) and perf_now.get("current_drawdown_pct") is None:
+            # A saved report: recompute what it does not store from the
+            # bot's own files (see `offline_bot_metrics`).
+            try:
+                offline = await run_in_threadpool(offline_bot_metrics, service.data_dir, str(result.get("code") or code))
+            except Exception:  # noqa: BLE001 - optional figures
+                offline = None
+        return _revalidated_html(
+            if_none_match,
             render_bot_report_html(
                 result,
                 is_admin=is_admin,
@@ -3343,8 +3631,13 @@ def create_app(
                 refresh_url=refresh_url,
                 is_stale=is_stale,
                 hidden_panels=hidden_panels,
+                peer_rows=peer_rows,
+                regime_timelines=regimes,
+                pair_stats=pair_stats,
+                ledger=ledger,
+                offline=offline,
+                stylesheet_href=report_stylesheet()[0],
             ),
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
 
     async def api_portfolio_analyze(request: Request) -> Response:
@@ -3412,6 +3705,18 @@ def create_app(
     async def portfolio_report(request: Request) -> Response:
         """GET /portfolio/<id> -- the portfolio page, in the single-bot style.
 
+        Registered at TWO paths, both landing here so there is one
+        implementation and nothing to drift. `/portfolio/<id>` is the
+        canonical, shareable URL and the one `report_url` hands out.
+        `/api/portfolio/page/<id>` exists because this deployment sits behind
+        an nginx vhost whose final rule is `location / { return 404; }`: every
+        new Starlette route needs a matching `location`, and until that vhost
+        is updated (`sudo bash Agent/nginx/install-nginx-vhost.sh`) the
+        canonical path is swallowed at the edge while everything under
+        `/api/` is already proxied. The SPA fetches the `/api/` path so the
+        report works today; the canonical one starts working the moment the
+        vhost is reloaded, with no code change.
+
         Rendered by the very same `render_bot_report_html` the single-bot
         route uses, on the very same payload shape, so the two pages cannot
         drift: same three tabs, same stylesheet, same charts. The one
@@ -3436,14 +3741,42 @@ def create_app(
                 status_code=500,
             )
         if payload is None:
+            running = portfolio_wire_tasks.get(portfolio_id)
+            if running is not None and not running.done():
+                # Launched through /api/analyze a moment ago: say so, and
+                # reload by itself, instead of a 404 for a link just handed out.
+                return HTMLResponse(
+                    _REPORT_PENDING_HTML.format(message=html.escape(
+                        "This portfolio is being analysed right now (every "
+                        "member's OKX data, the correlation matrix and the joint "
+                        "Monte Carlo). The report appears here when it is done, "
+                        "usually within one to two minutes -- this page reloads "
+                        "itself."
+                    )),
+                    status_code=202,
+                    headers={"Cache-Control": "no-store"},
+                )
             return HTMLResponse(
                 _report_error_html(
-                    "This portfolio run is no longer held by this process. "
-                    "Run the analysis again from the bot codes to rebuild it."
+                    "No rendered report exists for this portfolio id. Runs are "
+                    "filed on disk when they complete, so this is either an id "
+                    "that was never analysed here, or a run whose document has "
+                    "since been removed. Re-run the same bot codes to rebuild "
+                    "the page -- the id is derived from the member set, so it "
+                    "will come back the same."
                 ),
                 status_code=404,
             )
         is_admin = await _is_admin_request(request)
+        # Same extras the single-bot route renders with (analysis time, peer
+        # ranks, regime timelines, same-market comparison), built for a
+        # merged book -- see `portfolio_render_context`.
+        try:
+            context = await run_in_threadpool(
+                portfolio_render_context, service.data_dir, payload
+            )
+        except Exception:  # noqa: BLE001 - every extra is optional
+            context = {}
         document = render_bot_report_html(
             payload,
             is_admin=is_admin,
@@ -3452,10 +3785,30 @@ def create_app(
                 if request.query_params.get("view") == "user" and not is_admin
                 else ()
             ),
+            snapshot_at_ms=context.get("snapshot_at_ms"),
+            peer_rows=context.get("peer_rows"),
+            regime_timelines=context.get("regime_timelines"),
+            pair_stats=context.get("pair_stats"),
+            stylesheet_href=report_stylesheet()[0],
         )
-        return HTMLResponse(
-            inject_portfolio_section(document, payload.get("portfolio") or {}),
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        evidence = payload.get("evidence") or {}
+        return _revalidated_html(
+            request.headers.get("if-none-match", ""),
+            inject_portfolio_section(
+                document,
+                payload.get("portfolio") or {},
+                # The market half of the joint per-instrument table. It lives
+                # in `evidence` because the coverage was resolved by the
+                # pipeline for the merged bot, not by the portfolio layer.
+                evidence.get("resolved_markets") or [],
+                evidence.get("unresolved_markets") or [],
+                # Members that never loaded. Carried from the payload rather
+                # than recomputed: by the time a saved document is re-served
+                # the pipeline is long gone, and a bot that concealed its
+                # ledger has to keep showing up on the page every time the
+                # page is opened, not only on the run that first hit it.
+                payload.get("failures") or [],
+            ),
         )
 
     async def bot_report(request: Request) -> Response:
@@ -3485,6 +3838,7 @@ def create_app(
         return await _bot_report_response(
             code,
             client_host,
+            if_none_match=request.headers.get("if-none-match", ""),
             is_admin=is_admin,
             refresh=refresh,
             self_path=f"/bot/{code}",
@@ -3624,7 +3978,9 @@ def create_app(
         # `test_endpoint_gives_an_admin_caller_the_full_premium_context`
         # trong `test_chat.py` sẽ đỏ ngay lập tức.
         is_admin = await _is_admin_request(request)
-        role = ViewRole.ADMIN if is_admin else ViewRole.USER
+        # While role gating is off (view_policy.ROLE_GATING_ENABLED), the chat
+        # reads the same full record every report reader now sees.
+        role = ViewRole.ADMIN if (is_admin or not ROLE_GATING_ENABLED) else ViewRole.USER
 
         try:
             document = await run_in_threadpool(
@@ -3759,19 +4115,25 @@ def create_app(
         return await _bot_report_response(
             code,
             client_host,
+            if_none_match=request.headers.get("if-none-match", ""),
             is_admin=is_admin,
             refresh=refresh,
             self_path=f"/{raw_user_ref}_{code}",
-            # Same rule as GET /bot/<code>: absent an explicit `?view=user`,
-            # this route renders exactly as it always has -- see that
-            # route's own comment for why `and`, not `or`, is what keeps a
-            # default (no query param) request from being silently
-            # downgraded to the restricted view.
-            hidden_panels=(
-                USER_HIDDEN_PANELS
-                if request.query_params.get("view") == "user" and not is_admin
-                else ()
-            ),
+            # HỒI QUY 23/09: KHÔNG còn theo cùng luật với GET /bot/<code>
+            # nữa -- cố tình khác, và đây là chỗ đã sai trước bản vá này.
+            # Route NÀY là chính cái link `report_url` mà `/api/analyze`
+            # phát ra cho một phiên USER đã đăng nhập (xem docstring hàm
+            # này) -- tức đây LÀ "bản paywall thật" chứ không phải một biến
+            # thể tuỳ chọn của /bot/<code>. Luật cũ (`... and not is_admin`)
+            # coi query string `?view=user` do CHÍNH CLIENT tự thêm là thứ
+            # quyết định có khoá panel hay không -- nghĩa là bất kỳ ai mở
+            # thẳng chuỗi `report_url` trong JSON trả về (tab mới, agent
+            # marketplace, share link...), vốn KHÔNG mang `?view=user` (chỉ
+            # SPA tự thêm khi nó fetch nội bộ, xem `BotDetailView.jsx`), sẽ
+            # thấy report đầy đủ không khoá gì -- paywall chỉ có tác dụng
+            # khi đúng SPA là bên gọi. Sửa: khoá panel cho MỌI caller không
+            # phải admin trên route này, không phụ thuộc query string nữa.
+            hidden_panels=() if is_admin else USER_HIDDEN_PANELS,
         )
 
     async def admin_page(request: Request) -> Response:
@@ -3816,6 +4178,21 @@ def create_app(
     # above, for the snapshot Redis reachability probe (see
     # SNAPSHOT_HEALTHZ_CACHE_TTL_SECONDS's own comment).
     snapshot_health_cache: Dict[str, Any] = {"checked_at": None, "status": None}
+
+    async def report_css(request: Request) -> Response:
+        """GET /assets/report-<hash>.css -- the report stylesheet. The hash
+        in the name is of its text, so the current one is cached for a year;
+        an older name (a page rendered before a CSS change) still gets the
+        current text, uncached, rather than an unstyled page."""
+        href, text = report_stylesheet()
+        current = href.endswith(f"-{request.path_params.get('digest')}.css")
+        return Response(
+            text,
+            media_type="text/css; charset=utf-8",
+            headers={
+                "Cache-Control": "public, max-age=31536000, immutable" if current else "no-cache"
+            },
+        )
 
     async def healthz(request: Request) -> Response:
         """Liveness probe for an orchestrator (see docker-compose's
@@ -4080,6 +4457,11 @@ def create_app(
         # Registered BEFORE the catch-all "/{user_ref}_{code}" below, which
         # would otherwise swallow any single-segment path.
         Route("/portfolio/{portfolio_id}", portfolio_report, methods=["GET"]),
+        # Same handler, second path -- see `portfolio_report`'s docstring for
+        # why the SPA asks for this one.
+        Route(
+            "/api/portfolio/page/{portfolio_id}", portfolio_report, methods=["GET"]
+        ),
         # Việc 2: the SPA's own JS/CSS bundle (Agent/frontend/build.sh's
         # output, see `assets_dir` above). `check_dir=False` -- a fresh
         # checkout that has not run the frontend build yet must not crash
@@ -4093,7 +4475,10 @@ def create_app(
         # -- see Agent/none/test/test_web_app.py's own directory-traversal tests,
         # required by this task, which check this holds rather than
         # assuming it.
-        Mount("/assets", app=StaticFiles(directory=assets_dir, check_dir=False)),
+        # The report pages' stylesheet (see `report_stylesheet`), ahead of
+        # the static mount that would otherwise 404 it.
+        Route("/assets/report-{digest}.css", report_css, methods=["GET"]),
+        Mount("/assets", app=_HashedStaticFiles(directory=assets_dir, check_dir=False)),
         Route("/healthz", healthz, methods=["GET"]),
         # Deliberately looks like any other route to Starlette's router --
         # the "cannot tell this exists" property lives entirely in

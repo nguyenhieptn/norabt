@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from Agent.backend.infra.quality import EvaluationMode
 from Agent.backend.market.schemas.market_result import MarketResult
 from Agent.backend.bot.mcp.schemas.bot_result import BotResult
-from Agent.backend.pipeline import RiskSupervisionResult
+from Agent.backend.pipeline import RiskSupervisionPipeline, RiskSupervisionResult
 from Agent.backend.report.qc.schemas.risk_assessment import BotRiskAssessment
 from Agent.backend.report.qc.reporting.market_adapter import normalize_market_payload
 from Agent.backend.report.qc.reporting.evidence import (

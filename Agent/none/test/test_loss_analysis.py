@@ -155,7 +155,10 @@ def test_deepest_episode_measures_peak_to_trough_and_recovery() -> None:
     assert profile is not None
     ep = profile["deepest_episode"]
     assert ep["depth_abs"] == 80.0
-    assert ep["depth_pct"] == 8.0  # 80 / 1000
+    # Standard max drawdown since 2026-09-25: depth / peak equity, where
+    # equity = capital + cumulative PnL -> 80 / (1000 + 100).
+    assert abs(ep["depth_pct"] - 80.0 / 1100.0 * 100.0) < 1e-9
+    assert ep["depth_pct_of_capital"] == 8.0  # 80 / 1000, the old share-of-capital figure
     assert ep["peak_cum"] == 100.0
     assert ep["trough_cum"] == 20.0
     assert ep["trade_count"] == 2  # từ đỉnh (lệnh 1) xuống đáy (lệnh 3)

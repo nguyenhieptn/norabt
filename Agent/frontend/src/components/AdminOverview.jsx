@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Block, Cards, Card } from "./common.jsx";
+import { VERDICT_COLOR_VAR, VerdictDot, verdictColor, verdictShort } from "./verdictUi.jsx";
 
 const CORE_VERDICTS = [
   "DRAWDOWN: HIGH · QUALITY: WEAK",
@@ -9,14 +10,6 @@ const CORE_VERDICTS = [
   "HIDDEN RISK",
 ];
 
-const VERDICT_COLOR_VAR = {
-  "DRAWDOWN: HIGH · QUALITY: WEAK": "var(--verdict-high-dd-weak-q)",
-  "DRAWDOWN: HIGH · QUALITY: GOOD": "var(--verdict-high-dd-good-q)",
-  "DRAWDOWN: LOW · QUALITY: GOOD": "var(--verdict-low-dd-good-q)",
-  "DRAWDOWN: LOW · QUALITY: WEAK": "var(--verdict-low-dd-weak-q)",
-  "HIDDEN RISK": "var(--verdict-hidden-risk)",
-  "INSUFFICIENT EVIDENCE": "var(--verdict-unknown)",
-};
 
 // Bốn bậc TRẠNG THÁI (tốt -> cảnh báo -> nghiêm trọng -> nguy cấp), không
 // phải bảng màu phân loại: đây là MỘT đại lượng có thứ tự, không phải bốn
@@ -88,6 +81,10 @@ function computeOverview(rows) {
   };
 }
 
+function sharePct(part, total) {
+  return total > 0 ? Math.round((part / total) * 100) : 0;
+}
+
 function formatInt(value) {
   if (value === null || value === undefined) return "—";
   return value.toLocaleString("en-US");
@@ -103,26 +100,35 @@ function NoraDonut({ slices, total, onPick, openLabel }) {
   const S = 190;
   const R = 84;
   const r = 56;
+  const POP = 6; // how far the focused slice steps out of the ring
   const C = S / 2;
   const KHE = 2 / R; // 2px gap in radians
+
+  // Focus = what the reader is pointing at, else what they opened. The chart
+  // and the legend follow the SAME focus, so picking a group in either place
+  // reads as one selection: its slice steps out, the rest fade, and the
+  // centre switches from the total to that group's count and share.
+  const [hoverLabel, setHoverLabel] = useState(null);
+  const focus = hoverLabel || openLabel || null;
 
   const effectiveTotal = Math.max(total, 1);
   const activeSlices = slices.filter((s) => s.value > 0);
 
   let angle = -Math.PI / 2;
-  const arcs = activeSlices.map((s, i) => {
+  const arcs = activeSlices.map((s) => {
     const pct = s.value / effectiveTotal;
     const widthRad = pct * Math.PI * 2;
     const a0 = angle + KHE / 2;
     const a1 = angle + widthRad - KHE / 2;
     angle += widthRad;
     const large = widthRad > Math.PI ? 1 : 0;
+    const outer = focus === s.label ? R + POP : R;
     const pt = (rad, radDist) => [
       C + radDist * Math.cos(rad),
       C + radDist * Math.sin(rad),
     ];
-    const [x0, y0] = pt(a0, R);
-    const [x1, y1] = pt(a1, R);
+    const [x0, y0] = pt(a0, outer);
+    const [x1, y1] = pt(a1, outer);
     const [x2, y2] = pt(a1, r);
     const [x3, y3] = pt(a0, r);
 
@@ -132,14 +138,24 @@ function NoraDonut({ slices, total, onPick, openLabel }) {
       d:
         a1 <= a0
           ? ""
-          : `M${x0},${y0} A${R},${R} 0 ${large} 1 ${x1},${y1} L${x2},${y2} A${r},${r} 0 ${large} 0 ${x3},${y3} Z`,
+          : `M${x0},${y0} A${outer},${outer} 0 ${large} 1 ${x1},${y1} L${x2},${y2} A${r},${r} 0 ${large} 0 ${x3},${y3} Z`,
     };
   });
 
+  const focused = focus ? slices.find((s) => s.label === focus) : null;
+  const focusPct =
+    focused && total > 0 ? ((focused.value / total) * 100).toFixed(1) : null;
+
   return (
-    <div className="viz-donut">
+    <div className={`viz-donut ${focus ? "has-focus" : ""}`}>
       <div className="viz-donut-graphic">
-        <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} role="img">
+        <svg
+          width={S}
+          height={S}
+          viewBox={`${-POP} ${-POP} ${S + 2 * POP} ${S + 2 * POP}`}
+          role="img"
+          onMouseLeave={() => setHoverLabel(null)}
+        >
           {total === 0 ? (
             <circle
               cx={C}
@@ -155,34 +171,63 @@ function NoraDonut({ slices, total, onPick, openLabel }) {
                 key={arc.label}
                 d={arc.d}
                 fill={arc.color}
-                className={onPick ? "viz-slice-pick" : undefined}
+                className={`viz-slice ${onPick ? "viz-slice-pick" : ""} ${
+                  focus && focus !== arc.label && openLabel !== arc.label ? "is-dim" : ""
+                } ${focus === arc.label ? "is-focus" : ""}`}
                 onClick={onPick ? () => onPick(arc.label) : undefined}
+                onMouseEnter={() => setHoverLabel(arc.label)}
               >
-                <title>{`${arc.label} — ${formatInt(arc.value)} bot`}</title>
+                <title>{`${verdictShort(arc.label)} — ${formatInt(arc.value)} bot (${arc.pctVal}%)`}</title>
               </path>
             ))
           )}
-          <text x={C} y={C - 4} textAnchor="middle" className="viz-hero">
-            {formatInt(total)}
-          </text>
-          <text x={C} y={C + 16} textAnchor="middle" className="viz-sub">
-            total bots
-          </text>
+          {focused ? (
+            <>
+              <text
+                x={C}
+                y={C - 6}
+                textAnchor="middle"
+                className="viz-hero viz-hero-focus"
+                style={{ "--viz-focus": focused.color }}
+              >
+                {formatInt(focused.value)}
+              </text>
+              <text x={C} y={C + 12} textAnchor="middle" className="viz-sub viz-sub-focus">
+                {verdictShort(focused.label)}
+              </text>
+              <text x={C} y={C + 27} textAnchor="middle" className="viz-sub">
+                {focusPct}% of bots
+              </text>
+            </>
+          ) : (
+            <>
+              <text x={C} y={C - 4} textAnchor="middle" className="viz-hero">
+                {formatInt(total)}
+              </text>
+              <text x={C} y={C + 16} textAnchor="middle" className="viz-sub">
+                total bots
+              </text>
+            </>
+          )}
         </svg>
       </div>
 
-      <div className="viz-legend">
+      <div className="viz-legend" onMouseLeave={() => setHoverLabel(null)}>
         {slices.map((slice) => {
           const pct = total > 0 ? ((slice.value / total) * 100).toFixed(1) : "0.0";
           const empty = slice.value === 0;
           // Nhóm rỗng KHÔNG bấm được: mở ra một danh sách trống chỉ tốn một
           // cú bấm để phát hiện là không có gì.
           const pickable = Boolean(onPick) && !empty;
+          // The opened group never fades: hovering another row previews it
+          // without losing sight of what is open below the chart.
+          const dim =
+            focus && focus !== slice.label && openLabel !== slice.label ? "is-dim" : "";
           const inner = (
             <>
               <i style={{ background: slice.color }} />
               <span className="ten" title={slice.label}>
-                {slice.label}
+                {verdictShort(slice.label)}
               </span>
               <b>{formatInt(slice.value)}</b>
               <span className="pct">{pct}%</span>
@@ -190,25 +235,28 @@ function NoraDonut({ slices, total, onPick, openLabel }) {
           );
           if (!pickable) {
             return (
-              <div key={slice.label} className={`viz-leg ${empty ? "mo" : ""}`}>
+              <div key={slice.label} className={`viz-leg ${empty ? "mo" : ""} ${dim}`}>
                 {inner}
               </div>
             );
           }
+          const on = openLabel === slice.label;
           return (
             <button
               key={slice.label}
               type="button"
-              className={`viz-leg viz-leg-pick ${
-                openLabel === slice.label ? "on" : ""
-              }`}
-              aria-expanded={openLabel === slice.label}
+              className={`viz-leg viz-leg-pick ${on ? "on" : ""} ${dim}`}
+              style={on ? { borderColor: slice.color } : undefined}
+              aria-expanded={on}
               onClick={() => onPick(slice.label)}
+              onMouseEnter={() => setHoverLabel(slice.label)}
+              onFocus={() => setHoverLabel(slice.label)}
+              onBlur={() => setHoverLabel(null)}
               title={`View ${formatInt(slice.value)} bots in this group`}
             >
               {inner}
               <span className="viz-leg-caret" aria-hidden="true">
-                {openLabel === slice.label ? "▾" : "▸"}
+                {on ? "▾" : "▸"}
               </span>
             </button>
           );
@@ -291,7 +339,7 @@ function NoraVerticalBars({ buckets, counts }) {
   // mép trên: thẻ này nằm cùng hàng lưới với thẻ "Phân bố xếp loại" cao hơn,
   // nên nó bị kéo giãn và phần thừa dồn hết xuống dưới.
   const width = 380;
-  const height = 320;
+  const height = 270;
   const leftPad = 26;
   const rightPad = 18;
   const topPad = 34;
@@ -324,7 +372,7 @@ function NoraVerticalBars({ buckets, counts }) {
     <div className="viz-bars-container">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        style={{ width: "100%", height: "auto", maxHeight: 380 }}
+        style={{ width: "100%", height: "auto", maxHeight: 300 }}
         role="img"
         aria-label={`Risk score distribution by range: ${points
           .map((pt) => `${pt.sub} ${pt.val} bot`)
@@ -384,7 +432,7 @@ function NoraVerticalBars({ buckets, counts }) {
 /**
  * Clean horizontal bars for top veto reasons.
  */
-function NoraVetoBars({ rows }) {
+function NoraVetoBars({ rows, vetoCount }) {
   if (!rows || rows.length === 0) {
     return <div className="msg">No veto reasons recorded in the current bot list.</div>;
   }
@@ -407,6 +455,11 @@ function NoraVetoBars({ rows }) {
               />
             </div>
             <div className="veto-bar-count num">{formatInt(r.value)}</div>
+            {/* A bot can carry several reasons, so these shares do not add
+                up to 100% -- each one reads "this share of vetoed bots". */}
+            <div className="veto-bar-share num">
+              {vetoCount > 0 ? `${Math.round((r.value / vetoCount) * 100)}% of vetoed` : ""}
+            </div>
           </div>
         );
       })}
@@ -438,9 +491,9 @@ function VerdictDrilldown({ verdict, rows, onOpenBot, onSeeAll }) {
   const rest = ranked.length - shown.length;
 
   return (
-    <div className="tier-drill">
+    <div className="tier-drill" style={{ borderTopColor: verdictColor(verdict) }}>
       <div className="tier-drill-h">
-        <span className="tier-drill-title">{verdict}</span>
+        <span className="tier-drill-title"><VerdictDot verdict={verdict} /></span>
         <span className="note">
           {ranked.length} bots · sorted by risk score, descending
         </span>
@@ -452,7 +505,7 @@ function VerdictDrilldown({ verdict, rows, onOpenBot, onSeeAll }) {
               <th className="n">#</th>
               <th>Bot</th>
               <th>Code</th>
-              <th>Market</th>
+              <th>Pair</th>
               <th className="n">Risk</th>
               <th className="n">Quality</th>
             </tr>
@@ -470,7 +523,9 @@ function VerdictDrilldown({ verdict, rows, onOpenBot, onSeeAll }) {
                 <td className="mono" style={{ color: "var(--amber)" }}>
                   {row.code}
                 </td>
-                <td>{row.venue_asset || "—"}</td>
+                <td className="mono" title={row.venue_asset || ""}>
+                  {row.venue_asset ? row.venue_asset.split("·").pop().trim() : "—"}
+                </td>
                 <td className="n mono">
                   {typeof row.risk === "number" ? row.risk.toFixed(0) : "—"}
                 </td>
@@ -558,12 +613,13 @@ export default function AdminOverview({ rows, onFilterVerdict, onOpenBot }) {
 
   return (
     <section className="overview-section">
-      {/* 1. Stat cards with Minimalist OKX-Style SVG Icons */}
+      {/* 1. Stat cards: value + a thin share bar (composition for the total) */}
       <Cards>
         <Card
           label="Total bots"
           value={formatInt(overview.total)}
-          sub="Loaded & risk-assessed"
+          sub="By verdict"
+          segments={pieSlices}
           icon={
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="3" width="20" height="14" rx="2" />
@@ -571,12 +627,13 @@ export default function AdminOverview({ rows, onFilterVerdict, onOpenBot }) {
               <line x1="12" y1="17" x2="12" y2="21" />
             </svg>
           }
-          glowColor="primary"
         />
         <Card
           label="Safety vetoed"
           value={formatInt(overview.vetoCount)}
-          sub="Violates risk standards"
+          sub={`${sharePct(overview.vetoCount, overview.total)}% of bots · violates risk standards`}
+          bar={sharePct(overview.vetoCount, overview.total)}
+          barColor="var(--down)"
           tone={overview.vetoCount > 0 ? "down" : ""}
           icon={
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -585,7 +642,6 @@ export default function AdminOverview({ rows, onFilterVerdict, onOpenBot }) {
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
           }
-          glowColor={overview.vetoCount > 0 ? "danger" : "success"}
         />
         <Card
           label="Median risk score"
@@ -594,19 +650,22 @@ export default function AdminOverview({ rows, onFilterVerdict, onOpenBot }) {
               ? "—"
               : overview.medianRisk.toFixed(0)
           }
-          sub="Scale of 0 – 100"
+          sub="of 100"
+          bar={overview.medianRisk == null ? undefined : overview.medianRisk}
+          barColor="var(--amber)"
           tone="amber"
           icon={
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
             </svg>
           }
-          glowColor="warning"
         />
         <Card
           label="Net losing"
           value={formatInt(overview.losingCount)}
-          sub="Closed PnL < 0 USDT"
+          sub={`${sharePct(overview.losingCount, overview.total)}% of bots · closed PnL < 0`}
+          bar={sharePct(overview.losingCount, overview.total)}
+          barColor="var(--down)"
           tone={overview.losingCount > 0 ? "down" : ""}
           icon={
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -614,7 +673,6 @@ export default function AdminOverview({ rows, onFilterVerdict, onOpenBot }) {
               <polyline points="17 18 23 18 23 12" />
             </svg>
           }
-          glowColor={overview.losingCount > 0 ? "danger" : "primary"}
         />
       </Cards>
 
@@ -665,7 +723,7 @@ export default function AdminOverview({ rows, onFilterVerdict, onOpenBot }) {
             : ""
         }
       >
-        <NoraVetoBars rows={vetoReasonRows} />
+        <NoraVetoBars rows={vetoReasonRows} vetoCount={overview.vetoCount} />
       </Block>
     </section>
   );

@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import json
+import logging
 import time
 import threading
 from pathlib import Path
@@ -50,6 +51,8 @@ from Agent.backend.bot.mcp.positions.snapshot import PositionSnapshotParser
 from Agent.backend.bot.mcp.trades.identity import LedgerIdentityGuard
 from Agent.backend.bot.mcp.trades.ledger import TradeLedgerManager
 from Agent.backend.external.sources.bot_source import BotDataSource, FileBotDataSource
+
+logger = logging.getLogger(__name__)
 
 
 class BotDataUnavailableError(ValueError):
@@ -138,14 +141,13 @@ class BotObservationService:
             reference_data_dir if reference_data_dir is not None else self.data_dir
         )
         self._timeline_cache: Dict[str, Optional[PhaseTimeline]] = {}
-        # Guards the cache above. One service instance is now shared by the
-        # threads that read a portfolio's members in parallel (see
-        # `PortfolioSupervisionPipeline.fetch_members`), and two members
-        # trading the same symbol would otherwise both find the cache empty
-        # and each build the same 30k-candle timeline. Dict writes are atomic
-        # under the GIL so nothing corrupts either way -- what the lock buys
-        # is not doing the expensive work twice.
-        self._timeline_lock = threading.Lock()
+        # One lock PER SYMBOL, so two members needing different symbols build
+        # them at the same time while two members needing the same symbol
+        # build it once. See `_phase_timelines` for why a single lock around
+        # the whole method was the wrong shape: it deduplicated correctly and
+        # serialised the portfolio path at its most expensive step.
+        self._timeline_locks: Dict[str, threading.Lock] = {}
+        self._timeline_locks_guard = threading.Lock()
         self.evaluation_mode = evaluation_mode
         # Defaults to the on-disk crawl output -- every existing caller keeps
         # reading exactly what Agent/none/scripts/crawl_bots.py wrote. Passing a
@@ -371,6 +373,21 @@ class BotObservationService:
     # song THỰC TẾ vẫn tự co theo số symbol còn thiếu (`min(số symbol còn
     # thiếu, 6)`), không bao giờ tạo nhiều luồng hơn số việc cần làm.
     _PHASE_TIMELINE_MAX_WORKERS = 6
+    # Cái trần 6 ở trên là trần cho TOÀN BỘ phần I/O song song của dự án, nên
+    # nó phải được áp một lần cho cả tiến trình chứ không phải cho từng lượt
+    # gọi. Trước khi có đường phân tích tổ hợp, mỗi lượt phân tích chỉ có một
+    # bot nên hai cách hiểu trùng nhau. Bây giờ thì không: sáu luồng thành
+    # viên, mỗi luồng mở pool 6 của riêng nó, là 36 luồng đọc file cùng lúc
+    # trên một container được cấp 2 CPU. Semaphore ở cấp LỚP giữ cho số lượt
+    # đọc thật sự chạy song song không bao giờ vượt 6, bất kể bao nhiêu
+    # luồng gọi tới. Luồng bị chặn ở đây không tiêu CPU -- thứ đang được
+    # giới hạn là I/O đồng thời, đúng thứ cái trần nói tới.
+    _phase_timeline_gate = threading.BoundedSemaphore(_PHASE_TIMELINE_MAX_WORKERS)
+
+    def _load_phase_timeline_gated(self, symbol: str) -> Optional[PhaseTimeline]:
+        """`_load_phase_timeline` behind the process-wide concurrency gate."""
+        with self._phase_timeline_gate:
+            return self._load_phase_timeline(symbol)
 
     def _load_phase_timeline(self, symbol: str) -> Optional[PhaseTimeline]:
         """Đọc/dựng timeline pha cho ĐÚNG MỘT symbol -- tách riêng khỏi
@@ -400,6 +417,44 @@ class BotObservationService:
                 break
         return build_timeline(symbol, candles) if candles else None
 
+    def public_profile(
+        self,
+        unique_code: str,
+        folder: Optional[str] = None,
+        include_name: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """OKX's public aggregates for one bot (daily PnL, currency preference,
+        stats), raw -- or None when this service's source has none.
+
+        The portfolio layer's one door to the data OKX keeps publishing after
+        it withholds an order book (60004). Best-effort by contract: a failure
+        here must never take a portfolio run down with it, because every
+        caller has a ledger-only fallback.
+        """
+        getter = getattr(self._bot_source, "get_public_profile", None)
+        if getter is None:
+            return None
+        bot_dir: Optional[Path] = None
+        if folder and Path(folder).name == folder and folder not in (".", ".."):
+            candidate = self.data_dir / "trade" / folder
+            if candidate.is_dir():
+                bot_dir = candidate
+        try:
+            return getter(unique_code, bot_dir=bot_dir, include_name=include_name)
+        except TypeError:
+            # A source written against the older two-argument signature.
+            try:
+                return getter(unique_code, bot_dir=bot_dir)
+            except Exception:  # noqa: BLE001
+                return None
+        except Exception:  # noqa: BLE001 - best-effort by contract
+            logger.warning(
+                "BotObservationService: public profile for %s unavailable",
+                unique_code,
+                exc_info=True,
+            )
+            return None
+
     def phase_timelines(self, symbols: Iterable[str]) -> Dict[str, PhaseTimeline]:
         """Public access to the cached phase timelines.
 
@@ -416,36 +471,86 @@ class BotObservationService:
         Cached per service instance: one bot can touch a hundred instruments and
         rebuilding a 30k-point timeline for each would dominate the run.
 
-        The whole body is serialised on `self._timeline_lock`. That is not
-        about correctness -- writes here were always safe, for the reason the
-        comment below the loop gives -- it is about not doing the same work
-        twice. One service instance is now shared by the threads that read a
-        portfolio's members concurrently, and those members overwhelmingly
-        trade the same few symbols; without the lock, four threads all find
-        BTC missing at the same instant and all four build the same
-        30k-candle timeline. Serialising here makes the total work the UNION
-        of the members' symbols, built once, which is strictly less than what
-        the threads would otherwise duplicate. The build inside is still
-        parallel across symbols, so the critical section is as short as the
-        work allows.
-        """
-        with self._timeline_lock:
-            return self._phase_timelines_locked(symbols)
+        LOCKED PER SYMBOL, NOT PER CALL. One service instance is now shared by
+        the threads that read a portfolio's members concurrently, and those
+        members overwhelmingly trade the same few symbols -- without any
+        guard, six threads all find BTC missing at the same instant and all
+        six build the same 30k-candle timeline. An earlier version of this
+        guard held one lock around the whole method, which did stop the
+        duplication and also made every member wait for every other member's
+        symbols: the portfolio path went from parallel to effectively serial
+        at exactly its most expensive step. A lock per SYMBOL keeps both
+        properties -- BTC is built once, while ETH and SOL are built at the
+        same time by other threads.
 
-    def _phase_timelines_locked(
-        self, symbols: Iterable[str]
-    ) -> Dict[str, PhaseTimeline]:
+        The thread that loses a race does not rebuild and does not spin: it
+        blocks on that symbol's lock and then reads the cache the winner
+        filled.
+        """
+        wanted = {str(symbol).upper() for symbol in symbols if symbol}
         timelines: Dict[str, PhaseTimeline] = {}
-        unique_symbols = {str(s).upper() for s in symbols if s}
         missing: List[str] = []
-        for symbol in unique_symbols:
+        for symbol in wanted:
             if symbol in self._timeline_cache:
                 cached = self._timeline_cache[symbol]
                 if cached is not None:
                     timelines[symbol] = cached
             else:
                 missing.append(symbol)
+        if not missing:
+            return timelines
 
+        # Claim each missing symbol under its own lock, in a FIXED order --
+        # sorted, not `missing`'s own set-derived order. Two threads racing
+        # over the same two symbols must walk the locks in the same order or
+        # this is a textbook AB-BA deadlock: thread 1 holds BTC and blocks on
+        # ETH while thread 2 holds ETH and blocks on BTC, and both wait
+        # forever. `missing` looked safe because it comes from a Python
+        # `set`, and two sets holding the very same strings usually do
+        # iterate in the same order -- but only when they were built at the
+        # same table size. `wanted` is comprehended fresh from EACH bot's own
+        # symbol list, so a two-symbol bot and a twenty-symbol bot allocate
+        # different-sized hash tables and can land BTC and ETH in opposite
+        # relative order for that reason alone. `fetch_members` runs up to
+        # `DEFAULT_MAX_WORKERS` of exactly such threads at once, each calling
+        # into this lock through its own `get_bot_result`, so this is not a
+        # theoretical race -- it is the concurrency this method exists to
+        # support. Sorting removes the dependency on set internals entirely:
+        # every thread, whatever symbols the REST of its own book holds,
+        # visits BTC before ETH because "B" sorts before "E", full stop.
+        #
+        # Whatever is still missing after this pass is ours alone to build;
+        # whatever another thread filled while we waited is already in
+        # `timelines`.
+        to_build: List[str] = []
+        for symbol in sorted(missing):
+            with self._timeline_locks_guard:
+                lock = self._timeline_locks.setdefault(symbol, threading.Lock())
+            lock.acquire()
+            if symbol in self._timeline_cache:
+                cached = self._timeline_cache[symbol]
+                if cached is not None:
+                    timelines[symbol] = cached
+                lock.release()
+                continue
+            to_build.append(symbol)
+
+        try:
+            if to_build:
+                timelines.update(self._build_phase_timelines(to_build))
+        finally:
+            for symbol in to_build:
+                self._timeline_locks[symbol].release()
+        return timelines
+
+    def _build_phase_timelines(
+        self, symbols: Iterable[str]
+    ) -> Dict[str, PhaseTimeline]:
+        timelines: Dict[str, PhaseTimeline] = {}
+        # Every symbol here is one THIS thread has claimed: the caller took
+        # its per-symbol lock and re-checked the cache under it, so there is
+        # no second check to do and no other thread building the same one.
+        missing = [str(symbol).upper() for symbol in symbols]
         if not missing:
             return timelines
 
@@ -459,7 +564,7 @@ class BotObservationService:
             max_workers=worker_count, thread_name_prefix="norabt-phase-timeline"
         ) as pool:
             future_to_symbol = {
-                pool.submit(self._load_phase_timeline, symbol): symbol
+                pool.submit(self._load_phase_timeline_gated, symbol): symbol
                 for symbol in missing
             }
             for future in concurrent.futures.as_completed(future_to_symbol):

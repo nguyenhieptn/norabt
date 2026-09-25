@@ -10,6 +10,7 @@ from Agent.backend.report.qc.reporting.reasons import (
     computed_summary_vi,
     phase_vi,
     recommendation_vi,
+    risk_level_text,
     explain_vi,
     score_story_vi,
 )
@@ -321,7 +322,7 @@ def render_qc_ranking(report: CohortReport) -> str:
                 )
             )
         if row.recommended_action:
-            lines.append(f"     ↳ recommendation: {row.recommended_action}")
+            lines.append(f"     ↳ risk level: {risk_level_text(row.recommended_action)}")
     lines.append("-" * width)
     verdicts: dict = {}
     for row in report.rows:
@@ -366,7 +367,7 @@ def _bot_card(index: int, row, width: int) -> List[str]:
         f"     VERDICT: {row.verdict}"
         f"   ·   QUALITY SCORE: {num(row.quality_score, 1)}/100"
         f"   ·   RISK SCORE: {num(row.risk_score, 1)}/100 (lower is safer)"
-        f"   ·   RECOMMENDATION: {row.recommended_action}",
+        f"   ·   RISK LEVEL: {risk_level_text(row.recommended_action)}",
         f"     Assessment confidence: {num(row.confidence, 0)}%"
         f" · ledger reconciliation {row.reconciliation_status}"
         f" · measurement mode {row.measurement_mode}",
@@ -446,10 +447,10 @@ def _bot_card(index: int, row, width: int) -> List[str]:
             )
         lines.extend(_wrap("".join(parts), width - 6, "     "))
 
-    # 4. The recommendation in prose. This is what a trading agent reads; the
+    # 4. The assessment in prose. This is what a trading agent reads; the
     # numbers above are the attachment, not the message.
     lines.append("")
-    lines.append("     ASSESSMENT AND RECOMMENDATION:")
+    lines.append("     ASSESSMENT:")
     previous_was_bullet = False
     for paragraph in recommendation_vi(row):
         if paragraph.startswith("• "):

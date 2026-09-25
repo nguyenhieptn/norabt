@@ -25,6 +25,9 @@
 #     POST     /api/session/logout   -> location /api/
 #     GET+POST /api/analyze          -> location /api/analyze (riêng, chặt hơn)
 #     GET      /bot/{code}           -> location /bot/
+#     GET+POST /api/portfolio/analyze -> location /api/
+#     GET      /api/portfolios       -> location /api/
+#     GET      /portfolio/{id}       -> location /portfolio/
 #     GET      /healthz              -> location = /healthz
 #     GET      /admin                -> location = /admin
 #     GET      /{user_ref}_{code}    -> location ~ ^/[a-z2-7]{10}_[A-Za-z0-9]{1,64}$
@@ -287,6 +290,18 @@ server {
     # (404) dù JSON có vẻ hợp lệ — tự tái lập đúng lỗi mà việc chỉ trả
     # report_url khi có domain thật vốn định tránh, chỉ là ở tầng nginx.
     location /bot/ {
+        limit_req zone=agent_general burst=50 nodelay;
+        proxy_pass http://127.0.0.1:8770;
+    }
+
+    # GET /portfolio/<PORT_...> -- trang báo cáo TỔ HỢP nhiều bot
+    # (Agent/backend/web/app.py's `portfolio_report`). Cùng mức giới hạn với
+    # /bot/ vì nó cũng chỉ ĐỌC một tài liệu đã ghi sẵn trên đĩa
+    # (data/report/multi/<id>/latest.json) rồi render -- nó KHÔNG BAO GIỜ
+    # chạy lại phân tích khi trượt, nên một lượt mở trang không thể biến
+    # thành N lượt gọi OKX. Việc chạy phân tích nằm ở POST
+    # /api/portfolio/analyze, đã thuộc `location /api/` bên dưới.
+    location /portfolio/ {
         limit_req zone=agent_general burst=50 nodelay;
         proxy_pass http://127.0.0.1:8770;
     }

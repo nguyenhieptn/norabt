@@ -282,6 +282,144 @@ _METRIC_GLOSSARY: Tuple[Tuple[str, str], ...] = (
 )
 
 # --------------------------------------------------------------------------- #
+# 1a. Đa bot / danh mục (portfolio, thêm 23/09 theo tính năng correlation
+# mới của phiên khác) -- định nghĩa phải khớp ĐÚNG công thức engine, đọc
+# thẳng mã nguồn khi viết, không suy đoán:
+#   * căn chỉnh theo bucket thời gian dùng chung, ngưỡng loại trừ:
+#       backend/report/qc/portfolio/timeseries.py
+#   * Pearson / Spearman / p-value / co-active buckets / exposure overlap:
+#       backend/report/qc/portfolio/correlation.py
+#   * verdict, style verdict, xung đột "TRAP": backend/report/qc/portfolio/service.py
+#   * mô phỏng Monte Carlo chung: backend/report/qc/portfolio/joint_monte_carlo.py
+#   * hình dạng bản ghi: backend/report/qc/portfolio/schemas.py
+#
+# Cùng kỷ luật với mục 1: mỗi mục là một câu tự đứng được, không số liệu
+# riêng của portfolio đang xem -- danh mục này thuộc `chat.build_chat_context`
+# một khi tính năng chat được nối vào trang portfolio, chưa xảy ra ở bản vá
+# này (xem lịch sử hội thoại 23/09) -- các mục dưới đây phục vụ TRƯỚC HẾT
+# nhóm (b) trong `chat.BOUNDARY_RULES`: câu hỏi lý thuyết tài chính định
+# lượng nói chung, kể cả khi người hỏi đang xem một bản ghi bot đơn lẻ chứ
+# không phải một portfolio.
+# --------------------------------------------------------------------------- #
+
+_PORTFOLIO_GLOSSARY: Tuple[Tuple[str, str], ...] = (
+    (
+        "Average pairwise correlation (portfolio)",
+        "the mean of the measurable Pearson correlation coefficients across "
+        "every pair of bots in a portfolio, computed on realised PnL summed "
+        "into shared time buckets over each pair's overlapping trading "
+        "window. Low means the bots' results move independently; 0.6 or "
+        "above means they move as one position.",
+    ),
+    (
+        "Pearson correlation (portfolio pair)",
+        "a linear correlation coefficient between two bots' realised PnL in "
+        "matching time buckets, restricted to the period both bots actually "
+        "traded. It is reported as NOT MEASURABLE, never as zero, whenever "
+        "either bot's PnL never varied or there are too few shared "
+        "observations -- zero would falsely claim the pair is independent "
+        "when there was nothing to measure.",
+    ),
+    (
+        "Spearman rank correlation (portfolio pair)",
+        "the same idea as Pearson correlation but computed on the RANK of "
+        "each bucket's PnL rather than its raw value (tied buckets, most "
+        "often shared idle periods, share the average of the ranks they "
+        "span), so it can pick up a monotonic relationship between two bots "
+        "even when it is not linear.",
+    ),
+    (
+        "Co-active buckets",
+        "the count of shared time buckets in which BOTH bots in a pair "
+        "closed at least one trade. A pair with few or zero co-active "
+        "buckets can still show a Pearson coefficient, but that coefficient "
+        "is then describing shared idle time, not real co-movement in "
+        "results.",
+    ),
+    (
+        "Exposure overlap",
+        "the cosine similarity, from 0 to 1, between two bots' shares of "
+        "exposure across traded symbols -- whether they hold the same "
+        "instruments. It is measured independently of PnL correlation, and "
+        "the two can disagree in either direction.",
+    ),
+    (
+        "Exit-rule distance",
+        "a measure of how similarly two bots trade -- their exit discipline "
+        "and holding period -- independent of whether their PnL moves "
+        "together. Zero means identical behaviour, and LOW distance is the "
+        "concerning end here, the opposite convention from correlation.",
+    ),
+    (
+        "Correlation/style conflict",
+        "flagged on a pair whose PnL correlation looks low, uncorrelated "
+        "results, while their exit-rule distance is also very low, "
+        "near-identical trading behaviour. It means any apparent "
+        "diversification is timing luck rather than a real difference in "
+        "strategy, since the two bots are effectively running the same "
+        "playbook.",
+    ),
+    (
+        "Diversification ratio",
+        "the share of a portfolio's undiversified 95% VaR, the sum of each "
+        "member's own standalone VaR, that combining the bots' actual, "
+        "correlated behaviour removed. Near zero means combining the bots "
+        "bought little or no protection; a negative value means the "
+        "combination is riskier than holding the parts separately would "
+        "have been.",
+    ),
+    (
+        "Correlation cost",
+        "the gap between a portfolio's actual joint 95% VaR and the VaR the "
+        "same bots would have produced if their returns had been "
+        "independent of each other -- the loss attributable specifically to "
+        "their real co-movement.",
+    ),
+    (
+        "Joint Monte Carlo simulation (portfolio)",
+        "a stationary-bootstrap simulation that, on each simulated draw, "
+        "picks ONE shared historical time bucket and takes every member "
+        "bot's real outcome from that same bucket, so co-movement between "
+        "bots is preserved by construction rather than assumed away. This "
+        "differs from resampling each bot independently, which would "
+        "understate risk for a correlated portfolio.",
+    ),
+    (
+        "Portfolio verdict (diversified / moderate co-movement / high "
+        "correlation cluster)",
+        "an assessment of whether combining a set of bots into one "
+        "portfolio actually bought diversification, based on their average "
+        "and single strongest pairwise Pearson correlation. It is NOT a "
+        "risk-tier score -- a portfolio can be labelled a high correlation "
+        "cluster while its combined risk score is a separate figure "
+        "entirely.",
+    ),
+    (
+        "Combined risk/quality score (portfolio)",
+        "the same scoring engine used for a single bot, run once on the "
+        "merged trade ledger of every portfolio member as if it were one "
+        "bot -- not a separate portfolio-specific formula. It can "
+        "legitimately be higher than any individual member's own score, "
+        "because several correlated bets held together carry more risk "
+        "than any one of them alone.",
+    ),
+    (
+        "Normalised HHI (portfolio concentration)",
+        "a Herfindahl-Hirschman index over open-position notional share "
+        "across symbols, rescaled to 0-1 so portfolios holding different "
+        "numbers of symbols stay comparable. 0 means exposure is spread "
+        "evenly across symbols; 1 means it all sits in one symbol.",
+    ),
+    (
+        "Directional alignment (portfolio)",
+        "the absolute value of net notional divided by gross notional "
+        "across a portfolio's open book. A value of 1.0 means the whole "
+        "book points in one direction regardless of how many bots or "
+        "symbols make it up.",
+    ),
+)
+
+# --------------------------------------------------------------------------- #
 # 1b. Mẫu suy luận định lượng -- KHÁC hẳn mục 1 (định nghĩa một chỉ tiêu):
 # đây là mối quan hệ THỐNG KÊ đã được công nhận giữa NHIỀU chỉ tiêu, cho phép
 # model tạo ra một câu trả lời có chiều sâu thật thay vì đọc từng số rời rạc.
@@ -404,11 +542,15 @@ BOUNDARY_RULES: Tuple[str, ...] = (
     "finance, risk, statistics, or OKX/copy-trading question, even one that "
     "names no figure from this record at all (e.g. explaining what a Sharpe "
     "ratio is or why stationary bootstrap preserves autocorrelation), or "
-    "(c) a short, plain conversational exchange -- a greeting, thanks, "
-    "goodbye, or brief acknowledgment. For (c), reply briefly and warmly in "
-    "kind, as one short natural sentence; never invent a figure, never give "
-    "advice, and you may close by naming what you can help with, but do not "
-    "repeat that invitation on every single turn -- once is enough for a "
+    "(c) a short, plain social exchange about the conversation itself -- a "
+    "greeting, thanks, goodbye, apology, brief acknowledgment ('ok', 'got "
+    "it', a laugh), small talk about how the reader or you are doing, or a "
+    "plain question about what you are or what you can help with (e.g. "
+    "'are you an AI?', 'what can you do?'). For (c), reply briefly and "
+    "warmly in kind, as one short natural sentence; never invent a figure, "
+    "never give advice, and you may close by naming what you can help "
+    "with, but do not repeat that invitation on every single turn -- once "
+    "is enough for a "
     "short exchange. Any OTHER subject entirely -- general knowledge, "
     "current events, other people or companies, coding, personal/medical/"
     "legal advice, or a request to write, translate or role-play something "
@@ -445,8 +587,18 @@ BOUNDARY_RULES: Tuple[str, ...] = (
 
 
 def metric_glossary_block() -> str:
-    """Bảng thuật ngữ, một dòng mỗi chỉ tiêu, cho vào prompt."""
-    return "\n".join(f"- {name}: {meaning}" for name, meaning in _METRIC_GLOSSARY)
+    """Bảng thuật ngữ, một dòng mỗi chỉ tiêu, cho vào prompt.
+
+    Gộp cả 1 (đơn bot) và 1a (đa bot/portfolio, thêm 23/09): một câu hỏi lý
+    thuyết chung (nhóm (b) trong `chat.BOUNDARY_RULES`) có thể tới từ người
+    đang xem MỘT bản ghi bot đơn lẻ mà vẫn muốn hiểu khái niệm correlation
+    của tính năng portfolio -- gộp sẵn ở đây rẻ hơn nhiều so với việc phải
+    biết TRƯỚC người hỏi đang xem trang nào mới quyết định đưa block nào
+    vào prompt."""
+    return "\n".join(
+        f"- {name}: {meaning}"
+        for name, meaning in (*_METRIC_GLOSSARY, *_PORTFOLIO_GLOSSARY)
+    )
 
 
 def okx_facts_block() -> str:
@@ -465,4 +617,6 @@ def boundary_rules_block() -> str:
 def metric_names() -> Dict[str, str]:
     """Bảng tra tên -> định nghĩa, cho test và cho bất kỳ nơi nào cần kiểm
     một thuật ngữ có trong từ điển hay không."""
-    return {name: meaning for name, meaning in _METRIC_GLOSSARY}
+    return {
+        name: meaning for name, meaning in (*_METRIC_GLOSSARY, *_PORTFOLIO_GLOSSARY)
+    }

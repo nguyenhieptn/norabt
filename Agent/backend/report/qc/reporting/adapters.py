@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List
+from typing import Any, Iterable, List
 
 from Agent.backend.report.qc.reporting.contracts import (
     ReportDocument,
@@ -13,7 +13,6 @@ from Agent.backend.report.qc.reporting.contracts import (
 )
 from Agent.backend.report.qc.reporting.dossier import (
     AnalysisDossier,
-    DossierStatus,
     EvidenceProvenance,
 )
 
@@ -71,7 +70,6 @@ def _base(dossier: AnalysisDossier, product: ReportProduct, sections: List[Repor
 def analyst_report(dossier: AnalysisDossier) -> ReportDocument:
     assessment = dossier.risk_assessment
     assessment_dump = assessment.model_dump(mode="json")
-    score_breakdown = assessment_dump.get("score_breakdown") or {}
     evidence_ids = _evidence_ids(dossier, "bot.", "market.")
     summary_metrics = [
         _metric("risk.score", "Risk score", assessment.risk_score, status=EvidenceProvenance.OBSERVED, unit="/100", confidence=assessment.confidence / 100.0, evidence_ids=evidence_ids),

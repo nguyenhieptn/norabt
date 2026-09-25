@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from Agent.backend.report.qc.scoring.verdict import (
     VERDICT_LOW_DD_GOOD_Q,
@@ -242,7 +242,7 @@ def _action_emergency_stop(row) -> str:
     if row.p_ruin:
         text += f", {_pct0(row.p_ruin)} of simulations wipe out capital entirely"
     text += (
-        " -- total loss of capital, not a temporary drawdown. Whether to keep copying is your call."
+        " -- total loss of capital, not a temporary drawdown."
     )
     return text
 
@@ -253,8 +253,8 @@ def _action_pause(row) -> str:
     elif row.p_ruin:
         metric = f"Simulated probability of ruin {_pct0(row.p_ruin)}"
     else:
-        metric = "The bot is in a risk zone that needs to be resolved on its own"
-    return f"{metric}. Whether to wait until that is resolved is your call."
+        metric = f"Risk score {_num0(row.risk_score)}/100"
+    return f"{metric} -- a high risk zone."
 
 
 def _action_reduce(row) -> str:
@@ -269,36 +269,34 @@ def _action_reduce(row) -> str:
 def _action_block_new_trades(row) -> str:
     if row.capital_at_risk:
         return (
-            f"{_money(row.capital_at_risk)} is currently open, in an elevated risk zone. "
-            "Whether to add more is your call."
+            f"{_money(row.capital_at_risk)} is currently open, in an elevated risk zone."
         )
-    return "The open position is in an elevated risk zone. Whether to add more is your call."
+    return f"Risk score {_num0(row.risk_score)}/100; the open position is in an elevated risk zone."
 
 
 def _action_warn(row) -> str:
     if row.p95_max_drawdown is not None:
         return (
-            f"Simulated P95 drawdown {_pct0(row.p95_max_drawdown)}, a watch "
-            "zone. Whether to withdraw or hold is your call."
+            f"Simulated P95 drawdown {_pct0(row.p95_max_drawdown)}, a watch zone."
         )
-    return "The current measurement sits in a watch zone, no action needed yet. Whether to withdraw or hold is your call."
+    return f"Risk score {_num0(row.risk_score)}/100, a watch zone."
 
 
 def _action_monitor(row) -> str:
     return (
-        f"Risk score {_num0(row.risk_score)}/100, no sign of anything abnormal. "
-        "Whether to keep copying is still your call."
+        f"Risk score {_num0(row.risk_score)}/100, no sign of anything abnormal."
     )
 
 
 # The old imperative-mood strings here (stop-now / pause / cut-size wording)
 # overran the scope agreed with the project owner: this system only analyzes
-# and suggests, it never substitutes its own decision for the user's. They
-# also had no evidence behind them specifically -- the out-of-sample
-# validation (Agent/docs/out_of_sample_validation.md) measured the risk
-# score's correlation with forward drawdown, never whether stopping a copy
-# changes the outcome. Each function below instead states this bot's own
-# measured numbers and hands the decision back to the reader. Dict keys stay
+# and assesses; it never advises what to do, or leaves a decision to the
+# reader in words that imply one. They also had no evidence behind them
+# specifically -- the out-of-sample validation
+# (Agent/docs/out_of_sample_validation.md) measured the risk score's
+# correlation with forward drawdown, never whether stopping a copy changes
+# the outcome. Each function below only states this bot's own measured
+# numbers and the risk zone they fall in. Dict keys stay
 # the internal action codes fusion.py already emits -- only the VALUES moved
 # from a static string to a per-bot text generator.
 ACTION_VI = {
@@ -311,9 +309,82 @@ ACTION_VI = {
 }
 
 
+# The internal control codes (fusion.py, the control plane) read as orders;
+# anything a person reads shows the risk level they stand for instead.
+RISK_LEVEL_BY_ACTION = {
+    "EMERGENCY_STOP": "critical",
+    "PAUSE": "high",
+    "REDUCE": "high",
+    "BLOCK_NEW_TRADES": "elevated (open exposure)",
+    "WARN": "watch",
+    "MONITOR": "normal",
+}
+
+
+def risk_level_text(action: Optional[str]) -> str:
+    """"PAUSE" -> "high"; unknown codes pass through unchanged."""
+    return RISK_LEVEL_BY_ACTION.get(action or "", action or "—")
+
+
+# Reports written before the advice wording was removed still carry it on
+# disk; readers pass the raw file text through `scrub_legacy_advice` so an
+# old report reads the same as a new one. JSON-safe: no quotes, no escapes.
+LEGACY_ADVICE_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+    (" Whether to keep copying is still your call.", ""),
+    (" Whether to keep copying is your call.", ""),
+    (" Whether to wait until that is resolved is your call.", ""),
+    (" Whether to add more is your call.", ""),
+    (" Whether to withdraw or hold is your call.", ""),
+    (", no action needed yet.", "."),
+    ("The bot is in a risk zone that needs to be resolved on its own", "The bot is in a high risk zone"),
+    (
+        "the bot is losing money, so this is not a recommendation to copy it, only that",
+        "the bot is losing money; the rating only says that",
+    ),
+    (
+        "Do not treat the offsetting PnL as diversification: at least one pair trades the "
+        "same way and will fail together when the regime turns",
+        "The offsetting PnL is not diversification: at least one pair trades the same way, "
+        "so those members are likely to lose together when the regime turns",
+    ),
+    (
+        "Treat this as one position, not several: size it as a single bet and cut the "
+        "overlap before adding capital",
+        "The members behave as one position rather than several: their results and "
+        "drawdowns overlap heavily",
+    ),
+    (
+        "Usable as a set, but size it expecting the members to draw down together; the "
+        "strongest pair is the one to thin first",
+        "The members partly move together: drawdowns are likely to overlap, most of all "
+        "in the most correlated pair",
+    ),
+    (
+        "The spread is real on both results and behaviour; keep it by watching the pair "
+        "correlations rather than the count of bots",
+        "The spread is real on both results and behaviour; it rests on the pair "
+        "correlations staying low, not on the count of bots",
+    ),
+    (
+        "Collect more overlapping history before treating these bots as a diversified set",
+        "Not enough overlapping history yet to tell whether these bots form a diversified set",
+    ),
+)
+
+
+def scrub_legacy_advice(text: str) -> str:
+    """Old advice sentences -> today's assessment wording (no-op on new text)."""
+    if "your call" not in text and "no action needed" not in text and "recommendation to copy" not in text \
+            and "resolved on its own" not in text and "recommended_action" not in text:
+        return text
+    for old, new in LEGACY_ADVICE_REPLACEMENTS:
+        text = text.replace(old, new)
+    return text
+
+
 def action_vi(row) -> str:
-    """The measured consequence behind `row.recommended_action`, argued from
-    this bot's own numbers, ending on the reader's own call -- see the
+    """The measured risk zone behind `row.recommended_action`, argued from
+    this bot's own numbers, with no advice -- see the
     module comment above `ACTION_VI` for why this replaced a fixed
     imperative-mood string per action.
     """
@@ -593,12 +664,12 @@ def _proof_points(row) -> List[str]:
 
     # 4. Where the risk score actually came from: a veto floor overrides the
     # weighted average, so the average alone would be misleading here.
-    if row.veto_reasons:
+    if row.risk_score is not None and row.veto_reasons:
         points.append(
             f"Risk score {row.risk_score:.0f} comes from the veto floor (weighted average "
             f"across 10 dimensions is only {row.weighted_average:.1f}): " + "; ".join(row.veto_reasons)
         )
-    elif row.top_risk_drivers:
+    elif row.risk_score is not None and row.top_risk_drivers:
         points.append(
             f"Risk score {row.risk_score:.0f} is the weighted average across 10 dimensions; heaviest: "
             + ", ".join(row.top_risk_drivers[:2])
@@ -755,17 +826,21 @@ def recommendation_vi(row) -> List[str]:
         out.extend(f"• {point}" for point in proof)
 
     action = action_vi(row)
+    quality_text = (
+        f"{row.quality_score:.0f}/100" if row.quality_score is not None else "not scored"
+    )
+    risk_text = f"{row.risk_score:.0f}/100" if row.risk_score is not None else "not scored"
     closing = (
-        f"CONCLUSION: {row.verdict} — quality {row.quality_score:.0f}/100, risk "
-        f"{row.risk_score:.0f}/100. {action}"
+        f"CONCLUSION: {row.verdict} — quality {quality_text}, risk "
+        f"{risk_text}. {action}"
     )
     if row.verdict in (VERDICT_LOW_DD_GOOD_Q, VERDICT_LOW_DD_WEAK_Q) and (
         (row.total_pnl is not None and row.total_pnl < 0)
         or (row.expectancy is not None and row.expectancy < 0)
     ):
         closing += (
-            " This verdict is about risk, not about profit: the bot is losing money, so "
-            "this is not a recommendation to copy it, only that the potential damage is limited."
+            " This verdict is about risk, not about profit: the bot is losing money; "
+            "the rating only says the potential damage is limited."
         )
     change = _what_would_change_it(row)
     if change:

@@ -29,7 +29,12 @@ class ViewRole(str, Enum):
 # Dotted paths withheld from a USER view. Each entry is raw operational detail
 # that is useless without the surrounding admin context; none of them feeds a
 # score, so removing them cannot change a number the user sees.
-USER_WITHHELD_PATHS: Tuple[str, ...] = (
+# TEMPORARY (project owner, 2026-09-25): every role sees the full analysis --
+# no withheld branch, no locked tab -- until plans/permissions are decided.
+# Flip back to True to restore the USER gating defined below unchanged.
+ROLE_GATING_ENABLED = False
+
+_USER_WITHHELD_PATHS: Tuple[str, ...] = (
     "bot_result",
     "primary_market_result",
     "source_ledger",
@@ -38,7 +43,10 @@ USER_WITHHELD_PATHS: Tuple[str, ...] = (
 
 # Panels a USER view does not render. These are presentation IDs, not data:
 # the dossier keeps every field, and the report simply does not open the panel.
-USER_HIDDEN_PANELS: Tuple[str, ...] = ("panel-market", "panel-trades")
+_USER_HIDDEN_PANELS: Tuple[str, ...] = ("panel-market", "panel-trades")
+
+USER_WITHHELD_PATHS: Tuple[str, ...] = _USER_WITHHELD_PATHS if ROLE_GATING_ENABLED else ()
+USER_HIDDEN_PANELS: Tuple[str, ...] = _USER_HIDDEN_PANELS if ROLE_GATING_ENABLED else ()
 
 ADMIN_WITHHELD_PATHS: Tuple[str, ...] = ()
 

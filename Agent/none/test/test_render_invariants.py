@@ -232,13 +232,22 @@ def test_result_tab_stays_an_overview(html: str) -> None:
 
     Deep modules were briefly rendered here as extra cards, and an extra
     "essence" summary was added on top of Conclusion and Expert assessment --
-    a third card saying the same thing. Both are gone; the tab is back to the
-    five sections it had.
+    a third card saying the same thing. Both are gone.
+
+    Trần đổi 5 -> 6 (23/09): `ideallm.md` §8.1 xếp "Essence -> Behavioral DNA
+    -> ..." NGAY TRONG tab này, miễn phí cho cả admin lẫn user -- mục
+    "cach-choi" (Behavioral DNA/"How this bot trades") trước đó nằm NHẦM ở
+    tab Premium Market (xem `_render_tab_market`/`_render_tab_report` trong
+    `report_page.py`, dời 23/09), khiến `chat.py` (đã đọc đúng spec từ đầu)
+    và report tĩnh lệch nhau về việc trường này có free hay không -- xem
+    hồ sơ hội thoại 23/09. Đây là thêm ĐÚNG một mục theo spec, không phải
+    một thẻ trùng lặp/để lọt như 4 cái bị cấm dưới đây.
     """
     ids = _tab_ids(html, "panel-report")
     for extra in ("in-one-look", "holdout", "scenario-lab", "market-compatibility"):
         assert extra not in ids, f"{extra} does not belong on the result tab"
-    assert len(ids) == 5, f"the result tab has {len(ids)} sections, expected 5"
+    assert "cach-choi" in ids, "Behavioral DNA (ideallm.md §8.1) belongs on the result tab"
+    assert len(ids) == 6, f"the result tab has {len(ids)} sections, expected 6"
 
 
 def test_market_tab_carries_the_market_depth(html: str) -> None:
@@ -265,7 +274,7 @@ def test_methodology_footer_is_an_accordion_not_a_new_card(html: str) -> None:
     assert 'id="phuong-phap"' in html
     ids = _tab_ids(html, "panel-report")
     assert "phuong-phap" not in ids, "the footer must not become a section card"
-    assert len(ids) == 5
+    assert len(ids) == 6  # 23/09: xem test_result_tab_stays_an_overview
 
 
 def _section_of(html_doc: str, section_id: str) -> str:
@@ -292,7 +301,9 @@ def test_every_scenario_reaches_exactly_one_tab(html: str) -> None:
     lab = _section_of(html, "scenario-lab")
     # Execution scenarios on the market tab, everything else in the laboratory.
     assert "Observed book, resampled" in lab
-    market_rows = market.split("</table>")[-2].count("<tr>") - 1
+    # 2026-09-24 redesign: cost scenarios are rows of the "Show results by
+    # phase" block, not a <table>.
+    market_rows = market.split("Cost sensitivity", 1)[-1].count('class="quant-audit-row"')
     assert market_rows >= 1, "the market tab lost its cost scenarios"
 
 
@@ -312,14 +323,19 @@ def test_saved_record_page_states_its_limits_once_not_per_section(html: str) -> 
     stripped["evidence"].pop("insights", None)
     saved_page = render_bot_report_html(stripped)
 
-    # No empty insight cards at all.
-    for anchor in ("holdout", "scenario-lab", "market-compatibility"):
-        assert f'id="{anchor}"' not in saved_page
+    # No empty insight cards at all. (Market compatibility is no longer an
+    # insight-only card: since 2026-09-24 it is built from the saved record's
+    # own phase breakdown plus each traded pair's regime timeline, so it may
+    # appear here -- just without the cost-sensitivity scenarios.)
+    # Holdout validation is also computed from the saved closed-trade series
+    # now (same `build_out_of_sample_validation`, it only needs close time and
+    # realized PnL). The scenario laboratory still needs the live analysis.
+    assert 'id="scenario-lab"' not in saved_page
 
-    # And exactly one place says why.
-    assert saved_page.count("Data limitations") == 1
-    assert "closed-trade ledger" in saved_page
-    assert 'id="phuong-phap"' in saved_page
+    # Nothing says why either (project owner, 2026-09-24: what a record does
+    # not carry is not talked about) -- no "Data limitations" footer.
+    assert "Data limitations" not in saved_page
+    assert 'id="phuong-phap"' not in saved_page
 
     # The live page still carries them.
     for anchor in ("holdout", "scenario-lab", "market-compatibility"):

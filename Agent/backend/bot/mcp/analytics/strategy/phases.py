@@ -15,6 +15,7 @@ UNKNOWN instead of being guessed.
 from __future__ import annotations
 
 import bisect
+from bisect import bisect_left, bisect_right, insort
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence
@@ -121,19 +122,45 @@ def build_timeline(symbol: str, candles: List[Dict[str, Any]]) -> PhaseTimeline:
     atr = _ema(true_ranges, 14)
 
     phases: List[MarketPhase] = []
+    # The volatility rank below is "where does this hour's ATR sit inside the
+    # trailing 30 days of ATR". Written directly -- slice the window, count
+    # how many entries it beats -- that is 720 comparisons per hour, and a
+    # symbol carries ~30k hours: 21.6 million comparisons for ONE symbol, and
+    # a portfolio touches several. Profiling a three-member portfolio put 96%
+    # of the entire run inside this one expression (93.7 million calls), and
+    # because it is pure Python the GIL holds it, so no amount of threading
+    # moves it.
+    #
+    # The window is a SLIDING one, so it does not have to be re-read: keep it
+    # sorted, add the hour that enters, drop the hour that leaves, and the
+    # count of entries at or below the current ATR is a binary search.
+    # `bisect_right` returns the insertion point AFTER equal values, which is
+    # exactly `count(a <= current_atr)` -- same number, same floats, same
+    # comparisons, so the phase labels are unchanged.
+    sorted_window: List[float] = []
     for i in range(len(ordered)):
+        # Maintained on EVERY iteration, before any early exit: the original
+        # rebuilt the window from scratch each time, so a skipped hour cost
+        # it nothing. An incremental window that skips an update is simply
+        # wrong from that point on.
+        if atr[i] is not None:
+            insort(sorted_window, atr[i])
+        leaving = i - VOLATILITY_WINDOW_HOURS - 1
+        if leaving >= 0 and atr[leaving] is not None:
+            sorted_window.pop(bisect_left(sorted_window, atr[leaving]))
+
         fast, slow, current_atr = ema_fast[i], ema_slow[i], atr[i]
         if i < WARMUP_HOURS or fast is None or slow is None or not slow:
             phases.append(MarketPhase.UNKNOWN)
             continue
 
         gap_pct = (fast - slow) / slow * 100.0
-        window_start = max(0, i - VOLATILITY_WINDOW_HOURS)
-        window = [a for a in atr[window_start : i + 1] if a is not None]
-        if current_atr is None or len(window) < 24:
+        if current_atr is None or len(sorted_window) < 24:
             phases.append(MarketPhase.UNKNOWN)
             continue
-        rank = sum(1 for a in window if a <= current_atr) / len(window) * 100.0
+        rank = (
+            bisect_right(sorted_window, current_atr) / len(sorted_window) * 100.0
+        )
         volatile = rank >= VOLATILE_PERCENTILE
 
         if gap_pct >= TREND_GAP_PCT:

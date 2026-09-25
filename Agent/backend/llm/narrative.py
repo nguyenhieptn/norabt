@@ -476,22 +476,89 @@ FALLBACK_NARRATIVE_VI = (
     "affected by this."
 )
 
+# Bộ ngắt mạch (circuit breaker) rất nhẹ cho khe backend DÙNG CHUNG --
+# SỰ CỐ THẬT đo được (22/09, xem `cli.log` của chính `agy`): khi tài khoản
+# consumer đứng sau CLI chạm trần request/ngày (429 RESOURCE_EXHAUSTED,
+# "upgrade your subscription"), bản thân `agy` tự làm điều KHÔNG nên làm --
+# âm thầm thử lại 8+ lần với exponential backoff (4s, 8s, 15s, 26s, 24s,
+# 25s, 23s, 18s ... đo thật trong `cli.log`) TRƯỚC KHI trả lỗi về cho tiến
+# trình gọi nó, tức là MỘT lượt `_call_backend_once` có thể âm thầm đốt
+# 8+ REQUEST THẬT vào đúng cái trần đã cạn -- càng đào càng sâu, càng khiến
+# quota lâu hồi hơn. Không có cờ dòng lệnh nào của `agy` tắt được hành vi
+# này mà không đánh đổi việc cắt oan một lượt sinh văn CHẬM NHƯNG ĐANG CHẠY
+# ĐÚNG (xem lịch sử `AGY_TIMEOUT_SECONDS` ngay trên -- trần 90s cũ từng
+# hỏng 1/8 bot vì lý do y hệt, cắt oan một lượt đang chạy đúng).
+#
+# Thứ DUY NHẤT nằm trong tầm với an toàn: đừng tự bắn thêm lượt gọi MỚI vào
+# một backend vừa xác nhận đang cạn quota. Cơ chế: một lượt thất bại ở tầng
+# vận chuyển (transport -- `_call_backend_once` trả `None`) mở mạch trong
+# `_BACKEND_COOLDOWN_SECONDS`; trong lúc mạch mở, MỌI lượt `generate_narrative`
+# MỚI (một bot khác trong cùng batch, hay một câu hỏi chat khác) bỏ qua hẳn
+# backend thật, rơi thẳng về `FALLBACK_NARRATIVE_VI` mà không tốn thêm dù
+# chỉ một request thật -- so với việc để nguyên 166 bot trong một batch mỗi
+# con tự đốt 8+ request vào đúng cái trần đã cạn. Cùng lược đồ với
+# `Agent/backend/llm/chat.py`'s bộ ngắt mạch riêng của nó (cố tình KHÔNG
+# dùng chung biến -- hai module có caller/rủi ro khác nhau, xem chat.py's
+# comment cạnh hằng số cùng tên).
+_BACKEND_COOLDOWN_SECONDS = 30.0
+_backend_unavailable_until = 0.0
 
-def select_backend_from_env() -> Optional["NarrativeBackend"]:
+
+def _backend_recently_failed() -> bool:
+    return time.monotonic() < _backend_unavailable_until
+
+
+def _record_backend_failure() -> None:
+    global _backend_unavailable_until
+    _backend_unavailable_until = time.monotonic() + _BACKEND_COOLDOWN_SECONDS
+
+
+def _record_backend_success() -> None:
+    global _backend_unavailable_until
+    _backend_unavailable_until = 0.0
+
+
+def select_backend_from_env(
+    *, timeout_seconds: Optional[float] = None
+) -> Optional["NarrativeBackend"]:
     """`None` (feature off) unless `NORABT_NARRATIVE_BACKEND` is exactly
     "cli", "api" or "agy" (case-insensitive) -- any other value, including a typo,
     is treated the same as unset: fail closed to "off", never guess at
     what the operator meant. Called fresh on every `generate_narrative`
     call (no caching), so a running process picks up an operator's env
     change without a restart -- see module docstring.
+
+    `timeout_seconds`, khi truyền vào (HỒI QUY 23/09), GHI ĐÈ trần mặc định
+    của backend được chọn -- lý do tồn tại DUY NHẤT: `chat.py` dùng chung
+    hàm này nhưng KHÔNG được dùng chung trần 150s của narrative
+    (`AGY_TIMEOUT_SECONDS`). Trần đó được đo và giữ cao có chủ đích cho
+    narrative (đuôi trễ thật 38.9-65.4s, xem comment cạnh
+    `AGY_TIMEOUT_SECONDS`), NHƯNG 150s vượt xa `proxy_read_timeout 75s`
+    của nginx đứng trước `/api/chat` (`/tmp/vhost_new.conf` -- 75s bản thân
+    nó đã chọn để nằm dưới trần cứng ~100s của Cloudflare free tier, xem
+    comment tại đó). Một câu hỏi chat hợp lệ nhưng chạy chậm (60-90s+, đã
+    đo được thật) trước bản vá này bị nginx CẮT KẾT NỐI trước khi server
+    kịp tự trả `FALLBACK_CHAT_ANSWER` -- người dùng thấy lỗi kết nối vỡ
+    ngang, không phải câu dự phòng lịch sự. Không đổi mặc định
+    (`timeout_seconds=None`) để mọi caller cũ (kể cả `generate_narrative`
+    của chính module này) giữ nguyên hành vi, không ai bị ảnh hưởng ngoài
+    caller CHỦ ĐỘNG truyền tường minh.
     """
     choice = os.environ.get(ENV_BACKEND, "").strip().lower()
     if choice == "cli":
-        return CliNarrativeBackend()
+        return (
+            CliNarrativeBackend(timeout_seconds=timeout_seconds)
+            if timeout_seconds is not None
+            else CliNarrativeBackend()
+        )
     if choice == "api":
         return ApiNarrativeBackend()
     if choice == "agy":
-        return AgyNarrativeBackend()
+        return (
+            AgyNarrativeBackend(timeout_seconds=timeout_seconds)
+            if timeout_seconds is not None
+            else AgyNarrativeBackend()
+        )
     return None
 
 
@@ -1839,6 +1906,19 @@ async def _semantic_gate(
     raw = await _call_backend_once(
         resolved, build_verify_prompt(text, numbers, context)
     )
+    if raw is None:
+        # HỒI QUY 23/09: cổng ngữ nghĩa GỌI CÙNG `_call_backend_once` nhưng
+        # trước bản vá này KHÔNG ghi nhận thất bại vào bộ ngắt mạch chung
+        # (`_record_backend_failure`) -- một lượt phân tích có thể sinh văn
+        # THÀNH CÔNG (qua hết ba cổng tất định) rồi mới gặp 429 ĐÚNG ở bước
+        # kiểm ngữ nghĩa này, và vì không mở mạch, lượt phân tích KẾ TIẾP
+        # vẫn tự thử backend thật từ đầu thay vì rơi fallback nhanh -- đúng
+        # lúc backend đã biết là cạn quota. Coi như bỏ qua cổng (như trước),
+        # NHƯNG giờ ghi nhận đúng là một lượt thất bại vận chuyển.
+        _record_backend_failure()
+        logger.warning("norabt narrative: skipping the semantic gate (transport failure)")
+        return True, None
+    _record_backend_success()
     verdict, why = parse_verdict(raw)
     if verdict is None:
         logger.warning("norabt narrative: skipping the semantic gate (%s)", why)
@@ -1889,9 +1969,20 @@ async def generate_narrative(
     # ONLY there.
     known_identifiers = (context.untrusted_nick_name,)
 
+    if _backend_recently_failed():
+        logger.info(
+            "norabt narrative: skipping the real backend -- it failed within "
+            "the last %.0fs, falling back fast instead of burning another "
+            "request against a backend already known to be down",
+            _BACKEND_COOLDOWN_SECONDS,
+        )
+        return FALLBACK_NARRATIVE_VI
+
     text = await _call_backend_once(resolved, prompt)
     if text is None:
+        _record_backend_failure()
         return FALLBACK_NARRATIVE_VI
+    _record_backend_success()
 
     ok, reason = validate_narrative(
         text, allowed_values, known_identifiers=known_identifiers
@@ -1908,10 +1999,12 @@ async def generate_narrative(
     retry_prompt = _build_retry_prompt(prompt, text, reason or "")
     retry_text = await _call_backend_once(resolved, retry_prompt)
     if retry_text is None:
+        _record_backend_failure()
         logger.warning(
             "norabt narrative: the retry hit a transport failure -- falling back"
         )
         return FALLBACK_NARRATIVE_VI
+    _record_backend_success()
 
     ok2, reason2 = validate_narrative(
         retry_text, allowed_values, known_identifiers=known_identifiers

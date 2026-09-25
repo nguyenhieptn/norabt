@@ -1,0 +1,923 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nora - Risk Management · Admin (preview)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { font-family: 'IBM Plex Sans', system-ui, sans-serif; background: #f4f5f7; color: #14161a; -webkit-font-smoothing: antialiased; }
+  .num { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  a { color: #2454e0; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 11px 14px; white-space: nowrap; }
+  th { font-size: 11px; font-weight: 600; color: #9296a0; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid rgba(20,22,26,0.06); }
+  td { font-size: 13px; border-bottom: 1px solid #f1f2f4; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr { transition: background .12s ease; }
+  tbody tr:hover { background: #f7f8fb; }
+  th.n, td.n { text-align: right; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: #14161a; }
+  tr.rowlink { cursor: pointer; }
+  tr.row-stale td { opacity: .72; }
+
+  .card { border: 1px solid rgba(20,22,26,0.05); border-radius: 16px; background: #fff; box-shadow: 0 1px 2px rgba(20,22,26,0.03), 0 10px 24px -16px rgba(20,22,26,0.08); }
+  .stat-tile { border-radius: 14px; background: #fff; border: 1px solid rgba(20,22,26,0.05); padding: 16px 18px; transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease; }
+  .stat-tile:hover { box-shadow: 0 14px 28px -18px rgba(20,22,26,0.18); transform: translateY(-2px); border-color: rgba(36,84,224,0.18); }
+
+  .btn { font-size: 12.5px; font-weight: 500; padding: 8px 15px; border-radius: 9px; border: 1px solid #e1e3e8; background: #fff; color: #40444d; transition: background .15s ease, border-color .15s ease; }
+  .btn:hover:not(:disabled) { background: #f4f5f7; border-color: #d3d6dd; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn-dark { border-color: #14161a; background: #14161a; color: #fff; }
+  .btn-dark:hover:not(:disabled) { background: #2a2d34; border-color: #2a2d34; }
+  .btn-warn { border-color: #f1d6a8; background: #fdf1de; color: #9a5a08; }
+  .btn-warn:hover:not(:disabled) { background: #fbe7c6; border-color: #eccb91; }
+  .btn-link { border: none; background: none; padding: 5px 8px; font-size: 12.5px; font-weight: 600; color: #2454e0; border-radius: 7px; }
+  .btn-link:hover:not(:disabled) { background: #eef2fe; }
+
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .pill-up { background: #e4f5ea; color: #16794a; }
+  .pill-down { background: #fbeae9; color: #af3327; }
+  .pill-neutral { background: #eef2fe; color: #2454e0; }
+  .pill-amber { background: #fdf1de; color: #9a5a08; }
+  .pill-purple { background: #f1ecfc; color: #6340b8; }
+  .pill-flat { background: #eef0f3; color: #62666f; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
+  .tabbar { display: inline-flex; gap: 2px; padding: 4px; background: #eceef1; border-radius: 12px; }
+  .tab-btn { border: none; background: transparent; padding: 7px 16px; border-radius: 9px; font-size: 13px; font-weight: 500; color: #62666f; display: inline-flex; align-items: center; gap: 7px; transition: background .15s ease, color .15s ease; }
+  .tab-btn:hover { color: #14161a; background: rgba(255,255,255,0.55); }
+  .tab-btn.active { background: #fff; color: #14161a; font-weight: 600; box-shadow: 0 1px 2px rgba(20,22,26,0.08); }
+  .tab-btn .count { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: rgba(20,22,26,0.06); color: #62666f; }
+  .tab-btn.active .count { background: #eef2fe; color: #2454e0; }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 32px 64px; }
+  .view { display: none; flex-direction: column; gap: 18px; }
+  .view.active { display: flex; }
+  .head .crumb { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #9296a0; }
+  .head h1 { margin: 4px 0 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+  .head p { margin: 6px 0 0; font-size: 13px; color: #62666f; max-width: 760px; line-height: 1.5; }
+
+  .block-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 18px 22px 0; }
+  .block-h h2 { margin: 0; font-size: 14px; font-weight: 700; }
+  .block-h .note { font-size: 11.5px; color: #9296a0; }
+  .block-b { padding: 16px 22px 20px; }
+  .block-b.flush { padding: 14px 0 0; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 22px; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #e6e8ec; background: #fff; border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 500; color: #40444d; transition: background .15s ease, border-color .15s ease; }
+  .chip:hover { background: #f7f8fa; }
+  .chip.active { background: #14161a; border-color: #14161a; color: #fff; }
+  .chip .chip-count { font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 999px; background: #eef0f3; color: #62666f; }
+  .chip.active .chip-count { background: rgba(255,255,255,0.16); color: #fff; }
+
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 14px 22px; }
+  .search { display: flex; align-items: center; gap: 8px; border: 1px solid #e1e3e8; border-radius: 10px; padding: 0 10px; background: #fff; min-width: 340px; transition: border-color .15s ease, box-shadow .15s ease; }
+  .search:focus-within { border-color: #9fb4ee; box-shadow: 0 0 0 3px rgba(36,84,224,0.08); }
+  .search input { border: none; outline: none; font: inherit; font-size: 13px; padding: 9px 0; flex: 1; background: transparent; }
+  .search .clear { border: none; background: none; color: #9296a0; padding: 2px 4px; }
+  .toolbar-note { font-size: 12px; color: #9296a0; }
+
+  .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 22px; border-top: 1px solid #f1f2f4; font-size: 12.5px; color: #62666f; }
+  .pager-controls { display: flex; align-items: center; gap: 6px; }
+  .pager-controls .btn { padding: 6px 11px; }
+  .pager select { font: inherit; font-size: 12.5px; border: 1px solid #e1e3e8; border-radius: 8px; padding: 5px 8px; background: #fff; }
+
+  .riskbar { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; }
+  .riskbar .track { width: 36px; height: 5px; border-radius: 3px; background: #eef0f3; overflow: hidden; }
+  .riskbar .fill { height: 100%; border-radius: 3px; }
+  .copy-btn { border: none; background: none; color: #b3b6bd; padding: 2px; border-radius: 5px; display: inline-flex; }
+  .copy-btn:hover { color: #2454e0; background: #eef2fe; }
+
+  .msg { padding: 28px 22px; text-align: center; font-size: 13px; color: #9296a0; }
+
+  /* overview */
+  .cards4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .kpi-top { display: flex; align-items: center; justify-content: space-between; }
+  .kpi-lbl { font-size: 12px; color: #9296a0; }
+  .kpi-ic { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: #f1f2f5; color: #62666f; }
+  .kpi-val { margin-top: 10px; font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+  .kpi-sub { margin-top: 2px; font-size: 12px; color: #9296a0; }
+  .grid2 { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+  .donut { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; }
+  .legend { flex: 1; min-width: 250px; display: flex; flex-direction: column; gap: 4px; }
+  .leg { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 52px 14px; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 9px; border: 1px solid transparent; background: none; font-size: 12.5px; text-align: left; color: #14161a; width: 100%; }
+  .leg:hover:not(.empty) { background: #f7f8fa; }
+  .leg.on { background: #eef2fe; border-color: #d7e1fb; }
+  .leg.empty { opacity: .45; cursor: default; }
+  .leg .ten { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .leg b { font-weight: 700; }
+  .leg .pct { color: #9296a0; text-align: right; font-size: 12px; }
+  .leg .caret { color: #9296a0; font-size: 10px; }
+  .drill { margin-top: 16px; border-top: 1px solid #eef0f3; padding-top: 14px; }
+  .drill-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .drill-f { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; font-size: 12px; color: #9296a0; }
+  .hint { margin: 14px 0 0; font-size: 12px; color: #9296a0; }
+  .veto-row { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr) 36px; align-items: center; gap: 14px; }
+  .veto-track { height: 8px; border-radius: 4px; background: #f3f4f6; overflow: hidden; }
+  .veto-fill { height: 100%; border-radius: 4px; background: #d04a3c; opacity: .85; }
+
+  /* analyze */
+  .preview-states { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border: 1px dashed #cfd3da; border-radius: 12px; font-size: 12px; color: #9296a0; }
+  .preview-states button { border: 1px solid #e1e3e8; background: #fff; border-radius: 999px; padding: 4px 11px; font-size: 12px; color: #40444d; }
+  .preview-states button.on { background: #14161a; border-color: #14161a; color: #fff; }
+  .state { display: none; flex-direction: column; gap: 16px; }
+  .state.active { display: flex; }
+  .searchbar { display: flex; gap: 10px; }
+  .searchbar .search { flex: 1; min-width: 0; padding: 0 12px; }
+  .searchbar .search input { padding: 12px 0; font-size: 13.5px; }
+  .hintline { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; color: #62666f; line-height: 1.5; }
+  .notice { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 12px; font-size: 12.5px; line-height: 1.5; }
+  .notice-info { background: #eef2fe; color: #2c3e73; }
+  .notice-ok { background: #e9f6ee; color: #1f5b3b; }
+  .notice-warn { background: #fdf3e2; color: #6f4a0e; }
+  .notice-danger { background: #fbeae9; color: #7d2a22; }
+  .notice .t { font-weight: 700; margin-bottom: 2px; }
+  .code-chip { font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 3px 8px; border-radius: 6px; background: #fff; border: 1px solid #d7e1fb; color: #2454e0; }
+
+  .summary-head { display: flex; align-items: center; gap: 14px; }
+  .avatar { width: 44px; height: 44px; border-radius: 12px; background: #14161a; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 17px; flex-shrink: 0; }
+  .asset-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+  .asset-list li { display: flex; align-items: center; justify-content: space-between; border: 1px solid #eef0f3; border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .stepper { display: flex; flex-direction: column; gap: 4px; }
+  .step { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; padding: 10px 12px; border-radius: 12px; }
+  .step .bullet { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; border: 1px solid #e1e3e8; color: #9296a0; background: #fff; }
+  .step .st { font-size: 13.5px; font-weight: 600; color: #9296a0; }
+  .step .sd { font-size: 12px; color: #b3b6bd; margin-top: 2px; line-height: 1.45; }
+  .step.done .bullet { background: #e4f5ea; border-color: #bfe3ca; color: #16794a; }
+  .step.done .st { color: #14161a; }
+  .step.done .sd { color: #9296a0; }
+  .step.active { background: #f4f7fe; }
+  .step.active .bullet { border-color: #2454e0; color: #2454e0; }
+  .step.active .st { color: #14161a; }
+  .step.active .sd { color: #62666f; }
+  .spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #c9d5f6; border-top-color: #2454e0; animation: spin .8s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .console { border-radius: 14px; background: #14161a; color: #d5d8de; overflow: hidden; }
+  .console-h { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 11.5px; letter-spacing: 0.03em; color: #9aa0aa; }
+  .console-b { padding: 12px 16px; max-height: 190px; overflow-y: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.7; }
+  .log-time { color: #6f7580; margin-right: 8px; }
+  .log-step { color: #8fb0ff; }
+  .log-success { color: #6fd39b; }
+
+  .modal-bg { position: fixed; inset: 0; background: rgba(20,22,26,0.35); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  .modal-bg.open { display: flex; }
+  .modal { width: 100%; max-width: 480px; border-radius: 16px; background: #fff; box-shadow: 0 24px 60px -20px rgba(20,22,26,0.4); }
+  .modal-h { padding: 20px 22px 0; }
+  .modal-b { padding: 16px 22px; }
+  .modal-f { padding: 0 22px 20px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .pf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .pf-card { border: 1px solid rgba(20,22,26,0.06); border-radius: 14px; padding: 14px 16px; background: #fff; }
+  .pf-card.bad { border-color: #f1c9c5; background: #fdf5f4; }
+
+  .info-ic { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 50%; border: 1px solid #b3b6bd; color: #9296a0; font-size: 8.5px; font-family: 'IBM Plex Mono', monospace; font-style: normal; cursor: default; position: relative; margin-left: 5px; vertical-align: 1px; }
+  .info-ic .tip { visibility: hidden; opacity: 0; position: absolute; bottom: 140%; left: 50%; transform: translateX(-50%); background: #14161a; color: #fff; font-size: 11px; font-family: 'IBM Plex Sans', sans-serif; font-weight: 400; text-transform: none; letter-spacing: normal; padding: 6px 9px; border-radius: 6px; width: 220px; line-height: 1.4; transition: opacity .12s ease; z-index: 30; white-space: normal; }
+  .info-ic:hover .tip { visibility: visible; opacity: 1; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d7dae0; border-radius: 6px; }
+  .vpill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px; background: #f6f7f9; font-size: 11.5px; font-weight: 600; color: #14161a; white-space: nowrap; }
+  .vpill i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .kpi-bar { margin-top: 10px; height: 5px; border-radius: 3px; background: #eef0f3; overflow: hidden; }
+  .kpi-bar span { display: block; height: 100%; border-radius: 3px; }
+  .kpi-sub { margin-top: 6px !important; }
+  .kpi-comp { display: flex; gap: 2px; background: none !important; } .kpi-comp span { display: block; height: 100%; border-radius: 2px; }
+  .grid2 { align-items: stretch !important; }
+  .grid2 > .card { display: flex; flex-direction: column; }
+  .veto-row { grid-template-columns: minmax(0, 280px) minmax(0, 1fr) 30px 96px !important; }
+  .veto-track { height: 6px !important; border-radius: 3px !important; background: #eceef1 !important; }
+  .veto-fill { border-radius: 3px !important; opacity: 1 !important; }
+  .head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .head-row h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .go { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 8px; color: #9296a0; transition: background .15s ease, color .15s ease; }
+  tr.rowlink:hover .go { background: #eef2fe; color: #2454e0; }
+  .mstack { display: inline-flex; margin-right: 8px; vertical-align: middle; }
+  .mstack i { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #fff; margin-left: -6px; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 9.5px; font-style: normal; font-weight: 700; }
+  .mstack i:first-child { margin-left: 0; }
+  th, td { padding: 11px 12px; }
+</style>
+</head>
+<body>
+
+<!-- ============ Header (App.jsx AppHeader, admin) ============ -->
+<header style="position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 28px; border-bottom: 1px solid rgba(20,22,26,0.06); background: rgba(255,255,255,0.94); backdrop-filter: blur(6px);">
+  <div style="display: flex; align-items: center; gap: 18px;">
+    <a href="#overview" data-nav="overview" style="display: flex; align-items: center; gap: 10px; color: inherit;">
+      <div style="width: 28px; height: 28px; border-radius: 8px; background: #14161a; display: flex; align-items: center; justify-content: center;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" fill="#fff"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="#fff" stroke-width="1.8"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="#fff" stroke-width="1.8"/><rect x="14" y="14" width="7" height="7" rx="1.5" fill="#7fa1ef"/></svg>
+      </div>
+      <div>
+        <div style="display: flex; align-items: center; gap: 7px;">
+          <span style="font-size: 14px; font-weight: 700; letter-spacing: 0.02em;">NORABT</span>
+          <span class="pill pill-flat" style="font-size: 10px; padding: 1px 7px;">AI Engine</span>
+        </div>
+        <div style="font-size: 10.5px; color: #9296a0; letter-spacing: 0.04em;">OKX quant risk protocol</div>
+      </div>
+    </a>
+    <div style="width: 1px; height: 26px; background: #e6e8ec;"></div>
+    <nav class="tabbar" id="mainNav">
+      <button class="tab-btn" data-nav="overview">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+        Overview
+      </button>
+      <button class="tab-btn" data-nav="bots">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        Bot List
+      </button>
+      <button class="tab-btn" data-nav="analyze">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Analyze Bot
+      </button>
+    </nav>
+  </div>
+  <div style="display: flex; align-items: center; gap: 10px;">
+    <span class="pill pill-up"><span class="dot" style="background: #17a565;"></span>Admin</span>
+    <button class="btn" title="Toggle theme" style="padding: 7px 9px; display: inline-flex;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+    <button class="btn" style="display: inline-flex; align-items: center; gap: 6px;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Log out
+    </button>
+  </div>
+</header>
+
+<div class="page">
+
+  <!-- ===================== OVERVIEW (AdminOverview.jsx) ===================== -->
+  <section class="view" id="view-overview">
+    <div class="cards4" id="ovCards"></div>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="block-h"><h2>Risk verdict distribution</h2><span class="note" id="ovTotalNote"></span></div>
+        <div class="block-b">
+          <div class="donut">
+            <svg id="donutSvg" width="190" height="190" viewBox="0 0 190 190" role="img"></svg>
+            <div class="legend" id="legend"></div>
+          </div>
+          <div id="drill"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="block-h"><h2>Risk score distribution</h2><span class="note">Trend line shows the distribution's shape</span></div>
+        <div class="block-b" style="flex: 1; display: flex; align-items: center;"><svg id="barsSvg" viewBox="0 0 380 320" style="width: 100%; height: auto; max-height: 300px; display: block;"></svg></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="block-h"><h2>Most common veto reasons</h2><span class="note" id="vetoNote"></span></div>
+      <div class="block-b" id="vetoList" style="display: flex; flex-direction: column; gap: 12px;"></div>
+    </div>
+  </section>
+
+  <!-- ===================== BOT LIST (AdminHome.jsx, tab=bots) ===================== -->
+  <section class="view" id="view-bots">
+    <div class="head-row">
+      <h1>Analysis catalog</h1>
+    <div class="tabbar" id="subTabs">
+      <button class="tab-btn active" data-sub="individual">Single Bots <span class="count" id="cntSingle"></span></button>
+      <button class="tab-btn" data-sub="portfolio">Portfolio Runs <span class="count" id="cntPf"></span></button>
+    </div>
+    </div>
+
+    <!-- Single bots -->
+    <div class="card" id="sub-individual">
+      <div class="block-h"><h2>Single-Bot Assessment Table</h2><span class="note" id="botNote"></span></div>
+      <div class="block-b flush">
+        <div class="chips" id="chips"></div>
+        <div class="toolbar">
+          <div class="search">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9296a0" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input id="botSearch" type="text" placeholder="Search by name, bot code, venue/pair, or verdict...">
+            <button class="clear" id="botSearchClear" title="Clear search" style="display: none;">&#x2715;</button>
+          </div>
+          <div class="toolbar-note">Click any row to view the single bot report</div>
+        </div>
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr id="botHead"></tr>
+            </thead>
+            <tbody id="botBody"></tbody>
+          </table>
+        </div>
+        <div id="botEmpty"></div>
+        <div class="pager" id="pager"></div>
+      </div>
+    </div>
+
+    <!-- Portfolio runs -->
+    <div class="card" id="sub-portfolio" style="display: none;">
+      <div class="block-h"><h2>Multi-Bot Portfolio Run History</h2><span class="note" id="pfNote"></span></div>
+      <div class="block-b flush">
+        <div class="toolbar">
+          <div class="search">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9296a0" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input id="pfSearch" type="text" placeholder="Search by portfolio id, bot code, or verdict...">
+          </div>
+          <div class="toolbar-note">Click a row to see the correlation matrix &amp; joint Monte Carlo simulation</div>
+        </div>
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Portfolio</th>
+                <th>Members</th>
+                <th class="n">Bots</th>
+                <th>Verdict</th>
+                <th class="n">Avg r</th>
+                <th class="n">Risk</th>
+                <th class="n">Joint DD (p95)<i class="info-ic">i<span class="tip">95th percentile of the simulated joint drawdown.</span></i></th>
+                <th class="n">Analyzed</th>
+                <th style="text-align: center;"></th>
+              </tr>
+            </thead>
+            <tbody id="pfBody"></tbody>
+          </table>
+        </div>
+        <div id="pfEmpty"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== ANALYZE BOT (AdminHome tab=analyze + AnalyzeFlow.jsx) ===================== -->
+  <section class="view" id="view-analyze">
+    <div class="head">
+      <div class="crumb">Monitoring system &middot; Assessment tool</div>
+      <h1>Look Up &amp; Analyze Bot</h1>
+      <p>One bot code for a single report &middot; several codes for a portfolio.</p>
+    </div>
+
+    <div class="preview-states" id="previewStates">
+      <span>Preview state:</span>
+      <button data-state="input" class="on">Input</button>
+      <button data-state="summary-new">Bot found &middot; new</button>
+      <button data-state="summary-old">Bot found &middot; analyzed</button>
+      <button data-state="confirm">Confirm re-run</button>
+      <button data-state="running">Analyzing</button>
+      <button data-state="pf-confirm">Portfolio &middot; confirm</button>
+      <button data-state="pf-running">Portfolio &middot; running</button>
+    </div>
+
+    <div class="card">
+      <div class="block-h"><h2>Direct Quantitative Assessment from OKX</h2><span class="note">Monte Carlo engine &amp; portfolio risk assessment</span></div>
+      <div class="block-b">
+
+        <!-- STATE: input -->
+        <div class="state active" id="st-input">
+          <form class="searchbar" id="lookupForm" autocomplete="off">
+            <div class="search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9296a0" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input id="codeInput" type="text" placeholder="Enter an OKX bot ID (e.g. EF1CC6F40E834D1A), or multiple IDs separated by commas/spaces...">
+              <button type="button" class="clear" id="codeClear" title="Clear input" style="display: none;">&#x2715;</button>
+            </div>
+            <button type="submit" class="btn btn-dark" id="lookupBtn" disabled>Look up bot</button>
+          </form>
+          <div id="modeHint"></div>
+        </div>
+
+        <!-- STATE: single bot summary (BotSummaryCard.jsx) -->
+        <div class="state" id="st-summary">
+          <div class="summary-head">
+            <div class="avatar">F</div>
+            <div style="min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <span style="font-size: 18px; font-weight: 700;">Falcon Grid V3</span>
+                <span class="pill pill-neutral">OKX CEX &middot; Copy Trading</span>
+              </div>
+              <div style="font-size: 12.5px; color: #9296a0; margin-top: 2px;">Bot code: <span class="num" style="color: #14161a; font-weight: 600;">482991BA0C7E11F2</span></div>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;">
+            <div class="stat-tile"><div style="font-size: 12px; color: #9296a0;">Total assets (AUM)</div><div class="num" style="margin-top: 6px; font-size: 17px; font-weight: 700;">120,000 <span style="font-size: 11.5px; color: #9296a0; font-weight: 500;">USDT</span></div></div>
+            <div class="stat-tile"><div style="font-size: 12px; color: #9296a0;">Closed PnL</div><div class="num" style="margin-top: 6px; font-size: 17px; font-weight: 700; color: #16794a;">+58,200 <span style="font-size: 11.5px; font-weight: 500;">(+48.5%)</span></div></div>
+            <div class="stat-tile"><div style="font-size: 12px; color: #9296a0;">Exchange rank</div><div class="num" style="margin-top: 6px; font-size: 17px; font-weight: 700;">#37</div></div>
+            <div class="stat-tile"><div style="font-size: 12px; color: #9296a0;">Copy traders</div><div class="num" style="margin-top: 6px; font-size: 17px; font-weight: 700;">1,204</div></div>
+          </div>
+          <div>
+            <div style="font-size: 12px; color: #9296a0;">Traded assets (5 pairs)</div>
+            <ul class="asset-list">
+              <li><span class="num" style="font-weight: 600;">BTC-USDT</span><span class="pill pill-up">Trading</span></li>
+              <li><span class="num" style="font-weight: 600;">ETH-USDT</span><span class="pill pill-up">Trading</span></li>
+              <li><span class="num" style="font-weight: 600;">SOL-USDT</span><span class="pill pill-amber">Holding only</span></li>
+              <li><span class="num" style="font-weight: 600;">XRP-USDT</span><span class="pill pill-up">Trading</span></li>
+              <li><span class="num" style="font-weight: 600;">DOGE-USDT</span><span class="pill pill-flat">Exited</span></li>
+            </ul>
+          </div>
+
+          <div class="notice notice-info" id="bannerOld">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex-shrink: 0; margin-top: 2px;"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            <div><div class="t">This bot has already been analyzed</div>Stored assessment on record (last run: 03:14:00 22/09/2026). Analyze again to view it or re-scan the order book.</div>
+          </div>
+          <div class="notice notice-ok" id="bannerNew" style="display: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/></svg>
+            <div><div class="t">New bot &mdash; never analyzed</div>Starting will load the full OKX order book, analyze related markets, score all 10 risk dimensions and run a 10,000-scenario Monte Carlo simulation.</div>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn btn-dark" id="analyzeBtn">Analyze this bot</button>
+            <button class="btn" data-go="input">Enter a different code</button>
+          </div>
+        </div>
+
+        <!-- STATE: single-bot progress (InPageAnalyzeProgress) -->
+        <div class="state" id="st-running">
+          <div class="stepper" id="stepper"></div>
+          <div class="console">
+            <div class="console-h"><span><span style="color: #6fd39b;">&#9679;</span>&nbsp; Live log &middot; bot 482991BA0C7E11F2</span><span class="num" id="timer">0s</span></div>
+            <div class="console-b" id="log"></div>
+          </div>
+          <div id="runDone" style="display: none; text-align: center;">
+            <a class="btn btn-dark" href="bot-report-redesign.html" id="viewReportBtn">View report now &rarr;</a>
+          </div>
+        </div>
+
+        <!-- STATE: portfolio confirm -->
+        <div class="state" id="st-pf-confirm">
+          <div class="notice notice-info">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex-shrink: 0; margin-top: 2px;"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8.6" y1="10.7" x2="15.4" y2="7.3"/><line x1="8.6" y1="13.3" x2="15.4" y2="16.7"/></svg>
+            <div><div class="t">Confirm 3-bot portfolio run</div>Found <strong>2</strong> / 3 valid bots on OKX. Running will align time series, compute the Pearson &amp; Spearman correlation matrix and run the joint Monte Carlo simulation.</div>
+          </div>
+          <div class="pf-grid">
+            <div class="pf-card">
+              <div style="display: flex; justify-content: space-between; align-items: center;"><span class="num" style="font-size: 12px; font-weight: 600; color: #9a5a08;">482991BA0C7E11F2</span><span class="pill pill-up">Found</span></div>
+              <div style="margin-top: 8px; font-size: 14px; font-weight: 600;">Falcon Grid V3</div>
+              <div style="margin-top: 2px; display: flex; justify-content: space-between; font-size: 12px; color: #62666f;"><span>Pair: BTC-USDT</span><span>Win rate: 63%</span></div>
+            </div>
+            <div class="pf-card">
+              <div style="display: flex; justify-content: space-between; align-items: center;"><span class="num" style="font-size: 12px; font-weight: 600; color: #9a5a08;">0CAEA63367C29A80</span><span class="pill pill-up">Found</span></div>
+              <div style="margin-top: 8px; font-size: 14px; font-weight: 600;">Lynx Arbit</div>
+              <div style="margin-top: 2px; display: flex; justify-content: space-between; font-size: 12px; color: #62666f;"><span>Pair: SOL-USDT</span><span>Win rate: 58%</span></div>
+            </div>
+            <div class="pf-card bad">
+              <div style="display: flex; justify-content: space-between; align-items: center;"><span class="num" style="font-size: 12px; font-weight: 600; color: #9a5a08;">FFFF0000AAAA1111</span><span class="pill pill-down">Not found</span></div>
+              <div style="margin-top: 8px; font-size: 12.5px; color: #af3327;">No bot with this code was found on OKX</div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-dark" data-go="pf-running">Run portfolio analysis (2 bots)</button>
+            <button class="btn" data-go="input">Enter a different list</button>
+          </div>
+        </div>
+
+        <!-- STATE: portfolio running -->
+        <div class="state" id="st-pf-running">
+          <div style="text-align: center; padding: 6px 0 4px;">
+            <span class="spinner" style="width: 26px; height: 26px; border-width: 3px;"></span>
+            <div style="margin-top: 12px; font-size: 17px; font-weight: 700;">Running portfolio analysis for 2 bots&hellip;</div>
+            <div style="margin-top: 4px; font-size: 12.5px; color: #62666f;">Loading order books, aligning PnL timelines, computing the correlation matrix, running 10,000 joint scenarios.</div>
+          </div>
+          <div class="stepper" id="pfStepper" style="max-width: 680px; width: 100%; margin: 0 auto;"></div>
+          <div id="pfDone" style="display: none; text-align: center; margin-top: 14px;">
+            <div style="font-size: 12.5px; color: #16794a; font-weight: 600; margin-bottom: 10px;">&#10003; Portfolio analysis complete &middot; PORT_7F3A2C91</div>
+            <a class="btn btn-dark" href="portfolio-report-redesign.html">View portfolio report &rarr;</a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- Confirm modal (bot already analyzed) -->
+<div class="modal-bg" id="confirmModal">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-h">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-size: 16px; font-weight: 700;">Confirm bot assessment</div>
+        <button class="clear" data-close style="border: none; background: none; color: #9296a0; font-size: 15px;">&#x2715;</button>
+      </div>
+      <div style="margin-top: 4px; font-size: 12.5px; color: #62666f;">Bot: <strong style="color: #14161a;">Falcon Grid V3</strong> <span class="num">(482991BA0C7E11F2)</span></div>
+    </div>
+    <div class="modal-b">
+      <div class="notice notice-warn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex-shrink: 0; margin-top: 2px;"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+        <div><div class="t">This bot has already been analyzed</div>Time on record: <strong class="num">03:14:00 22/09/2026</strong></div>
+      </div>
+      <p style="margin: 12px 0 0; font-size: 12.5px; color: #62666f; line-height: 1.5;">View the existing result immediately, or re-analyze from scratch to scan the latest order book from OKX.</p>
+    </div>
+    <div class="modal-f">
+      <a class="btn btn-dark" href="bot-report-redesign.html">View existing result</a>
+      <button class="btn btn-warn" data-go="running">Re-run analysis</button>
+      <button class="btn" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------------- data (sample, 31 bots) ---------------- */
+var NOW = new Date(2026, 8, 22, 12, 0, 0);
+var BOTS = [{"name": "Falcon Grid V3", "code": "482991BA0C7E11F2", "venue_asset": "SWAP · BTC-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: GOOD", "risk": 24.0, "quality": 81, "confidence": 92, "trade_count": 142, "hours_ago": 8.77, "total_pnl": 58200, "is_veto": false, "veto_reasons": []}, {"name": "Sigma Scalper", "code": "0661FCCD268A29A0", "venue_asset": "SWAP · XRP-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: GOOD", "risk": 40.4, "quality": 79, "confidence": 60, "trade_count": 159, "hours_ago": 14.2, "total_pnl": 76758, "is_veto": false, "veto_reasons": []}, {"name": "BlueOcean Trend", "code": "6E64DC3CD6089065", "venue_asset": "SWAP · XRP-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: GOOD", "risk": 43.9, "quality": 85, "confidence": 79, "trade_count": 328, "hours_ago": 2.3, "total_pnl": 43058, "is_veto": false, "veto_reasons": []}, {"name": "Kestrel Swing", "code": "A9C222670BBE4F4C", "venue_asset": "SWAP · ETH-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: GOOD", "risk": 40.2, "quality": 76, "confidence": 67, "trade_count": 149, "hours_ago": 16.4, "total_pnl": 16223, "is_veto": false, "veto_reasons": []}, {"name": "Delta Neutral Pro", "code": "CF2D133187C8DF95", "venue_asset": "SWAP · BTC-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: WEAK", "risk": 84.4, "quality": 22, "confidence": 74, "trade_count": 367, "hours_ago": 17.1, "total_pnl": 21336, "is_veto": false, "veto_reasons": []}, {"name": "Aurora BTC", "code": "028DE71159B42B4E", "venue_asset": "SWAP · SOL-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: GOOD", "risk": 60.1, "quality": 77, "confidence": 83, "trade_count": 332, "hours_ago": 19.0, "total_pnl": 46210, "is_veto": false, "veto_reasons": []}, {"name": "Nimbus Grid", "code": "9102F29A422EB14A", "venue_asset": "SWAP · BTC-USDT", "verdict": "HIDDEN RISK", "risk": 63.4, "quality": 66, "confidence": 78, "trade_count": 352, "hours_ago": 13.3, "total_pnl": 58921, "is_veto": true, "veto_reasons": ["Never booked a loss over 30+ trades"]}, {"name": "Quantum Hedge", "code": "38DACEEE2092F073", "venue_asset": "SWAP · XRP-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: GOOD", "risk": 13.4, "quality": 87, "confidence": 81, "trade_count": 281, "hours_ago": 5.3, "total_pnl": 14777, "is_veto": false, "veto_reasons": []}, {"name": "Orca DCA", "code": "AEF7AC86D66C7A64", "venue_asset": "SWAP · SOL-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: WEAK", "risk": 83.7, "quality": 46, "confidence": 89, "trade_count": 397, "hours_ago": 1.6, "total_pnl": -42686, "is_veto": false, "veto_reasons": []}, {"name": "Vega Momentum", "code": "6DCFAEA21818B904", "venue_asset": "SWAP · XRP-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: GOOD", "risk": 20.0, "quality": 80, "confidence": 56, "trade_count": 169, "hours_ago": 5.0, "total_pnl": 94484, "is_veto": false, "veto_reasons": []}, {"name": "Titan Breakout", "code": "3B266F850F1578B5", "venue_asset": "SWAP · XRP-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: GOOD", "risk": 42.5, "quality": 82, "confidence": 83, "trade_count": 147, "hours_ago": 2.0, "total_pnl": 13515, "is_veto": false, "veto_reasons": []}, {"name": "Lynx Arbit", "code": "0CAEA63367C29A80", "venue_asset": "SWAP · SOL-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: GOOD", "risk": 19.7, "quality": 81, "confidence": 56, "trade_count": 208, "hours_ago": 11.1, "total_pnl": 88393, "is_veto": false, "veto_reasons": []}, {"name": "Polar Mean-Rev", "code": "2D15A4F4EF27E958", "venue_asset": "SWAP · SOL-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: GOOD", "risk": 15.7, "quality": 85, "confidence": 93, "trade_count": 345, "hours_ago": 71.9, "total_pnl": 50897, "is_veto": false, "veto_reasons": []}, {"name": "Crimson Martin", "code": "6D30C01C3F252EDC", "venue_asset": "SWAP · SOL-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: WEAK", "risk": 100.0, "quality": 19, "confidence": 78, "trade_count": 88, "hours_ago": 8.8, "total_pnl": -44852, "is_veto": true, "veto_reasons": ["Unrealised loss above 30% of capital", "Leverage above 20x"]}, {"name": "Echo Futures", "code": "D0840164709AB7F3", "venue_asset": "SWAP · XRP-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: GOOD", "risk": 13.8, "quality": 86, "confidence": 60, "trade_count": 294, "hours_ago": 64.8, "total_pnl": 84504, "is_veto": false, "veto_reasons": []}, {"name": "Helix Range", "code": "D566647B5AA66634", "venue_asset": "SWAP · ETH-USDT", "verdict": "HIDDEN RISK", "risk": 52.7, "quality": 62, "confidence": 65, "trade_count": 82, "hours_ago": 76.8, "total_pnl": 76086, "is_veto": false, "veto_reasons": []}, {"name": "Jade Carry", "code": "C036BB3A62F301F4", "venue_asset": "SWAP · ETH-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: GOOD", "risk": 14.1, "quality": 74, "confidence": 63, "trade_count": 113, "hours_ago": 19.8, "total_pnl": 56163, "is_veto": false, "veto_reasons": []}, {"name": "Onyx Scalp 2x", "code": "23ACEDBD6B0165DE", "venue_asset": "SWAP · SOL-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: WEAK", "risk": 63.6, "quality": 32, "confidence": 63, "trade_count": 117, "hours_ago": 2.2, "total_pnl": -5931, "is_veto": false, "veto_reasons": []}, {"name": "Raven Trend 5x", "code": "C6A8835C4ABD5C65", "venue_asset": "SWAP · BTC-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: WEAK", "risk": 91.7, "quality": 18, "confidence": 69, "trade_count": 360, "hours_ago": 18.1, "total_pnl": -3506, "is_veto": true, "veto_reasons": ["Unrealised loss above 30% of capital"]}, {"name": "Summit Grid", "code": "A6C52CF63C03378E", "venue_asset": "SWAP · BTC-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: WEAK", "risk": 32.0, "quality": 49, "confidence": 81, "trade_count": 38, "hours_ago": 2.2, "total_pnl": -22092, "is_veto": false, "veto_reasons": []}, {"name": "Zephyr ETH", "code": "3E21C5CF5F1DFD9C", "venue_asset": "SPOT · BTC-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: GOOD", "risk": 20.6, "quality": 77, "confidence": 76, "trade_count": 280, "hours_ago": 13.2, "total_pnl": 64109, "is_veto": false, "veto_reasons": []}, {"name": "Cobalt Swing", "code": "00715DC1AC1A27DF", "venue_asset": "SWAP · SOL-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: GOOD", "risk": 24.7, "quality": 91, "confidence": 65, "trade_count": 300, "hours_ago": 2.2, "total_pnl": 14886, "is_veto": false, "veto_reasons": []}, {"name": "Maple Hedge", "code": "31DE361B43BE4DE8", "venue_asset": "SWAP · SOL-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: WEAK", "risk": 100.0, "quality": 43, "confidence": 65, "trade_count": 91, "hours_ago": 42.7, "total_pnl": 60448, "is_veto": true, "veto_reasons": ["Unrealised loss above 30% of capital", "Probability of ruin at or above 20%"]}, {"name": "Ironclad DCA", "code": "68767611088D0137", "venue_asset": "SWAP · ETH-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: WEAK", "risk": 100.0, "quality": 39, "confidence": 70, "trade_count": 278, "hours_ago": 7.3, "total_pnl": -12919, "is_veto": true, "veto_reasons": ["Stress scenario ends in liquidation", "Probability of ruin at or above 20%"]}, {"name": "Nova Pulse", "code": "23E6ED8C4B4A95DB", "venue_asset": "SWAP · XRP-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: WEAK", "risk": 35.1, "quality": 52, "confidence": 58, "trade_count": 75, "hours_ago": 8.8, "total_pnl": 29533, "is_veto": false, "veto_reasons": []}, {"name": "Atlas Range", "code": "29629FA947BAB3AE", "venue_asset": "SPOT · BTC-USDT", "verdict": "INSUFFICIENT EVIDENCE", "risk": 43.3, "quality": 52, "confidence": 91, "trade_count": 384, "hours_ago": 18.3, "total_pnl": 44645, "is_veto": false, "veto_reasons": []}, {"name": "Pioneer SOL", "code": "72BB0BCC6BC4552E", "venue_asset": "SWAP · SOL-USDT", "verdict": "DRAWDOWN: LOW · QUALITY: WEAK", "risk": 24.0, "quality": 50, "confidence": 64, "trade_count": 62, "hours_ago": 11.0, "total_pnl": 62934, "is_veto": false, "veto_reasons": []}, {"name": "Harbor Grid", "code": "292A283A2043D77F", "venue_asset": "SPOT · ETH-USDT", "verdict": "INSUFFICIENT EVIDENCE", "risk": 43.7, "quality": 58, "confidence": 69, "trade_count": 268, "hours_ago": 8.1, "total_pnl": 64942, "is_veto": false, "veto_reasons": []}, {"name": "Solstice Lev10", "code": "21DB0C2E0B03DD47", "venue_asset": "SWAP · DOGE-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: WEAK", "risk": 78.7, "quality": 31, "confidence": 62, "trade_count": 137, "hours_ago": 8.0, "total_pnl": -2324, "is_veto": false, "veto_reasons": []}, {"name": "Ember Scalp", "code": "939451E0F1A365B6", "venue_asset": "SPOT · BTC-USDT", "verdict": "HIDDEN RISK", "risk": 53.9, "quality": 62, "confidence": 79, "trade_count": 147, "hours_ago": 9.0, "total_pnl": 17554, "is_veto": false, "veto_reasons": []}, {"name": "Mistral Alt", "code": "9F8FCA2F7C164C81", "venue_asset": "SWAP · DOGE-USDT", "verdict": "DRAWDOWN: HIGH · QUALITY: GOOD", "risk": 56.7, "quality": 83, "confidence": 91, "trade_count": 274, "hours_ago": 18.1, "total_pnl": 68820, "is_veto": false, "veto_reasons": []}];
+
+var PORTFOLIOS = [
+  { id: "PORT_7F3A2C91", members: ["Aquila Grid", "Delta Mean Rev", "Solar Swing", "Ripple Range"], verdict: "MODERATE", avg: 0.31, risk: 24, jointDD: 16.8, hours_ago: 9.0, available: true },
+  { id: "PORT_1B9E44D0", members: ["Sigma Scalper", "Titan Breakout"], verdict: "MODERATE", avg: 0.41, risk: 48, jointDD: 18.9, hours_ago: 20.5, available: true },
+  { id: "PORT_C2D81F37", members: ["Orca DCA", "Raven Trend 5x", "Onyx Scalp 2x", "Solstice Lev10"], verdict: "CLUSTER", avg: 0.72, risk: 71, jointDD: 31.5, hours_ago: 30.1, available: true },
+  { id: "PORT_09AE5B12", members: ["Vega Momentum", "Echo Futures"], verdict: "DIVERSIFIED", avg: 0.09, risk: 27, jointDD: 9.8, hours_ago: 96.0, available: false }
+];
+
+var V = {
+  HW: "DRAWDOWN: HIGH · QUALITY: WEAK", HG: "DRAWDOWN: HIGH · QUALITY: GOOD",
+  LG: "DRAWDOWN: LOW · QUALITY: GOOD", LW: "DRAWDOWN: LOW · QUALITY: WEAK",
+  HR: "HIDDEN RISK", IE: "INSUFFICIENT EVIDENCE"
+};
+var CORE = [V.HW, V.HG, V.LG, V.LW, V.HR];
+var VCOLOR = {}; VCOLOR[V.HW] = "#d04a3c"; VCOLOR[V.HG] = "#e0a32a"; VCOLOR[V.LG] = "#17a565"; VCOLOR[V.LW] = "#3d7fd6"; VCOLOR[V.HR] = "#7a55d6"; VCOLOR[V.IE] = "#a9aeb7";
+var VPILL = {}; VPILL[V.HW] = "pill-down"; VPILL[V.HG] = "pill-amber"; VPILL[V.LG] = "pill-up"; VPILL[V.LW] = "pill-neutral"; VPILL[V.HR] = "pill-purple"; VPILL[V.IE] = "pill-flat";
+
+function fmtInt(n) { return n == null ? "—" : n.toLocaleString("en-US"); }
+function pad(n) { return String(n).padStart(2, "0"); }
+function stamp(hoursAgo) {
+  var d = new Date(NOW.getTime() - hoursAgo * 3600000);
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+function riskColor(r) { if (r < 30) return "#16794a"; if (r < 50) return "#b8720a"; if (r < 70) return "#d0692f"; return "#af3327"; }
+function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+var VSHORT = {}; VSHORT[V.HW] = "High DD · Weak"; VSHORT[V.HG] = "High DD · Good"; VSHORT[V.LG] = "Low DD · Good"; VSHORT[V.LW] = "Low DD · Weak"; VSHORT[V.HR] = "Hidden risk"; VSHORT[V.IE] = "Insufficient evidence";
+function verdictPill(v) { v = v || V.IE; return '<span class="vpill" title="' + esc(v) + '"><i style="background:' + (VCOLOR[v] || "#a9aeb7") + '"></i>' + esc(VSHORT[v] || v) + "</span>"; }
+function icon(name) {
+  var p = {
+    monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
+    gauge: '<path d="M4 16a8 8 0 1 1 16 0"/><line x1="12" y1="16" x2="15.5" y2="10.5"/>',
+    down: '<polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/>',
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'
+  }[name];
+  return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + p + "</svg>";
+}
+
+/* ---------------- navigation ---------------- */
+function showView(name) {
+  ["overview", "bots", "analyze"].forEach(function (v) {
+    document.getElementById("view-" + v).classList.toggle("active", v === name);
+  });
+  document.querySelectorAll("#mainNav .tab-btn").forEach(function (b) { b.classList.toggle("active", b.dataset.nav === name); });
+  document.title = name === "overview" ? "Nora - Risk Management · Overview" : name === "bots" ? "Nora - Bot List" : "Nora - Analyze Bot";
+  if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll("[data-nav]").forEach(function (el) {
+  el.addEventListener("click", function (e) { e.preventDefault(); showView(el.dataset.nav); });
+});
+
+/* ---------------- OVERVIEW ---------------- */
+var scored = BOTS.filter(function (b) { return typeof b.risk === "number"; });
+var tierCounts = {};
+scored.forEach(function (b) { var k = CORE.indexOf(b.verdict) >= 0 ? b.verdict : V.IE; tierCounts[k] = (tierCounts[k] || 0) + 1; });
+var bucketDefs = [
+  { label: "< 30", sub: "Low", color: "#17a565" },
+  { label: "30 – 50", sub: "Medium", color: "#e0a32a" },
+  { label: "50 – 70", sub: "High", color: "#e0794f" },
+  { label: "≥ 70", sub: "Very High", color: "#d04a3c" }
+];
+var buckets = [0, 0, 0, 0];
+scored.forEach(function (b) { buckets[b.risk < 30 ? 0 : b.risk < 50 ? 1 : b.risk < 70 ? 2 : 3]++; });
+var risks = scored.map(function (b) { return b.risk; }).sort(function (a, b) { return a - b; });
+var mid = Math.floor(risks.length / 2);
+var medianRisk = risks.length % 2 ? risks[mid] : (risks[mid - 1] + risks[mid]) / 2;
+var vetoCount = scored.filter(function (b) { return b.is_veto; }).length;
+var losingCount = BOTS.filter(function (b) { return b.total_pnl < 0; }).length;
+
+var slices = CORE.map(function (v) { return { label: v, value: tierCounts[v] || 0, color: VCOLOR[v] }; });
+if (tierCounts[V.IE]) slices.push({ label: V.IE, value: tierCounts[V.IE], color: VCOLOR[V.IE] });
+(function renderCards() {
+  var cards = [
+    { lbl: "Total bots", val: fmtInt(BOTS.length), sub: "by verdict", bar: scored.length / BOTS.length * 100, bc: "#2454e0", ic: "monitor", color: "#14161a", icbg: "#eef2fe", icfg: "#2454e0" },
+    { lbl: "Safety vetoed", val: fmtInt(vetoCount), sub: Math.round(vetoCount / BOTS.length * 100) + "% of bots", bar: vetoCount / BOTS.length * 100, bc: "#d04a3c", ic: "shield", color: vetoCount ? "#af3327" : "#14161a", icbg: "#fbeae9", icfg: "#af3327" },
+    { lbl: "Median risk score", val: medianRisk.toFixed(0), sub: "of 100", bar: medianRisk, bc: "#d08a1a", ic: "gauge", color: "#b8720a", icbg: "#fdf1de", icfg: "#b8720a" },
+    { lbl: "Net losing", val: fmtInt(losingCount), sub: Math.round(losingCount / BOTS.length * 100) + "% of bots · PnL < 0", bar: losingCount / BOTS.length * 100, bc: "#d04a3c", ic: "down", color: losingCount ? "#af3327" : "#14161a", icbg: "#fbeae9", icfg: "#af3327" }
+  ];
+  var comp = slices.filter(function (x) { return x.value; }).map(function (x) { return '<span title="' + (VSHORT[x.label] || x.label) + ': ' + x.value + '" style="width:' + (x.value / scored.length * 100).toFixed(1) + '%;background:' + x.color + '"></span>'; }).join("");
+  document.getElementById("ovCards").innerHTML = cards.map(function (c, i) {
+    return '<div class="stat-tile"><div class="kpi-top"><span class="kpi-lbl">' + c.lbl + '</span><span class="kpi-ic" style="background:' + c.icbg + ';color:' + c.icfg + '">' + icon(c.ic) + '</span></div>' +
+      '<div class="kpi-val" style="color:' + c.color + '">' + c.val + '</div><div class="kpi-bar' + (i === 0 ? " kpi-comp" : "") + '">' + (i === 0 ? comp : '<span style="width:' + Math.max(2, c.bar).toFixed(1) + '%;background:' + c.bc + '"></span>') + '</div><div class="kpi-sub">' + c.sub + "</div></div>";
+  }).join("");
+  document.getElementById("ovTotalNote").textContent = fmtInt(BOTS.length) + " bots";
+})();
+
+var openVerdict = null;
+
+function renderDonut() {
+  var S = 190, R = 84, r = 56, C = S / 2, GAP = 2 / R, total = scored.length;
+  var angle = -Math.PI / 2, out = "";
+  slices.filter(function (s) { return s.value > 0; }).forEach(function (s) {
+    var w = s.value / total * Math.PI * 2, a0 = angle + GAP / 2, a1 = angle + w - GAP / 2; angle += w;
+    var large = w > Math.PI ? 1 : 0;
+    function pt(a, d) { return [C + d * Math.cos(a), C + d * Math.sin(a)]; }
+    var p0 = pt(a0, R), p1 = pt(a1, R), p2 = pt(a1, r), p3 = pt(a0, r);
+    var dim = openVerdict && openVerdict !== s.label ? ' opacity="0.3"' : "";
+    out += '<path d="M' + p0 + " A" + R + "," + R + " 0 " + large + " 1 " + p1 + " L" + p2 + " A" + r + "," + r + " 0 " + large + " 0 " + p3 + ' Z" fill="' + s.color + '"' + dim + ' style="cursor:pointer;transition:opacity .15s" data-v="' + s.label + '"><title>' + s.label + " — " + s.value + " bot</title></path>";
+  });
+  out += '<text x="' + C + '" y="' + (C - 2) + '" text-anchor="middle" font-size="28" font-weight="700" fill="#14161a" font-family="IBM Plex Sans">' + total + "</text>";
+  out += '<text x="' + C + '" y="' + (C + 18) + '" text-anchor="middle" font-size="11.5" fill="#9296a0" font-family="IBM Plex Sans">total bots</text>';
+  var svg = document.getElementById("donutSvg");
+  svg.innerHTML = out;
+  svg.querySelectorAll("path[data-v]").forEach(function (p) { p.addEventListener("click", function () { toggleVerdict(p.dataset.v); }); });
+
+  document.getElementById("legend").innerHTML = slices.map(function (s) {
+    var pct = total ? (s.value / total * 100).toFixed(1) : "0.0";
+    var empty = s.value === 0, on = openVerdict === s.label;
+    return '<button type="button" class="leg' + (empty ? " empty" : "") + (on ? " on" : "") + '" data-v="' + s.label + '"' + (empty ? " disabled" : "") + '>' +
+      '<i class="dot" style="background:' + s.color + ';width:10px;height:10px;border-radius:3px"></i><span class="ten" title="' + s.label + '">' + (VSHORT[s.label] || s.label) + "</span><b>" + s.value + '</b><span class="pct">' + pct + '%</span><span class="caret">' + (empty ? "" : on ? "&#9662;" : "&#9656;") + "</span></button>";
+  }).join("");
+  document.querySelectorAll("#legend .leg:not(.empty)").forEach(function (b) { b.addEventListener("click", function () { toggleVerdict(b.dataset.v); }); });
+  renderDrill();
+}
+function toggleVerdict(v) { openVerdict = openVerdict === v ? null : v; renderDonut(); }
+function renderDrill() {
+  var el = document.getElementById("drill");
+  if (!openVerdict) { el.innerHTML = '<p class="hint">Click a verdict group to see the list of bots in that group.</p>'; return; }
+  var rows = scored.filter(function (b) { var k = CORE.indexOf(b.verdict) >= 0 ? b.verdict : V.IE; return k === openVerdict; })
+    .sort(function (a, b) { return b.risk - a.risk; });
+  var shown = rows.slice(0, 8), rest = rows.length - shown.length;
+  el.innerHTML = '<div class="drill"><div class="drill-h">' + verdictPill(openVerdict) + '<span style="font-size:11.5px;color:#9296a0">' + rows.length + " bots · sorted by risk score, descending</span></div>" +
+    '<table><thead><tr><th class="n">#</th><th>Bot</th><th>Code</th><th>Market</th><th class="n">Risk</th><th class="n">Quality</th></tr></thead><tbody>' +
+    shown.map(function (b, i) {
+      return '<tr class="rowlink" data-href="bot-report-redesign.html"><td class="n num" style="color:#9296a0">' + (i + 1) + '</td><td style="font-weight:600">' + esc(b.name) + '</td><td class="num" style="color:#9a5a08">' + b.code + "</td><td>" + b.venue_asset + '</td><td class="n num" style="font-weight:700;color:' + riskColor(b.risk) + '">' + b.risk.toFixed(0) + '</td><td class="n num">' + b.quality + "</td></tr>";
+    }).join("") + "</tbody></table>" +
+    '<div class="drill-f"><span>' + (rest > 0 ? rest + " more bots in this group." : "") + '</span><button class="btn" id="seeAll">Open full group in bot list &rarr;</button></div></div>';
+  bindRowLinks(el);
+  document.getElementById("seeAll").addEventListener("click", function () {
+    query = openVerdict; activeCat = "all"; document.getElementById("botSearch").value = query; renderBots(); showView("bots");
+  });
+}
+
+(function renderBars() {
+  var width = 380, height = 320, lp = 26, rp = 18, tp = 34, bp = 50, pw = width - lp - rp, ph = height - tp - bp;
+  var maxV = Math.max.apply(null, buckets.concat([1])), n = bucketDefs.length, colW = pw / n, barW = Math.min(44, colW * 0.56);
+  var pts = bucketDefs.map(function (b, i) { var v = buckets[i], bh = v / maxV * ph, cx = lp + colW * i + colW / 2; return { b: b, v: v, cx: cx, bh: bh, cy: tp + ph - bh }; });
+  var out = '<line x1="' + lp + '" y1="' + (tp + ph) + '" x2="' + (lp + pw) + '" y2="' + (tp + ph) + '" stroke="#e5e7eb"/>';
+  pts.forEach(function (p) { out += '<rect x="' + (p.cx - barW / 2) + '" y="' + p.cy + '" width="' + barW + '" height="' + Math.max(p.v > 0 ? 3 : 0, p.bh) + '" rx="6" fill="' + p.b.color + '" opacity="' + (p.v > 0 ? 0.9 : 0.25) + '"><title>' + p.b.sub + " (" + p.b.label + "): " + p.v + " bot</title></rect>"; });
+  out += '<path d="' + monotone(pts.map(function (p) { return [p.cx, p.cy]; })) + '" fill="none" stroke="#14161a" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.55"/>';
+  pts.forEach(function (p) {
+    out += '<circle cx="' + p.cx + '" cy="' + p.cy + '" r="3.5" fill="#fff" stroke="#14161a" stroke-width="1.5"/>';
+    out += '<text x="' + p.cx + '" y="' + (p.cy - 12) + '" text-anchor="middle" font-size="13" font-weight="700" fill="#14161a" font-family="IBM Plex Sans">' + p.v + "</text>";
+    out += '<text x="' + p.cx + '" y="' + (tp + ph + 18) + '" text-anchor="middle" font-size="11.5" fill="#40444d" font-family="IBM Plex Mono">' + p.b.label + "</text>";
+    out += '<text x="' + p.cx + '" y="' + (tp + ph + 33) + '" text-anchor="middle" font-size="11" fill="#9296a0" font-family="IBM Plex Sans">' + p.b.sub + "</text>";
+  });
+  document.getElementById("barsSvg").innerHTML = out;
+})();
+/* Fritsch–Carlson monotone cubic, same as AdminOverview.jsx: never overshoots the data. */
+function monotone(pts) {
+  var n = pts.length; if (n < 2) return ""; var dx = [], s = [], m = new Array(n), i;
+  for (i = 0; i < n - 1; i++) { var h = pts[i + 1][0] - pts[i][0]; dx.push(h); s.push(h === 0 ? 0 : (pts[i + 1][1] - pts[i][1]) / h); }
+  m[0] = s[0]; m[n - 1] = s[n - 2]; for (i = 1; i < n - 1; i++) m[i] = (s[i - 1] + s[i]) / 2;
+  for (i = 0; i < n - 1; i++) {
+    if (s[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+    var a = m[i] / s[i], b = m[i + 1] / s[i], q = a * a + b * b;
+    if (q > 9) { var t = 3 / Math.sqrt(q); m[i] = t * a * s[i]; m[i + 1] = t * b * s[i]; }
+  }
+  var d = "M " + pts[0][0] + " " + pts[0][1];
+  for (i = 0; i < n - 1; i++) { var hh = dx[i] / 3; d += " C " + (pts[i][0] + hh) + " " + (pts[i][1] + m[i] * hh) + " " + (pts[i + 1][0] - hh) + " " + (pts[i + 1][1] - m[i + 1] * hh) + " " + pts[i + 1][0] + " " + pts[i + 1][1]; }
+  return d;
+}
+
+(function renderVeto() {
+  var c = {};
+  BOTS.forEach(function (b) { b.veto_reasons.forEach(function (r) { c[r] = (c[r] || 0) + 1; }); });
+  var rows = Object.keys(c).map(function (k) { return { label: k, value: c[k] }; }).sort(function (a, b) { return b.value - a.value; }).slice(0, 6);
+  document.getElementById("vetoNote").textContent = rows.length ? rows.length + " notable reasons" : "";
+  if (!rows.length) { document.getElementById("vetoList").innerHTML = '<div class="msg">No veto reasons recorded in the current bot list.</div>'; return; }
+  var max = rows[0].value;
+  document.getElementById("vetoList").innerHTML = rows.map(function (r) {
+    return '<div class="veto-row"><span style="font-size:13px">' + esc(r.label) + '</span><span class="veto-track"><span class="veto-fill" style="display:block;width:' + (r.value / max * 100) + '%"></span></span><span class="num" style="font-size:13px;font-weight:700;text-align:right">' + r.value + '</span><span class="num" style="font-size:11.5px;color:#9296a0;text-align:right">' + Math.round(r.value / vetoCount * 100) + "% of vetoed</span></div>";
+  }).join("");
+})();
+
+/* ---------------- BOT LIST ---------------- */
+var query = "", activeCat = "all", sortKey = "risk", sortDir = "desc", page = 1, size = 10;
+var CATS = [
+  { key: "all", label: "All", color: null, test: function () { return true; } },
+  { key: "low_good", label: "Low Drawdown · Good", color: VCOLOR[V.LG], test: function (b) { return b.verdict === V.LG; } },
+  { key: "high_good", label: "High Drawdown · Good", color: VCOLOR[V.HG], test: function (b) { return b.verdict === V.HG; } },
+  { key: "high_weak", label: "High Drawdown · Weak", color: VCOLOR[V.HW], test: function (b) { return b.verdict === V.HW; } },
+  { key: "hidden", label: "Hidden Risk", color: VCOLOR[V.HR], test: function (b) { return b.verdict === V.HR; } },
+  { key: "losing", label: "Net Losing", color: "#af3327", test: function (b) { return b.total_pnl < 0; } }
+];
+var COLS = [
+  { key: "name", label: "Bot Name", get: function (b) { return b.name; } },
+  { key: "code", label: "Bot Code", get: function (b) { return b.code; } },
+  { key: "venue_asset", label: "Pair", get: function (b) { return b.venue_asset; } },
+  { key: "verdict", label: "Verdict", get: function (b) { return b.verdict; } },
+  { key: "risk", label: "Risk Score", n: true, get: function (b) { return b.risk; } },
+  { key: "quality", label: "Quality", n: true, get: function (b) { return b.quality; } },
+  { key: "confidence", label: "Confidence", n: true, get: function (b) { return b.confidence; } },
+  { key: "trade_count", label: "Trades", n: true, get: function (b) { return b.trade_count; } },
+  { key: "generated_at", label: "Scored", n: true, get: function (b) { return -b.hours_ago; } }
+];
+
+function visibleBots() {
+  var cat = CATS.filter(function (c) { return c.key === activeCat; })[0];
+  var needle = query.trim().toLowerCase();
+  var list = BOTS.filter(cat.test).filter(function (b) {
+    return !needle || [b.code, b.name, b.venue_asset, b.verdict].some(function (f) { return f.toLowerCase().indexOf(needle) >= 0; });
+  });
+  var col = COLS.filter(function (c) { return c.key === sortKey; })[0];
+  return list.sort(function (a, b) { var x = col.get(a), y = col.get(b); return (x < y ? -1 : x > y ? 1 : 0) * (sortDir === "asc" ? 1 : -1); });
+}
+
+function renderBots() {
+  document.getElementById("chips").innerHTML = CATS.map(function (c) {
+    var count = BOTS.filter(c.test).length;
+    return '<button class="chip' + (activeCat === c.key ? " active" : "") + '" data-cat="' + c.key + '">' + (c.color ? '<span class="dot" style="background:' + c.color + '"></span>' : "") + "<span>" + c.label + '</span><span class="chip-count">' + count + "</span></button>";
+  }).join("");
+  document.querySelectorAll("#chips .chip").forEach(function (b) { b.addEventListener("click", function () { activeCat = b.dataset.cat; page = 1; renderBots(); }); });
+
+  document.getElementById("botHead").innerHTML = COLS.map(function (c) {
+    var arrow = sortKey === c.key ? (sortDir === "asc" ? " &#9650;" : " &#9660;") : "";
+    return '<th class="sortable' + (c.n ? " n" : "") + '" data-sort="' + c.key + '">' + c.label + '<span style="font-size:9px">' + arrow + "</span></th>";
+  }).join("") + '<th style="text-align:center"></th>';
+  document.querySelectorAll("#botHead th[data-sort]").forEach(function (th) {
+    th.addEventListener("click", function () {
+      if (sortKey === th.dataset.sort) sortDir = sortDir === "asc" ? "desc" : "asc"; else { sortKey = th.dataset.sort; sortDir = "desc"; }
+      renderBots();
+    });
+  });
+
+  var rows = visibleBots(), total = rows.length, pages = Math.max(1, Math.ceil(total / size));
+  page = Math.min(Math.max(1, page), pages);
+  var slice = rows.slice((page - 1) * size, page * size);
+  document.getElementById("botNote").textContent = total + " / " + BOTS.length + " bot";
+  document.getElementById("botSearchClear").style.display = query ? "" : "none";
+
+  document.getElementById("botBody").innerHTML = slice.map(function (b) {
+    var stale = b.hours_ago > 24;
+    return '<tr class="rowlink' + (stale ? " row-stale" : "") + '" data-href="bot-report-redesign.html" title="View bot ' + b.code + ' details">' +
+      '<td style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis">' + esc(b.name) + "</td>" +
+      '<td class="num" style="color:#9a5a08;font-weight:500"><span style="display:inline-flex;align-items:center;gap:6px" title="' + b.code + '">' + b.code.slice(0, 8) + '&hellip;<button class="copy-btn" title="Copy bot code" data-copy="' + b.code + '">' + icon("copy").replace('width="15" height="15"', 'width="13" height="13"') + "</button></span></td>" +
+      '<td title="' + esc(b.venue_asset) + '"><span class="num">' + esc(b.venue_asset.split(" · ").pop()) + "</span></td><td>" + verdictPill(b.verdict) + "</td>" +
+      '<td class="n num"><span class="riskbar"><span class="track"><span class="fill" style="display:block;width:' + Math.min(100, b.risk) + "%;background:" + riskColor(b.risk) + '"></span></span><span style="font-weight:700;color:' + riskColor(b.risk) + ';min-width:24px;text-align:right">' + b.risk.toFixed(0) + "</span></span></td>" +
+      '<td class="n num">' + b.quality + '</td><td class="n num">' + b.confidence + '%</td><td class="n num">' + fmtInt(b.trade_count) + "</td>" +
+      '<td class="n num" style="color:#62666f;font-size:12px">' + stamp(b.hours_ago) + (stale ? ' <span class="pill pill-amber" style="font-size:10px;padding:1px 6px;margin-left:4px" title="Scored more than 24 hours ago">&gt;24h</span>' : "") + "</td>" +
+      '<td style="text-align:center"><span class="go" title="View report">&rarr;</span></td></tr>';
+  }).join("");
+  document.getElementById("botEmpty").innerHTML = total ? "" : '<div class="msg">No bots found matching the keyword "' + esc(query) + '".</div>';
+  bindRowLinks(document.getElementById("botBody"));
+  document.querySelectorAll("#botBody .copy-btn").forEach(function (b) {
+    b.addEventListener("click", function (e) { e.stopPropagation(); if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.copy); b.style.color = "#16794a"; });
+  });
+
+  var start = total ? (page - 1) * size + 1 : 0, end = Math.min(page * size, total);
+  document.getElementById("pager").innerHTML = total ? (
+    '<div class="pager-controls"><button class="btn" data-p="first"' + (page <= 1 ? " disabled" : "") + '>&laquo;</button><button class="btn" data-p="prev"' + (page <= 1 ? " disabled" : "") + '>&larr; Prev</button>' +
+    '<span style="padding:0 6px">Page <b>' + page + "</b> / <b>" + pages + '</b></span><button class="btn" data-p="next"' + (page >= pages ? " disabled" : "") + '>Next &rarr;</button><button class="btn" data-p="last"' + (page >= pages ? " disabled" : "") + ">&raquo;</button></div>" +
+    '<div style="display:flex;align-items:center;gap:8px"><span>Show</span><select id="pageSize" aria-label="Rows per page"><option value="10"' + (size === 10 ? " selected" : "") + '>10 rows</option><option value="20"' + (size === 20 ? " selected" : "") + '>20 rows</option><option value="50"' + (size === 50 ? " selected" : "") + ">50 rows</option></select></div>" +
+    "<span>Showing <b>" + start + "</b> – <b>" + end + "</b> of <b>" + total + "</b> bot</span>") : "";
+  document.querySelectorAll("#pager [data-p]").forEach(function (b) {
+    b.addEventListener("click", function () { var p = b.dataset.p; page = p === "first" ? 1 : p === "prev" ? page - 1 : p === "next" ? page + 1 : pages; renderBots(); });
+  });
+  var sel = document.getElementById("pageSize");
+  if (sel) sel.addEventListener("change", function () { size = Number(sel.value); page = 1; renderBots(); });
+}
+document.getElementById("botSearch").addEventListener("input", function (e) { query = e.target.value; page = 1; renderBots(); });
+document.getElementById("botSearchClear").addEventListener("click", function () { query = ""; document.getElementById("botSearch").value = ""; renderBots(); });
+
+function pfVerdictPill(v) {
+  if (v === "DIVERSIFIED") return '<span class="vpill" title="DIVERSIFIED"><i style="background:#17a565"></i>Diversified</span>';
+  if (v === "MODERATE") return '<span class="vpill" title="MODERATE_CO_MOVEMENT"><i style="background:#d08a1a"></i>Moderate co-movement</span>';
+  return '<span class="vpill" title="HIGH_CORRELATION_CLUSTER"><i style="background:#d04a3c"></i>High correlation</span>';
+}
+function renderPortfolios() {
+  var q = document.getElementById("pfSearch").value.trim().toLowerCase();
+  var rows = PORTFOLIOS.filter(function (p) { return !q || p.id.toLowerCase().indexOf(q) >= 0 || p.verdict.toLowerCase().indexOf(q) >= 0 || p.members.some(function (m) { return m.toLowerCase().indexOf(q) >= 0; }); });
+  document.getElementById("pfNote").textContent = rows.length + " / " + PORTFOLIOS.length + " portfolios";
+  document.getElementById("pfBody").innerHTML = rows.map(function (p) {
+    var corrColor = p.avg >= 0.6 ? "#af3327" : p.avg >= 0.3 ? "#b8720a" : "#16794a";
+    return '<tr class="' + (p.available ? "rowlink" : "") + '"' + (p.available ? ' data-href="portfolio-report-redesign.html"' : ' style="opacity:.62" title="The rendered report for this run is no longer on disk. Re-run the same bot codes to rebuild it."') + ">" +
+      '<td class="num" style="font-weight:700;color:#2454e0">' + p.id + "</td>" +
+      '<td title="' + esc(p.members.join(", ")) + '"><span class="mstack">' + p.members.map(function (m, i) { return '<i style="background:' + ["#f7931a", "#627eea", "#9945ff", "#3a3f47", "#ba9f33"][i % 5] + '">' + esc(m[0]) + "</i>"; }).join("") + '</span><span style="font-weight:600">' + esc(p.members[0]) + '</span>' + (p.members.length > 1 ? ' <span style="color:#9296a0">+' + (p.members.length - 1) + "</span>" : "") + "</td>" +
+      '<td class="n num" style="font-weight:600">' + p.members.length + "</td><td>" + pfVerdictPill(p.verdict) + "</td>" +
+      '<td class="n num" style="font-weight:700;color:' + corrColor + '">' + p.avg.toFixed(2) + '</td><td class="n num" style="font-weight:700;color:' + riskColor(p.risk) + '">' + p.risk + "</td>" +
+      '<td class="n num">' + p.jointDD.toFixed(1) + '%</td><td class="n num" style="color:#62666f;font-size:12px">' + stamp(p.hours_ago) + "</td>" +
+      '<td style="text-align:center">' + (p.available ? '<span class="go" title="View portfolio report">&rarr;</span>' : '<button class="btn-link" data-rebuild="1">&#8635; Rebuild</button>') + "</td></tr>";
+  }).join("");
+  document.getElementById("pfEmpty").innerHTML = rows.length ? "" : '<div class="msg">No portfolio run matches this search.</div>';
+  bindRowLinks(document.getElementById("pfBody"));
+  document.querySelectorAll("#pfBody [data-rebuild]").forEach(function (b) {
+    b.addEventListener("click", function (e) { e.stopPropagation(); showView("analyze"); setState("pf-running"); });
+  });
+}
+document.getElementById("pfSearch").addEventListener("input", renderPortfolios);
+
+document.getElementById("cntSingle").textContent = BOTS.length;
+document.getElementById("cntPf").textContent = PORTFOLIOS.length;
+document.querySelectorAll("#subTabs .tab-btn").forEach(function (b) {
+  b.addEventListener("click", function () {
+    document.querySelectorAll("#subTabs .tab-btn").forEach(function (x) { x.classList.toggle("active", x === b); });
+    document.getElementById("sub-individual").style.display = b.dataset.sub === "individual" ? "" : "none";
+    document.getElementById("sub-portfolio").style.display = b.dataset.sub === "portfolio" ? "" : "none";
+  });
+});
+
+function bindRowLinks(root) {
+  root.querySelectorAll("tr[data-href]").forEach(function (tr) { tr.addEventListener("click", function () { location.href = tr.dataset.href; }); });
+}
+
+/* ---------------- ANALYZE BOT ---------------- */
+var PIPELINE = [
+  { t: "Load & verify OKX order book data", d: "Open positions, the last 100 filled orders, order-book integrity, trading cadence and AUM ratio." },
+  { t: "Related market analysis & volatility correlation", d: "Main traded pairs, 1H/4H/1D candles and depth, volatility regime, strategy drift." },
+  { t: "10-dimension risk scoring & Monte Carlo simulation", d: "10,000 simulated paths, bootstrap tests, tail risk (VaR/CVaR), liquidity risk, max drawdown." },
+  { t: "Verdict synthesis & report generation", d: "Safety score, risk classification, quantitative narrative, record saved." }
+];
+var PF_STEPS = [
+  { t: "Collect & reconcile each bot's order book from OKX", d: "Filled orders, open-position state and trading cadence for every member, fetched concurrently." },
+  { t: "Normalize time series & related market analysis", d: "PnL timelines aligned to common buckets; exposure overlap and active markets measured." },
+  { t: "Compute the correlation matrix (Pearson & Spearman)", d: "PnL correlation, rank correlation, p-values, false-diversification traps." },
+  { t: "Joint portfolio Monte Carlo (10,000 scenarios)", d: "Joint max drawdown, joint VaR/CVaR 95%, actual diversification benefit." }
+];
+function renderStepper(id, steps, activeIdx, doneAll) {
+  document.getElementById(id).innerHTML = steps.map(function (s, i) {
+    var done = doneAll || i < activeIdx, cur = !doneAll && i === activeIdx;
+    return '<div class="step ' + (done ? "done" : cur ? "active" : "") + '"><div class="bullet">' + (done ? "&#10003;" : cur ? '<span class="spinner"></span>' : i + 1) + '</div><div><div class="st">' + s.t + '</div><div class="sd">' + s.d + "</div></div></div>";
+  }).join("");
+}
+
+var timers = [];
+function clearTimers() { timers.forEach(clearTimeout); timers = []; if (window._tick) clearInterval(window._tick); }
+function logTime(sec) { var d = new Date(NOW.getTime() + sec * 1000); return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); }
+
+function setState(name) {
+  clearTimers();
+  document.querySelectorAll("#previewStates button").forEach(function (b) { b.classList.toggle("on", b.dataset.state === name); });
+  var map = { "input": "st-input", "summary-new": "st-summary", "summary-old": "st-summary", "confirm": "st-summary", "running": "st-running", "pf-confirm": "st-pf-confirm", "pf-running": "st-pf-running" };
+  document.querySelectorAll(".state").forEach(function (s) { s.classList.toggle("active", s.id === map[name]); });
+  document.getElementById("confirmModal").classList.toggle("open", name === "confirm");
+  var analyzed = name !== "summary-new";
+  document.getElementById("bannerOld").style.display = analyzed ? "" : "none";
+  document.getElementById("bannerNew").style.display = analyzed ? "none" : "";
+  document.getElementById("analyzeBtn").textContent = analyzed ? "Analyze this bot" : "Start analyzing this bot";
+  document.getElementById("analyzeBtn").onclick = function () { setState(analyzed ? "confirm" : "running"); };
+  if (name === "running") runSingle();
+  if (name === "pf-running") runPortfolio();
+}
+
+function runSingle() {
+  var log = document.getElementById("log"), elapsed = 0;
+  document.getElementById("runDone").style.display = "none";
+  log.innerHTML = "";
+  function add(text, cls, sec) { log.innerHTML += '<div><span class="log-time">[' + logTime(sec) + "]</span><span class=\"" + (cls || "") + "\">" + text + "</span></div>"; log.scrollTop = log.scrollHeight; }
+  add("Starting the quantitative assessment pipeline for bot [482991BA0C7E11F2] (Falcon Grid V3)...", "", 0);
+  add("STEP 1: connecting to the OKX API, loading open positions and order history...", "log-step", 0);
+  renderStepper("stepper", PIPELINE, 0, false);
+  document.getElementById("timer").textContent = "0s";
+  window._tick = setInterval(function () { elapsed++; document.getElementById("timer").textContent = elapsed + "s"; }, 1000);
+  [1, 2, 3].forEach(function (i) {
+    timers.push(setTimeout(function () { renderStepper("stepper", PIPELINE, i, false); add("Moving to stage: " + PIPELINE[i].t, "log-step", i * 2); }, i * 2000));
+  });
+  timers.push(setTimeout(function () {
+    renderStepper("stepper", PIPELINE, 4, true); add("Analysis completed successfully! Preparing the report.", "log-success", 8);
+    clearInterval(window._tick); document.getElementById("runDone").style.display = "";
+  }, 8000));
+}
+function runPortfolio() {
+  document.getElementById("pfDone").style.display = "none";
+  renderStepper("pfStepper", PF_STEPS, 0, false);
+  [1, 2, 3].forEach(function (i) { timers.push(setTimeout(function () { renderStepper("pfStepper", PF_STEPS, i, false); }, [0, 1800, 3800, 6000][i])); });
+  timers.push(setTimeout(function () { renderStepper("pfStepper", PF_STEPS, 4, true); document.getElementById("pfDone").style.display = ""; }, 8000));
+}
+
+document.querySelectorAll("#previewStates button").forEach(function (b) { b.addEventListener("click", function () { setState(b.dataset.state); }); });
+document.querySelectorAll("[data-go]").forEach(function (b) { b.addEventListener("click", function () { setState(b.dataset.go); }); });
+document.querySelectorAll("#confirmModal [data-close]").forEach(function (b) { b.addEventListener("click", function () { setState("summary-old"); }); });
+document.getElementById("confirmModal").addEventListener("click", function (e) { if (e.target.id === "confirmModal") setState("summary-old"); });
+
+function parseCodes(s) { return Array.from(new Set(s.trim().split(/[\s,;]+/).filter(Boolean))); }
+var codeInput = document.getElementById("codeInput");
+codeInput.addEventListener("input", function () {
+  var codes = parseCodes(codeInput.value), multi = codes.length > 1;
+  document.getElementById("codeClear").style.display = codeInput.value ? "" : "none";
+  var btn = document.getElementById("lookupBtn");
+  btn.disabled = !codes.length;
+  btn.textContent = multi ? "Look up portfolio (" + codes.length + ")" : "Look up bot";
+  document.getElementById("modeHint").innerHTML = multi
+    ? '<div class="notice notice-info"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex-shrink:0;margin-top:2px"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8.6" y1="10.7" x2="15.4" y2="7.3"/><line x1="8.6" y1="13.3" x2="15.4" y2="16.7"/></svg><div><div class="t">Portfolio mode detected (' + codes.length + ' bots)</div>Look up will switch to portfolio analysis to measure strategy correlation and joint risk.<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">' + codes.map(function (c, i) { return '<span class="code-chip">#' + (i + 1) + ": " + esc(c) + "</span>"; }).join("") + "</div></div></div>"
+    : '<div class="hintline"><span class="pill pill-flat">Hint</span><span>Enter <strong>1 ID</strong> for a single-bot analysis. For a portfolio, enter <strong>several IDs</strong> separated by commas or spaces.</span></div>';
+});
+document.getElementById("codeClear").addEventListener("click", function () { codeInput.value = ""; codeInput.dispatchEvent(new Event("input")); });
+document.getElementById("lookupForm").addEventListener("submit", function (e) {
+  e.preventDefault();
+  var codes = parseCodes(codeInput.value); if (!codes.length) return;
+  setState(codes.length > 1 ? "pf-confirm" : "summary-old");
+});
+
+/* ---------------- boot ---------------- */
+renderDonut();
+renderBots();
+renderPortfolios();
+codeInput.dispatchEvent(new Event("input"));
+var start = (location.hash || "#overview").slice(1);
+if (start === "portfolios") { showView("bots"); document.querySelector('#subTabs .tab-btn[data-sub="portfolio"]').click(); }
+else showView(["overview", "bots", "analyze"].indexOf(start) >= 0 ? start : "overview");
+</script>
+</body>
+</html>

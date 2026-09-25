@@ -1284,7 +1284,7 @@ table {
 
 th, td {
   text-align: left;
-  padding: 10px 16px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -1508,14 +1508,15 @@ td.mono {
 .tag {
   display: inline-block;
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 10px;
   letter-spacing: .06em;
-  padding: 3px 8px;
+  padding: 2px 6px;
   border: 1px solid var(--line-2);
   color: var(--ink-2);
-  border-radius: var(--radius-xs, 4px);
+  border-radius: 2px;
   background: var(--panel);
-  font-weight: 500;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .tag.run, .tag.trend {
@@ -2975,44 +2976,73 @@ button.viz-leg-pick:focus-visible {
   flex-shrink: 0;
 }
 
-.btn-subnav-back {
+/* Back / Re-analyze on their own row above the bot name (the row the
+   "MONITORING SYSTEM · ..." crumb used to take). */
+.report-head-actions-top {
+  margin-bottom: 14px;
+}
+
+.btn.btn-subnav-back {
   background: var(--panel-2, rgba(255, 255, 255, 0.05));
   color: var(--ink, #f1f5f9);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
-  font-weight: 600;
+  font-weight: 550;
   font-size: 13.5px;
   padding: 8px 16px;
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   cursor: pointer;
   user-select: none;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.btn-subnav-back:hover {
-  background: rgba(56, 189, 248, 0.12);
-  border-color: rgba(56, 189, 248, 0.4);
+.btn.btn-subnav-back .back-arrow {
+  display: inline-flex;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ink-3, #94a3b8);
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.btn.btn-subnav-back:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(56, 189, 248, 0.45);
   color: #38bdf8;
-  transform: translateX(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
-:root[data-theme="light"] .btn-subnav-back {
-  background: #ffffff;
-  color: #334155;
-  border: 1px solid #cbd5e1;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+.btn.btn-subnav-back:hover .back-arrow {
+  color: #38bdf8;
+  transform: translateX(-3px);
 }
 
-:root[data-theme="light"] .btn-subnav-back:hover {
-  background: #f8fafc;
-  border-color: #0284c7;
-  color: #0284c7;
-  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.15);
-  transform: translateX(-2px);
+/* Light Mode Harmonious Styling: Soft porcelain card, crisp slate typography, gentle hover */
+:root[data-theme="light"] .btn.btn-subnav-back {
+  background: #ffffff !important;
+  color: #334155 !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+:root[data-theme="light"] .btn.btn-subnav-back .back-arrow {
+  color: #64748b !important;
+}
+
+:root[data-theme="light"] .btn.btn-subnav-back:hover {
+  background: #f8fafc !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.08) !important;
+  transform: translateY(-1px);
+}
+
+:root[data-theme="light"] .btn.btn-subnav-back:hover .back-arrow {
+  color: #0284c7 !important;
+  transform: translateX(-3px);
 }
 
 .report-head-divider {
@@ -3028,6 +3058,13 @@ button.viz-leg-pick:focus-visible {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+/* Verdict chip ("DRAWDOWN: X · QUALITY: Y") on the bot-name row, pushed to
+   the right edge. The chip's own look (.report-verdict-chip / .verdict-chip)
+   comes from the report stylesheet the server ships with the document. */
+.report-head-verdict {
+  margin-left: auto;
 }
 
 .report-title-group h1 {
@@ -3049,15 +3086,15 @@ button.viz-leg-pick:focus-visible {
   color: var(--ink-2);
 }
 
+/* Plain text line under the bot name -- no box around it. */
 .report-snapshot-notice {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  padding: 10px 18px;
-  border-radius: var(--radius-sm);
-  background: rgba(59, 130, 246, 0.08);
-  border: 1px solid rgba(59, 130, 246, 0.25);
+  gap: 8px;
+  margin-top: 10px;
+  padding: 0;
+  background: none;
+  border: none;
   font-size: 13px;
   color: var(--ink-2);
   line-height: 1.5;
@@ -3128,9 +3165,17 @@ button.viz-leg-pick:focus-visible {
 }
 
 .bot-report-inner-main .stat-tile-hero:hover {
-  border-color: var(--accent) !important;
-  transform: translateY(-2px) !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+  border-color: var(--accent, #38bdf8) !important;
+  background: rgba(56, 189, 248, 0.04) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="light"] .bot-report-inner-main .stat-tile-hero:hover {
+  border-color: #0284c7 !important;
+  background: #f0f9ff !important;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 .bot-report-inner-main .stat-tile-hero .stat-value {
@@ -3298,6 +3343,108 @@ button.viz-leg-pick:focus-visible {
   padding: 24px 28px !important;
   box-shadow: var(--card-shadow) !important;
   margin-bottom: 24px !important;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+.bot-report-inner-main .card:hover {
+  transform: none !important;
+  box-shadow: var(--card-shadow) !important;
+  border-color: rgba(56, 189, 248, 0.45) !important;
+}
+
+:root[data-theme="light"] .bot-report-inner-main .card:hover {
+  transform: none !important;
+  box-shadow: var(--card-shadow) !important;
+  border-color: #0284c7 !important;
+}
+
+.bot-report-inner-main .card.card-danger:hover,
+.bot-report-inner-main .notice-danger:hover {
+  border-color: #ef4444 !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.bot-report-inner-main .card.card-warning:hover,
+.bot-report-inner-main .notice-warning:hover {
+  border-color: #f59e0b !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.bot-report-inner-main .card.card-safe:hover,
+.bot-report-inner-main .card.card-success:hover {
+  border-color: #10b981 !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* QRS items - hover with clean color accent, no protruding underlay */
+.bot-report-inner-main .qrs-item {
+  transition: border-color 0.2s ease, background-color 0.2s ease !important;
+}
+.bot-report-inner-main .qrs-item:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+.bot-report-inner-main .qrs-item.qrs-danger:hover {
+  border-color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.12) !important;
+}
+.bot-report-inner-main .qrs-item.qrs-warn:hover {
+  border-color: #f59e0b !important;
+  background: rgba(245, 158, 11, 0.12) !important;
+}
+.bot-report-inner-main .qrs-item.qrs-safe:hover {
+  border-color: #10b981 !important;
+  background: rgba(16, 185, 129, 0.12) !important;
+}
+
+/* Market specs, hero tiles, and evidence cards - hover with rich colors */
+.bot-report-inner-main .market-spec-item:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: #38bdf8 !important;
+  background: rgba(56, 189, 248, 0.05) !important;
+}
+:root[data-theme="light"] .bot-report-inner-main .market-spec-item:hover {
+  border-color: #0284c7 !important;
+  background: #f0f9ff !important;
+}
+
+.bot-report-inner-main .market-hero-card .stat-tile:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: #38bdf8 !important;
+  background: rgba(56, 189, 248, 0.04) !important;
+}
+:root[data-theme="light"] .bot-report-inner-main .market-hero-card .stat-tile:hover {
+  border-color: #0284c7 !important;
+  background: #f0f9ff !important;
+}
+
+.bot-report-inner-main .evidence-card:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: rgba(56, 189, 248, 0.45) !important;
+  background: rgba(56, 189, 248, 0.04) !important;
+}
+:root[data-theme="light"] .bot-report-inner-main .evidence-card:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: #0284c7 !important;
+  background: #f0f9ff !important;
+}
+
+.bot-report-inner-main .limited-evidence-row:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: #38bdf8 !important;
+  background: rgba(56, 189, 248, 0.03) !important;
+}
+:root[data-theme="light"] .bot-report-inner-main .limited-evidence-row:hover {
+  border-color: #0284c7 !important;
+  background: #f0f9ff !important;
 }
 
 .bot-report-inner-main .card h2 {
@@ -3370,9 +3517,10 @@ button.viz-leg-pick:focus-visible {
 }
 :root[data-theme="dark"] .bot-report-inner-main .conclusion-unified-box:hover,
 :root:not([data-theme="light"]) .bot-report-inner-main .conclusion-unified-box:hover {
-  border-color: rgba(245, 158, 11, 0.35) !important;
-  box-shadow: 0 10px 30px -4px rgba(0, 0, 0, 0.5), 0 0 16px rgba(245, 158, 11, 0.08) !important;
-  transform: translateY(-2px) !important;
+  border-color: var(--amber, #F59E0B) !important;
+  background: rgba(245, 158, 11, 0.04) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 :root[data-theme="light"] .bot-report-inner-main .conclusion-unified-box {
   background: #FFFFFF !important;
@@ -3380,9 +3528,10 @@ button.viz-leg-pick:focus-visible {
   box-shadow: 0 4px 18px -2px rgba(15, 23, 42, 0.06) !important;
 }
 :root[data-theme="light"] .bot-report-inner-main .conclusion-unified-box:hover {
-  border-color: #CBD5E1 !important;
-  box-shadow: 0 12px 32px -4px rgba(15, 23, 42, 0.12) !important;
-  transform: translateY(-2px) !important;
+  border-color: var(--amber, #D97706) !important;
+  background: #FFFDF5 !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
 .bot-report-inner-main .conclusion-badge {
@@ -4072,7 +4221,7 @@ svg .bar-value.val-neg {
   letter-spacing: 0.08em !important;
   padding: 10px 14px !important;
   border-bottom: 1px solid var(--line-2) !important;
-  text-align: left !important;
+  vertical-align: middle !important;
 }
 
 .bot-report-inner-main table td {
@@ -4080,6 +4229,77 @@ svg .bar-value.val-neg {
   border-bottom: 1px solid var(--line) !important;
   font-size: 13.5px !important;
   color: var(--ink) !important;
+  vertical-align: middle !important;
+}
+
+.bot-report-inner-main table th:first-child,
+.bot-report-inner-main table td:first-child {
+  text-align: left !important;
+}
+
+.bot-report-inner-main table th:not(:first-child),
+.bot-report-inner-main table td:not(:first-child) {
+  text-align: right !important;
+}
+
+.bot-report-inner-main .score-basis-table th:first-child,
+.bot-report-inner-main .score-basis-table td:first-child,
+.bot-report-inner-main .data-table th:first-child,
+.bot-report-inner-main .data-table td:first-child {
+  text-align: left !important;
+}
+
+.bot-report-inner-main .score-basis-table th:not(:first-child):not(:last-child),
+.bot-report-inner-main .score-basis-table td:not(:first-child):not(:last-child),
+.bot-report-inner-main .data-table th:not(:first-child):not(:last-child),
+.bot-report-inner-main .data-table td:not(:first-child):not(:last-child),
+.bot-report-inner-main .dim-col-num {
+  text-align: right !important;
+}
+
+.bot-report-inner-main .score-basis-table th:last-child,
+.bot-report-inner-main .score-basis-table td:last-child,
+.bot-report-inner-main .data-table th:last-child,
+.bot-report-inner-main .data-table td:last-child,
+.bot-report-inner-main .dim-col-status {
+  text-align: center !important;
+}
+
+.bot-report-inner-main .okx-trades-table thead th:nth-child(1),
+.bot-report-inner-main .okx-trades-table tbody td:nth-child(1) {
+  text-align: center !important;
+  width: 48px !important;
+}
+.bot-report-inner-main .okx-trades-table thead th:nth-child(2),
+.bot-report-inner-main .okx-trades-table tbody td:nth-child(2) {
+  text-align: left !important;
+}
+.bot-report-inner-main .okx-trades-table thead th:nth-child(3),
+.bot-report-inner-main .okx-trades-table tbody td:nth-child(3) {
+  text-align: left !important;
+}
+.bot-report-inner-main .okx-trades-table thead th:nth-child(4),
+.bot-report-inner-main .okx-trades-table tbody td:nth-child(4),
+.bot-report-inner-main .okx-trades-table thead th:nth-child(5),
+.bot-report-inner-main .okx-trades-table tbody td:nth-child(5) {
+  text-align: right !important;
+}
+.bot-report-inner-main .okx-trades-table thead th:nth-child(6),
+.bot-report-inner-main .okx-trades-table tbody td:nth-child(6) {
+  text-align: center !important;
+}
+
+.bot-report-inner-main #tai-san th:nth-child(1),
+.bot-report-inner-main #tai-san td:nth-child(1) {
+  text-align: left !important;
+}
+.bot-report-inner-main #tai-san th:nth-child(2),
+.bot-report-inner-main #tai-san td:nth-child(2) {
+  text-align: center !important;
+}
+.bot-report-inner-main #tai-san th:nth-child(n+3),
+.bot-report-inner-main #tai-san td:nth-child(n+3) {
+  text-align: right !important;
 }
 
 .bot-report-inner-main table tr:hover td {
@@ -4111,14 +4331,15 @@ input[name="main_tabs"] {
 /* Growth dashboard: 2-column layout (left: Cumulative capital curve, right: stacked donut pies) */
 .growth-dashboard-grid {
   display: grid !important;
-  grid-template-columns: 1.35fr 1fr !important;
-  gap: 20px !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 24px !important;
   align-items: stretch !important;
 }
 
 @media (max-width: 992px) {
   .growth-dashboard-grid {
     grid-template-columns: 1fr !important;
+    gap: 20px !important;
   }
 }
 
@@ -4136,7 +4357,7 @@ input[name="main_tabs"] {
 }
 
 .growth-chart-wrapper {
-  flex: 1 0 auto !important;
+  flex: 1 1 auto !important;
   display: flex !important;
   flex-direction: column !important;
   justify-content: center !important;
@@ -4158,9 +4379,11 @@ input[name="main_tabs"] {
 .pie-stack-vertical {
   display: flex !important;
   flex-direction: column !important;
-  gap: 16px !important;
-  margin-top: 8px !important;
-  flex: 1 0 auto !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin-top: 0 !important;
+  height: 100% !important;
+  flex: 1 1 auto !important;
 }
 
 .growth-curve-panel > .theory,
@@ -4170,10 +4393,11 @@ input[name="main_tabs"] {
 }
 
 .pie-card-stacked {
-  background: var(--panel-2, rgba(255, 255, 255, 0.03)) !important;
-  border: 1px solid var(--line, rgba(255, 255, 255, 0.08)) !important;
-  border-radius: 10px !important;
-  padding: 16px !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
 }
 
 .pie-card-stacked h4 {
@@ -4301,17 +4525,15 @@ input[name="main_tabs"] {
   text-align: left !important;
 }
 .param-horizontal-name .metric-label-row .formula-star-btn {
-  flex: 0 0 16px !important;
-  width: 16px !important;
+  flex: 0 0 14px !important;
+  width: 14px !important;
+  height: 14px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   margin-left: auto !important;
   margin-right: 4px !important;
-  text-align: center !important;
-  color: var(--accent, #38BDF8) !important;
-  font-size: 13px !important;
-  font-weight: 700 !important;
+  /* font-size/weight/color inherited from .formula-star-btn base */
 }
 .param-horizontal-val {
   font-family: var(--mono, monospace);
@@ -4355,64 +4577,70 @@ input[name="main_tabs"] {
 }
 #so-lieu table td:first-child .metric-label-row .formula-star-btn,
 #suy-luan table td:first-child .metric-label-row .formula-star-btn {
-  flex: 0 0 16px !important;
-  width: 16px !important;
+  flex: 0 0 14px !important;
+  width: 14px !important;
+  height: 14px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   margin-left: auto !important;
   margin-right: 4px !important;
-  text-align: center !important;
-  color: var(--accent, #38BDF8) !important;
-  font-size: 13px !important;
-  font-weight: 700 !important;
+  /* font-size/weight/color inherited from .formula-star-btn base */
 }
 
 /* Formula Star Button - clean naked asterisk */
+/* ─── Formula star (*) — thẳng hàng hoàn toàn với text ─── */
 .formula-star-btn {
-  display: inline-block !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 14px !important;
+  height: 14px !important;
+  line-height: 0 !important;            /* kills inline line-height inflation */
+  vertical-align: middle !important;
   background: transparent !important;
   border: none !important;
-  border-radius: 0 !important;
+  border-radius: 3px !important;
   box-shadow: none !important;
   outline: none !important;
   color: var(--accent, #38BDF8) !important;
-  font-size: 13px !important;
-  font-weight: 700 !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
   cursor: pointer !important;
-  line-height: 1 !important;
-  padding: 0 1px !important;
+  padding: 0 !important;
   margin: 0 0 0 3px !important;
-  width: auto !important;
-  height: auto !important;
-  min-width: 0 !important;
-  min-height: 0 !important;
-  vertical-align: baseline !important;
-  transition: color 0.15s ease !important;
+  flex-shrink: 0 !important;
+  opacity: 0.7 !important;
+  transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease !important;
   transform: none !important;
+  position: relative !important;
+  top: -1px !important;                 /* optical nudge: aligns to cap-height */
 }
 .formula-star-btn:hover,
 .formula-star-btn:focus-visible {
-  background: transparent !important;
+  background: rgba(56, 189, 248, 0.13) !important;
   border: none !important;
-  border-radius: 0 !important;
+  border-radius: 3px !important;
   box-shadow: none !important;
   outline: none !important;
   transform: none !important;
   color: #7dd3fc !important;
-  text-decoration: underline !important;
+  opacity: 1 !important;
+  text-decoration: none !important;
 }
 :root[data-theme="light"] .formula-star-btn {
   background: transparent !important;
   border: none !important;
   color: #0284c7 !important;
+  opacity: 0.65 !important;
 }
 :root[data-theme="light"] .formula-star-btn:hover,
 :root[data-theme="light"] .formula-star-btn:focus-visible {
-  background: transparent !important;
+  background: rgba(2, 132, 199, 0.1) !important;
   border: none !important;
   transform: none !important;
   color: #0369a1 !important;
+  opacity: 1 !important;
 }
 
 /* Drawdown vs. capital & Most recent closed trades full width */
@@ -4427,22 +4655,33 @@ input[name="main_tabs"] {
   overflow-x: auto !important;
 }
 
-/* Metric tables in Trade metrics and Statistical inference */
+/* Metric tables in Trade metrics, Statistical inference, and Drawdown vs. capital */
 #so-lieu table,
-#suy-luan table {
+#suy-luan table,
+#sut-giam-von table {
   width: 100% !important;
   table-layout: fixed !important;
+}
+#so-lieu th, #so-lieu td,
+#suy-luan th, #suy-luan td,
+#sut-giam-von th, #sut-giam-von td {
+  vertical-align: middle !important;
 }
 #so-lieu table th:first-child,
 #so-lieu table td:first-child,
 #suy-luan table th:first-child,
-#suy-luan table td:first-child {
+#suy-luan table td:first-child,
+#sut-giam-von table th:first-child,
+#sut-giam-von table td:first-child {
   width: 68% !important;
+  text-align: left !important;
 }
 #so-lieu table th:last-child,
 #so-lieu table td:last-child,
 #suy-luan table th:last-child,
-#suy-luan table td:last-child {
+#suy-luan table td:last-child,
+#sut-giam-von table th:last-child,
+#sut-giam-von table td:last-child {
   width: 32% !important;
   text-align: right !important;
 }
@@ -4863,7 +5102,7 @@ input[name="main_tabs"] {
   border-color: #d97706 !important;
 }
 :root[data-theme="light"] .cov-warning-head {
-  color: #b45309 !important;
+  color: #ca8a04 !important;
 }
 :root[data-theme="light"] .cov-warning-body {
   color: #1e293b !important;
@@ -4871,11 +5110,11 @@ input[name="main_tabs"] {
 :root[data-theme="light"] .cov-dim-pill {
   background: #fef3c7 !important;
   border-color: #fde68a !important;
-  color: #92400e !important;
+  color: #ca8a04 !important;
 }
 :root[data-theme="light"] .cov-dim-pill:hover {
   background: #fde68a !important;
-  color: #78350f !important;
+  color: #ca8a04 !important;
 }
 
 /* Multi-horizon comparison matrix */
@@ -4891,14 +5130,24 @@ input[name="main_tabs"] {
   margin-bottom: 0.65rem !important;
   box-sizing: border-box !important;
 }
+/* ─── Multi-horizon comparison table ─── */
 .hz-matrix-table {
   width: 100% !important;
-  min-width: 320px !important;
+  min-width: 540px !important;
   border-collapse: collapse !important;
   font-size: 12px !important;
-  table-layout: auto !important;
+  table-layout: fixed !important;   /* Fixed layout = headers and cells always aligned */
   margin: 0 !important;
 }
+/* Column widths — must sum to 100% */
+.hz-matrix-table .col-hz       { width: 9% !important; }
+.hz-matrix-table .col-sample   { width: 8% !important; }
+.hz-matrix-table .col-pop      { width: 23% !important; }  /* widest: has progress bar */
+.hz-matrix-table .col-med      { width: 10% !important; }
+.hz-matrix-table .col-range    { width: 20% !important; }
+.hz-matrix-table .col-dd       { width: 10% !important; }
+.hz-matrix-table .col-loss-ruin{ width: 20% !important; }
+
 .hz-matrix-table th {
   background: rgba(255, 255, 255, 0.035) !important;
   color: var(--muted, #94a3b8) !important;
@@ -4909,6 +5158,18 @@ input[name="main_tabs"] {
   letter-spacing: 0.05em !important;
   padding: 8px 10px !important;
   border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08)) !important;
+  vertical-align: middle !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
+}
+/* Make th inner content flex so * star stays on same line as label */
+.hz-matrix-table th > span,
+.hz-matrix-table th > .th-label-wrap {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  white-space: nowrap !important;
 }
 .hz-matrix-table td {
   padding: 8px 10px !important;
@@ -4916,6 +5177,8 @@ input[name="main_tabs"] {
   color: var(--ink, #e2e8f0) !important;
   font-size: 12px !important;
   vertical-align: middle !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 .hz-matrix-row {
   transition: background 0.15s ease !important;
@@ -4926,23 +5189,21 @@ input[name="main_tabs"] {
 .hz-matrix-table tr:last-child td {
   border-bottom: none !important;
 }
-.hz-matrix-table .col-hz {
-  width: 22% !important;
-  text-align: left !important;
-}
-.hz-matrix-table .col-sample {
-  width: 18% !important;
-  text-align: left !important;
-}
-.hz-matrix-table .col-pop {
-  width: 34% !important;
-  text-align: left !important;
-}
-.hz-matrix-table .col-loss-ruin {
-  width: 26% !important;
-  text-align: right !important;
-  white-space: nowrap !important;
-}
+/* Text alignment — header matches data cell */
+.hz-matrix-table th.col-hz,
+.hz-matrix-table td.col-hz     { text-align: left !important; }
+.hz-matrix-table th.col-sample,
+.hz-matrix-table td.col-sample { text-align: right !important; }
+.hz-matrix-table th.col-pop,
+.hz-matrix-table td.col-pop    { text-align: left !important; }  /* bar starts left */
+.hz-matrix-table th.col-med,
+.hz-matrix-table td.col-med    { text-align: right !important; }
+.hz-matrix-table th.col-range,
+.hz-matrix-table td.col-range  { text-align: center !important; }
+.hz-matrix-table th.col-dd,
+.hz-matrix-table td.col-dd     { text-align: right !important; }
+.hz-matrix-table th.col-loss-ruin,
+.hz-matrix-table td.col-loss-ruin { text-align: center !important; white-space: nowrap !important; }
 .hz-pill {
   display: inline-block !important;
   font-family: var(--mono) !important;
@@ -5206,6 +5467,7 @@ input[name="main_tabs"] {
   letter-spacing: 0.05em !important;
   padding: 8px 10px !important;
   border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08)) !important;
+  vertical-align: middle !important;
 }
 .kp-table td {
   padding: 8px 10px !important;
@@ -5283,7 +5545,7 @@ input[name="main_tabs"] {
 :root[data-theme="light"] .hz-insight-decay {
   background: #fef2f2 !important;
   border-color: #fecaca !important;
-  color: #991b1b !important;
+  color: #dc2626 !important;
 }
 :root[data-theme="light"] .hz-insight-decay strong {
   color: #b91c1c !important;
@@ -5291,10 +5553,10 @@ input[name="main_tabs"] {
 :root[data-theme="light"] .hz-insight-warn {
   background: #fffbeb !important;
   border-color: #fde68a !important;
-  color: #92400e !important;
+  color: #ca8a04 !important;
 }
 :root[data-theme="light"] .hz-insight-warn strong {
-  color: #b45309 !important;
+  color: #ca8a04 !important;
 }
 :root[data-theme="light"] .hz-insight-positive {
   background: #f0fdf4 !important;
@@ -5490,6 +5752,498 @@ input[name="main_tabs"] {
   background: #f1f5f9 !important;
 }
 
+/* ==========================================================================
+   Limited Bot - Synthesised Public Data Bento Presentation
+   ========================================================================== */
+.synthesised-bento-card {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 16px !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="light"] .synthesised-bento-card {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.synthesised-bento-card:hover {
+  border: none !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="light"] .synthesised-bento-card:hover {
+  border: none !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.synthesised-header-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: wrap !important;
+  gap: 10px !important;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.06)) !important;
+  padding-bottom: 12px !important;
+}
+
+:root[data-theme="light"] .synthesised-header-row {
+  border-bottom-color: #f1f5f9 !important;
+}
+
+.synthesised-badge-group {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-wrap: wrap !important;
+}
+
+.badge-synthesised {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: #38bdf8 !important;
+  background: rgba(56, 189, 248, 0.12) !important;
+  border: 1px solid rgba(56, 189, 248, 0.3) !important;
+  border-radius: 4px !important;
+  padding: 3px 8px !important;
+}
+
+:root[data-theme="light"] .badge-synthesised {
+  color: #0284c7 !important;
+  background: #e0f2fe !important;
+  border-color: #bae6fd !important;
+}
+
+.badge-tag-withheld {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: #f59e0b !important;
+  background: rgba(245, 158, 11, 0.12) !important;
+  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+  border-radius: 4px !important;
+  padding: 3px 8px !important;
+}
+
+:root[data-theme="light"] .badge-tag-withheld {
+  color: #d97706 !important;
+  background: #fef3c7 !important;
+  border-color: #fde68a !important;
+}
+
+.synthesised-subtitle {
+  font-size: 12px !important;
+  color: var(--muted, #94a3b8) !important;
+  font-weight: 500 !important;
+}
+
+:root[data-theme="light"] .synthesised-subtitle {
+  color: #64748b !important;
+}
+
+.synthesised-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) !important;
+  gap: 14px !important;
+}
+
+.synthesised-metric-tile {
+  background: rgba(255, 255, 255, 0.025) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+  padding: 14px 16px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  transition: border-color 0.2s ease, background 0.2s ease !important;
+}
+
+:root[data-theme="light"] .synthesised-metric-tile {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+.synthesised-metric-tile:hover {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="light"] .synthesised-metric-tile:hover {
+  border-color: #e2e8f0 !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.synthesised-metric-label {
+  font-family: var(--mono) !important;
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.07em !important;
+  color: var(--ink-3, #94a3b8) !important;
+}
+
+:root[data-theme="light"] .synthesised-metric-label {
+  color: #64748b !important;
+}
+
+.synthesised-metric-val {
+  font-family: var(--mono) !important;
+  font-size: 26px !important;
+  font-weight: 800 !important;
+  line-height: 1.15 !important;
+  color: var(--ink, #ffffff) !important;
+  margin: 4px 0 2px 0 !important;
+}
+
+:root[data-theme="light"] .synthesised-metric-val {
+  color: #0f172a !important;
+}
+
+.synthesised-metric-val.val-safe {
+  color: #10b981 !important;
+}
+
+.synthesised-metric-val.val-danger {
+  color: #f43f5e !important;
+}
+
+.synthesised-metric-sub {
+  font-size: 12px !important;
+  color: var(--ink-2, #cbd5e1) !important;
+  font-weight: 500 !important;
+  margin-top: 2px !important;
+}
+
+:root[data-theme="light"] .synthesised-metric-sub {
+  color: #64748b !important;
+}
+
+.synthesised-metric-tag {
+  display: inline-block !important;
+  align-self: flex-start !important;
+  margin-top: 8px !important;
+  font-family: var(--mono) !important;
+  font-size: 9.5px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  color: var(--ink-3, #94a3b8) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+:root[data-theme="light"] .synthesised-metric-tag {
+  color: #64748b !important;
+  background: #e2e8f0 !important;
+}
+
+.synthesised-metric-tag.tag-warning {
+  color: #f59e0b !important;
+  background: rgba(245, 158, 11, 0.1) !important;
+}
+
+:root[data-theme="light"] .synthesised-metric-tag.tag-warning {
+  color: #ca8a04 !important;
+  background: #fef3c7 !important;
+}
+
+.synthesised-notice {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 10px !important;
+  padding: 10px 14px !important;
+  border-radius: 8px !important;
+  background: rgba(245, 158, 11, 0.06) !important;
+  border: 1px solid rgba(245, 158, 11, 0.2) !important;
+  font-size: 12.5px !important;
+  line-height: 1.5 !important;
+  color: #fde68a !important;
+}
+
+:root[data-theme="light"] .synthesised-notice {
+  background: #fffbeb !important;
+  border-color: #fde68a !important;
+  color: #ca8a04 !important;
+}
+
+.synthesised-notice .notice-icon {
+  font-size: 14px !important;
+  line-height: 1.4 !important;
+}
+
+.synthesised-notice .notice-body strong {
+  color: #f59e0b !important;
+  font-weight: 700 !important;
+}
+
+:root[data-theme="light"] .synthesised-notice .notice-body strong {
+  color: #ca8a04 !important;
+}
+
+/* ==========================================================================
+   Limited Scope Callout (Thay thế raw text ném vào khung)
+   ========================================================================== */
+.limited-scope-callout {
+  background: rgba(245, 158, 11, 0.05) !important;
+  border: 1px solid rgba(245, 158, 11, 0.25) !important;
+  border-radius: var(--radius-md, 10px) !important;
+  padding: 16px 20px !important;
+  margin-top: 14px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  transition: border-color 0.2s ease, background 0.2s ease !important;
+}
+
+:root[data-theme="light"] .limited-scope-callout {
+  background: #fffbeb !important;
+  border-color: #fde68a !important;
+}
+
+.limited-scope-callout:hover {
+  border-color: #f59e0b !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.scope-callout-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  border-bottom: 1px solid rgba(245, 158, 11, 0.15) !important;
+  padding-bottom: 10px !important;
+}
+
+:root[data-theme="light"] .scope-callout-header {
+  border-bottom-color: #fef3c7 !important;
+}
+
+.scope-title-badge {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.scope-icon {
+  font-size: 15px !important;
+}
+
+.scope-status-pill {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: #f59e0b !important;
+}
+
+:root[data-theme="light"] .scope-status-pill {
+  color: #ca8a04 !important;
+}
+
+.scope-bot-id {
+  font-family: var(--mono) !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  color: var(--ink-3, #94a3b8) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  padding: 2px 8px !important;
+  border-radius: 4px !important;
+}
+
+:root[data-theme="light"] .scope-bot-id {
+  color: #64748b !important;
+  background: #f1f5f9 !important;
+}
+
+.scope-callout-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+}
+
+.scope-callout-item {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 10px !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+
+.scope-item-bullet.bullet-warn {
+  color: #f59e0b !important;
+  font-size: 12px !important;
+  line-height: 1.6 !important;
+}
+
+.scope-item-bullet.bullet-info {
+  color: #38bdf8 !important;
+  font-size: 12px !important;
+  line-height: 1.6 !important;
+}
+
+.scope-item-text {
+  color: var(--ink, #ffffff) !important;
+  flex: 1 !important;
+}
+
+:root[data-theme="light"] .scope-item-text {
+  color: #334155 !important;
+}
+
+.scope-item-text strong {
+  color: #f59e0b !important;
+  font-weight: 600 !important;
+}
+
+:root[data-theme="light"] .scope-item-text strong {
+  color: #ca8a04 !important;
+}
+
+/* ==========================================================================
+   Score Theory Toolbar (Thanh công cụ giải thích điểm số & phương pháp luận)
+   ========================================================================== */
+.score-theory-toolbar {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+  margin-top: 0.75rem !important;
+  margin-bottom: 1rem !important;
+  width: 100% !important;
+}
+
+.score-theory-toolbar details.theory {
+  margin-top: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  width: 100% !important;
+  flex: none !important;
+  min-width: 0 !important;
+}
+
+.score-theory-toolbar details.theory summary {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  padding: 8px 14px !important;
+  border-radius: 8px !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  transition: all 0.2s ease !important;
+  box-sizing: border-box !important;
+}
+
+/* Score basis button styling */
+.score-theory-toolbar details.score-basis summary {
+  background: rgba(56, 189, 248, 0.07) !important;
+  border: 1px solid rgba(56, 189, 248, 0.25) !important;
+  color: #38bdf8 !important;
+}
+
+:root[data-theme="light"] .score-theory-toolbar details.score-basis summary {
+  background: #f0f9ff !important;
+  border: 1px solid #bae6fd !important;
+  color: #0284c7 !important;
+}
+
+.score-theory-toolbar details.score-basis summary:hover {
+  background: rgba(56, 189, 248, 0.14) !important;
+  border-color: #38bdf8 !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="light"] .score-theory-toolbar details.score-basis summary:hover {
+  background: #e0f2fe !important;
+  border-color: #0284c7 !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Methodology button styling */
+.score-theory-toolbar details.theory:not(.score-basis) summary {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: var(--ink-2, #cbd5e1) !important;
+}
+
+:root[data-theme="light"] .score-theory-toolbar details.theory:not(.score-basis) summary {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  color: #475569 !important;
+}
+
+.score-theory-toolbar details.theory:not(.score-basis) summary:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: var(--ink, #ffffff) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="light"] .score-theory-toolbar details.theory:not(.score-basis) summary:hover {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.sb-summary-label,
+.th-summary-label {
+  flex: 1 !important;
+}
+
+.sb-summary-toggle,
+.th-summary-toggle {
+  font-size: 11px !important;
+  opacity: 0.7 !important;
+  transition: transform 0.2s ease !important;
+}
+
+details[open] .sb-summary-toggle,
+details[open] .th-summary-toggle {
+  transform: rotate(180deg) !important;
+}
+
+.score-theory-toolbar details.theory .theory-body {
+  margin-top: 10px !important;
+  padding: 14px 16px !important;
+  background: var(--panel-2, #0b111e) !important;
+  border: 1px solid var(--line-2, rgba(255, 255, 255, 0.08)) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
+}
+
+:root[data-theme="light"] .score-theory-toolbar details.theory .theory-body {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06) !important;
+}
+
 .bot-report-inner-main .mc-pair-cell details.theory,
 .bot-report-inner-main .mc-full-row details.theory,
 .mc-pair-cell details.theory,
@@ -5532,6 +6286,66 @@ input[name="main_tabs"] {
 :root[data-theme="light"] .bot-report-inner-main .mc-pair-cell h3,
 :root[data-theme="light"] .mc-pair-cell h3 {
   color: #0f172a !important;
+}
+
+/* ==========================================================================
+   Monte Carlo - Remove Double Nested Border / Double Hover
+   The outer card <section class="card" id="monte-carlo"> acts as the single
+   overall card and hover container. All inner rows/panels sit cleanly inside.
+   ========================================================================== */
+.bot-report-inner-main #monte-carlo .mc-full-row,
+.bot-report-inner-main #monte-carlo .mc-pair-cell,
+.bot-report-inner-main #monte-carlo .mc-unified-panel,
+.bot-report-inner-main #monte-carlo .mc-spec-panel,
+.bot-report-inner-main #monte-carlo .subsection {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin-bottom: 1.5rem !important;
+}
+
+.bot-report-inner-main #monte-carlo .mc-full-row:hover,
+.bot-report-inner-main #monte-carlo .mc-pair-cell:hover,
+.bot-report-inner-main #monte-carlo .mc-unified-panel:hover,
+.bot-report-inner-main #monte-carlo .mc-spec-panel:hover,
+.bot-report-inner-main #monte-carlo .subsection:hover {
+  border: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-full-row,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-pair-cell,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-unified-panel,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-spec-panel,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .subsection {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.bot-report-inner-main #monte-carlo .mc-unified-header,
+.bot-report-inner-main #monte-carlo .mc-spec-header {
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.06)) !important;
+  padding-bottom: 10px !important;
+  margin-bottom: 12px !important;
+}
+
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-unified-header,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-spec-header {
+  border-bottom-color: #f1f5f9 !important;
+}
+
+.bot-report-inner-main #monte-carlo .hz-matrix-wrap {
+  border: 1px solid var(--line-2, rgba(255, 255, 255, 0.08)) !important;
+  border-radius: var(--radius-md, 8px) !important;
+  overflow: hidden !important;
+}
+
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .hz-matrix-wrap {
+  border-color: #e2e8f0 !important;
 }
 
 .bot-report-inner-main .mc-full-row svg.bar-chart,
@@ -6031,47 +6845,41 @@ input[name="main_tabs"] {
 
 /* Actionable Insights Matrix */
 .insight-action-card:hover {
-  transform: translateY(-2px) !important;
-  box-shadow: 4px 4px 0 #000 !important;
-  border-color: #991b1b !important;
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.06) !important;
 }
 
 .btn-matrix-link:hover {
   border-color: #ef4444 !important;
   color: #f87171 !important;
-  background: rgba(239, 68, 68, 0.08) !important;
+  background: rgba(239, 68, 68, 0.12) !important;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 /* Bento Evidence Grid */
 .kpi-bento-card:hover {
-  transform: translateY(-2px) !important;
-  box-shadow: 4px 4px 0 #000 !important;
-  border-color: #3f3f46 !important;
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: #38bdf8 !important;
+  background: rgba(56, 189, 248, 0.04) !important;
 }
 
 /* Button Open Drawer */
 .btn-open-drawer:hover {
-  background: #1e2433 !important;
-  border-color: #ffffff !important;
-  color: #ffffff !important;
-  box-shadow: 4px 4px 0 #000 !important;
+  background: rgba(56, 189, 248, 0.12) !important;
+  border-color: #38bdf8 !important;
+  color: #38bdf8 !important;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 /* ==========================================================================
    Conclusion Subtitles (Bold) & Verdict Value Badges (Soft Color Hover)
    ========================================================================== */
-.conclusion-sub-title,
-.narrative-sub-title {
-  font-size: 13px !important;
-  font-weight: 800 !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.06em !important;
-  color: var(--ink, #f1f5f9) !important;
-}
-:root[data-theme="light"] .conclusion-sub-title,
-:root[data-theme="light"] .narrative-sub-title {
-  color: #0f172a !important;
-}
+/* .conclusion-sub-title lives in the report page CSS (web/report_page.py). */
 
 /* Verdict Headline Value Badges (hover pill with soft warning colors) */
 .verdict-val-badge {
@@ -6151,133 +6959,6 @@ input[name="main_tabs"] {
 :root[data-theme="light"] .verdict-val-badge.badge-safe:hover {
   background: rgba(21, 128, 61, 0.12);
   box-shadow: 0 0 0 1px rgba(21, 128, 61, 0.3);
-}
-
-/* ==========================================================================
-   QUANT TERMINAL / AUDIT LOG TEXT VIEW (QUANTITATIVE EVIDENCE)
-   ========================================================================== */
-.quant-audit-terminal {
-  font-family: var(--mono, "JetBrains Mono", monospace);
-  font-size: 13px;
-  line-height: 1.6;
-  margin: 8px 0 14px 0;
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 10px 0;
-}
-:root[data-theme="light"] .quant-audit-terminal {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-}
-.quant-terminal-divider {
-  height: 1px;
-  background: linear-gradient(90deg, rgba(255,255,255,0.14), rgba(255,255,255,0.03));
-  margin: 4px 14px;
-}
-:root[data-theme="light"] .quant-terminal-divider {
-  background: #e2e8f0;
-}
-.quant-audit-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.quant-audit-row {
-  display: grid;
-  grid-template-columns: 190px 1fr;
-  align-items: start;
-  column-gap: 20px;
-  padding: 8px 16px;
-  border-left: 3px solid transparent;
-  transition: all 0.15s ease;
-  cursor: default;
-}
-.quant-audit-row:hover {
-  background: rgba(255, 255, 255, 0.04);
-  border-left-color: #f59e0b;
-}
-:root[data-theme="light"] .quant-audit-row:hover {
-  background: rgba(241, 245, 249, 0.85);
-  border-left-color: #d97706;
-}
-.quant-audit-tag {
-  font-size: 12px;
-  font-weight: 700;
-  color: #94a3b8;
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-  user-select: none;
-  transition: color 0.15s ease;
-}
-.quant-audit-row:hover .quant-audit-tag {
-  color: #f1f5f9;
-}
-:root[data-theme="light"] .quant-audit-tag {
-  color: #64748b;
-}
-:root[data-theme="light"] .quant-audit-row:hover .quant-audit-tag {
-  color: #0f172a;
-}
-.quant-audit-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.quant-audit-main {
-  color: #cbd5e1;
-  word-break: break-word;
-}
-:root[data-theme="light"] .quant-audit-main {
-  color: #334155;
-}
-.quant-audit-consequence {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding-left: 2px;
-}
-.quant-consequence-arrow {
-  color: #f59e0b;
-  font-weight: 700;
-  font-size: 14px;
-  flex-shrink: 0;
-}
-.quant-consequence-text {
-  font-weight: 500;
-  color: #fde68a;
-}
-:root[data-theme="light"] .quant-consequence-arrow {
-  color: #d97706;
-}
-:root[data-theme="light"] .quant-consequence-text {
-  color: #b45309;
-}
-.quant-num {
-  font-weight: 700;
-  color: #f8fafc;
-}
-:root[data-theme="light"] .quant-num {
-  color: #0f172a;
-}
-.quant-num.quant-num-neg {
-  color: #f87171 !important;
-}
-:root[data-theme="light"] .quant-num.quant-num-neg {
-  color: #dc2626 !important;
-}
-.quant-num.quant-num-warn {
-  color: #fbbf24 !important;
-}
-:root[data-theme="light"] .quant-num.quant-num-warn {
-  color: #d97706 !important;
-}
-@media (max-width: 768px) {
-  .quant-audit-row {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
 }
 
 /* WHY ANALYSIS CARD - APPARENT METRICS & NARRATIVE */
@@ -6450,7 +7131,7 @@ input[name="main_tabs"] {
 }
 :root[data-theme="light"] .why-narrative-conclusion {
   background: rgba(245, 158, 11, 0.1);
-  color: #b45309;
+  color: #ca8a04;
   border-left-color: #d97706;
 }
 .why-conclusion-arrow {
@@ -7079,10 +7760,14 @@ details.theory[open] summary {
   gap: 6px;
 }
 .mc-spec-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 11px;
   font-weight: 700;
   color: var(--ink-2, #cbd5e1);
   font-family: var(--mono, monospace);
+  white-space: nowrap;
 }
 :root[data-theme="light"] .mc-spec-lbl {
   color: #475569;
@@ -7100,28 +7785,39 @@ details.theory[open] summary {
   font-family: var(--mono, monospace);
   letter-spacing: -0.02em;
 }
-/* Multi-horizon matrix expanded columns */
-.hz-matrix-table .col-med {
-  text-align: right;
-  font-family: var(--mono, monospace);
-  font-size: 12px;
-  white-space: nowrap;
+/* Multi-horizon matrix expanded columns — font/spacing only; alignment handled by consolidated block above */
+.hz-matrix-table th.col-med,
+.hz-matrix-table td.col-med {
+  font-family: var(--mono, monospace) !important;
+  font-size: 12px !important;
+  white-space: nowrap !important;
 }
-.hz-matrix-table .col-range {
-  text-align: center;
-  font-family: var(--mono, monospace);
-  font-size: 11px;
-  white-space: nowrap;
-  color: var(--ink-2, #cbd5e1);
+.hz-matrix-table th.col-range,
+.hz-matrix-table td.col-range {
+  font-family: var(--mono, monospace) !important;
+  font-size: 11px !important;
+  white-space: nowrap !important;
+  color: var(--ink-2, #cbd5e1) !important;
 }
-:root[data-theme="light"] .hz-matrix-table .col-range {
-  color: #475569;
+:root[data-theme="light"] .hz-matrix-table th.col-range,
+:root[data-theme="light"] .hz-matrix-table td.col-range {
+  color: #475569 !important;
 }
-.hz-matrix-table .col-dd {
-  text-align: right;
-  font-family: var(--mono, monospace);
-  font-size: 12px;
-  white-space: nowrap;
+.hz-matrix-table th.col-dd,
+.hz-matrix-table td.col-dd {
+  font-family: var(--mono, monospace) !important;
+  font-size: 12px !important;
+  white-space: nowrap !important;
+}
+.hz-matrix-table th.col-sample,
+.hz-matrix-table td.col-sample {
+  font-family: var(--mono, monospace) !important;
+  font-size: 11.5px !important;
+}
+.hz-matrix-table th.col-loss-ruin,
+.hz-matrix-table td.col-loss-ruin {
+  font-family: var(--mono, monospace) !important;
+  font-size: 11.5px !important;
 }
 .hz-range-val {
   padding: 2px 6px;
@@ -7709,20 +8405,21 @@ details.theory[open] summary {
 /* NORA AI CHAT ASSISTANT (MINI CHATGPT FLOATING WIDGET) */
 /* ========================================================================= */
 
-/* Floating Launch Button (FAB) */
+/* Floating Launch Button (FAB) -- icon-only, no label/status dot (24/09) */
 .nora-chat-fab {
   position: fixed;
   right: 24px;
   bottom: 24px;
+  width: 48px;
   height: 48px;
-  padding: 0 20px 0 16px;
+  padding: 0;
   border: 1px solid rgba(56, 189, 248, 0.4);
-  border-radius: 24px;
+  border-radius: 50%;
   background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
   color: #ffffff;
   display: flex;
   align-items: center;
-  gap: 9px;
+  justify-content: center;
   cursor: pointer;
   box-shadow: 0 8px 24px -4px rgba(2, 132, 199, 0.5), 0 2px 6px rgba(0, 0, 0, 0.2);
   z-index: 900;
@@ -7740,25 +8437,10 @@ details.theory[open] summary {
   display: none;
 }
 
-.nora-chat-fab-pulse {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #34d399;
-  box-shadow: 0 0 8px #34d399;
-  animation: pulseGreen 2s infinite ease-in-out;
-}
-
 .nora-chat-fab-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.nora-chat-fab-label {
-  font-size: 13.5px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
 }
 
 /* Chat Widget Panel (Mini ChatGPT Window) */
@@ -8187,11 +8869,1045 @@ details.theory[open] summary {
   .nora-chat-fab {
     right: 16px;
     bottom: 16px;
-    padding: 0 14px;
-  }
-  .nora-chat-fab-label {
-    display: none;
   }
 }
 
+/* =============================================================================
+   FINAL OVERRIDES: Single Overall Card & Single Hover for Monte Carlo & Synthesised
+   ============================================================================= */
+.bot-report-inner-main #monte-carlo .mc-full-row,
+.bot-report-inner-main #monte-carlo .mc-pair-cell,
+.bot-report-inner-main #monte-carlo .mc-unified-panel,
+.bot-report-inner-main #monte-carlo .mc-spec-panel,
+.bot-report-inner-main #monte-carlo .subsection,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-full-row,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-pair-cell,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-unified-panel,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-spec-panel,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .subsection {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
 
+.bot-report-inner-main #monte-carlo .mc-full-row:hover,
+.bot-report-inner-main #monte-carlo .mc-pair-cell:hover,
+.bot-report-inner-main #monte-carlo .mc-unified-panel:hover,
+.bot-report-inner-main #monte-carlo .mc-spec-panel:hover,
+.bot-report-inner-main #monte-carlo .subsection:hover,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-full-row:hover,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-pair-cell:hover,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-unified-panel:hover,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .mc-spec-panel:hover,
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .subsection:hover {
+  border: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.bot-report-inner-main #nhan-dinh .narrative-body-wrap,
+.bot-report-inner-main #nhan-dinh .narrative-wrap,
+.bot-report-inner-main #nhan-dinh .expert-summary-box,
+.bot-report-inner-main #nhan-dinh .synthesised-bento-card,
+:root[data-theme="light"] .bot-report-inner-main #nhan-dinh .narrative-body-wrap,
+:root[data-theme="light"] .bot-report-inner-main #nhan-dinh .narrative-wrap,
+:root[data-theme="light"] .bot-report-inner-main #nhan-dinh .expert-summary-box,
+:root[data-theme="light"] .bot-report-inner-main #nhan-dinh .synthesised-bento-card {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+/* ─── Monte Carlo: Formula star (*) — MC section overrides ─── */
+.bot-report-inner-main #monte-carlo .formula-star-btn {
+  /* Inherits base .formula-star-btn fixed-size box */
+  width: 13px !important;
+  height: 13px !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  margin-left: 3px !important;
+  top: -1px !important;
+  opacity: 0.68 !important;
+}
+
+.bot-report-inner-main #monte-carlo .hz-matrix-table th {
+  white-space: nowrap !important;
+  display: table-cell !important;
+}
+
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .formula-star-btn {
+  color: #0284c7 !important;
+}
+
+.bot-report-inner-main #monte-carlo .formula-star-btn:hover {
+  color: #7dd3fc !important;
+  background: rgba(56, 189, 248, 0.12) !important;
+  transform: none !important;
+  text-decoration: none !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme="light"] .bot-report-inner-main #monte-carlo .formula-star-btn:hover {
+  color: #0369a1 !important;
+}
+
+.bot-report-inner-main #monte-carlo .mc-spec-top {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 4px !important;
+}
+
+/* Percentile card label row: label text + star sit on same flex row */
+.bot-report-inner-main #monte-carlo .mc-spec-lbl {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  white-space: nowrap !important;
+}
+
+/* KP kpi-label row */
+.bot-report-inner-main #monte-carlo .kp-kpi-label,
+.bot-report-inner-main #monte-carlo .kp-stat-label {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  white-space: nowrap !important;
+}
+
+/* ─── .th-star-wrap: flex container injected by JS into every <th> that gets a * ─── */
+/* This is the CORRECT way to align * with header text:
+   instead of fighting vertical-align on inline elements, we make the th content
+   a proper flexbox row where text and button are vertically centered together */
+.th-star-wrap {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 3px !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
+}
+/* Inside th-star-wrap the star needs no top offset — flex align-items:center handles it */
+.th-star-wrap .formula-star-btn {
+  position: static !important;
+  top: 0 !important;
+  margin-left: 0 !important;
+  flex-shrink: 0 !important;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Portfolio Runs table (AdminHome, bot list sub-tab "Portfolio Runs").       */
+/* Compact rows: member avatars instead of a chip per member, verdict as a    */
+/* dot + short label, report as an arrow. Colours come from tokens so the    */
+/* table reads the same in the light and the dark theme.                     */
+/* ------------------------------------------------------------------------- */
+td .prun-id {
+  font-weight: 700;
+  color: var(--s1);
+}
+.prun-members {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.prun-stack {
+  display: inline-flex;
+}
+.prun-stack i {
+  width: 20px;
+  height: 20px;
+  margin-left: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--card-bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #ffffff;
+}
+.prun-stack i:first-child {
+  margin-left: 0;
+}
+.prun-first {
+  font-weight: 600;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prun-more {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.prun-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text);
+}
+.prun-verdict i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+.prun-ok i { background: var(--up); }
+.prun-warn i { background: var(--amber); }
+.prun-bad i { background: var(--down); }
+.prun-go {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+tbody tr.rowlink:hover .prun-go,
+.prun-go:hover,
+.prun-go:focus-visible {
+  background: var(--panel-2);
+  background: color-mix(in srgb, var(--s1) 12%, transparent);
+  color: var(--s1);
+}
+.prun-rebuild {
+  border: none;
+  background: transparent;
+  padding: 5px 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--s1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.prun-rebuild:hover:not(:disabled) {
+  background: var(--panel-2);
+  background: color-mix(in srgb, var(--s1) 12%, transparent);
+}
+.prun-rebuild:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+/* Emoji icons were replaced by inline SVGs; keep their box stable. */
+.analyze-search-icon,
+.tbl-search-box .search-icon,
+.admin-login-input-icon {
+  box-sizing: content-box;
+  flex-shrink: 0;
+}
+.tbl-search-box .search-icon {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Admin views (Overview / Bot list / Analyze) -- calm, token-only styling    */
+/* carried over from the approved preview. Scoped so report pages that share  */
+/* this stylesheet are untouched.                                             */
+/* ------------------------------------------------------------------------- */
+
+/* Verdict: dot + short label (components/verdictUi.jsx). */
+.vdot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.vdot i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Page header: title + control on one row, no breadcrumb. */
+.catalog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.catalog-head h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.catalog-head-stack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.catalog-head p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+/* Segmented control (Single Bots / Portfolio Runs). */
+.seg-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+.seg-tabs button {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.seg-tabs button:hover {
+  color: var(--ink);
+}
+.seg-tabs button.on {
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.seg-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--ink-3);
+}
+.seg-tabs button.on .seg-count {
+  background: color-mix(in srgb, var(--s1) 14%, transparent);
+  color: var(--s1);
+}
+
+/* Bot table details. */
+.stale-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+}
+.tab-bots th,
+.tab-bots td {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+/* Overview: stat cards without glows, thin share bars. */
+.overview-section .card:hover {
+  transform: none;
+}
+.card-bar {
+  margin-top: 12px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--track);
+  overflow: hidden;
+  display: flex;
+}
+.card-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+.card-bar-seg {
+  gap: 2px;
+  background: transparent;
+}
+.card-bar-seg > span {
+  border-radius: 2px;
+}
+.overview-section .card .lbl {
+  font-family: var(--sans);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.overview-section .card .sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* Overview: equal-height chart cards. */
+.overview-chart-grid {
+  align-items: stretch;
+}
+.overview-chart-grid > .block {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Overview: veto reasons as thin bars + share of vetoed bots. */
+.overview-section .veto-bar-track {
+  height: 6px;
+}
+.overview-section .veto-bar-fill {
+  background: var(--down) !important;
+  box-shadow: none;
+}
+.overview-section .veto-bar-label {
+  font-weight: 500;
+}
+.veto-bar-share {
+  width: 104px;
+  flex: 0 0 104px;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+/* Analyze: notes on tokens instead of hardcoded cyan glows. */
+.af-note {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--panel-2);
+  background: color-mix(in srgb, var(--s1) 8%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--s1) 22%, transparent);
+}
+.af-note-lg {
+  padding: 18px 20px;
+}
+.af-note-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--s1);
+}
+.af-code-chip {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--amber);
+}
+.tier-drill-title .vdot {
+  font-family: var(--sans);
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 12px;
+}
+
+/* Verdict donut: one focus shared by the ring and the legend (hover or the
+   opened group). The focused slice steps out, the rest fade. */
+.viz-slice {
+  transition: opacity 0.18s ease;
+}
+.viz-slice.is-dim {
+  opacity: 0.25;
+}
+.viz-slice.is-focus {
+  filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--ink) 18%, transparent));
+}
+.viz-slice-pick:hover {
+  opacity: 1;
+}
+.viz-leg {
+  transition: opacity 0.18s ease;
+}
+.viz-leg.is-dim {
+  opacity: 0.45;
+}
+.viz-sub-focus {
+  font-family: var(--sans) !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-size: 11.5px !important;
+  font-weight: 600;
+  fill: var(--ink) !important;
+}
+:root .viz-donut .viz-hero.viz-hero-focus {
+  fill: var(--viz-focus, var(--ink)) !important;
+}
+
+/* ========================================================================= */
+/* Phones (<= 768px): header on two rows, lists as cards, compact overview.  */
+/* Appended last so it wins over the earlier breakpoints it refines.         */
+/* ========================================================================= */
+@media (max-width: 768px) {
+  /* Header: brand + actions on row one, the three tabs full width below. */
+  .top-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "brand actions" "nav nav";
+    align-items: center;
+    gap: 10px 8px;
+    padding: 10px 12px !important;
+    height: auto !important; /* the report's own stylesheet pins 56px */
+  }
+  .header-left { display: contents !important; }
+  .header-left > .brand { grid-area: brand; min-width: 0; }
+  .header-divider { display: none !important; }
+  .header-nav-tabs { grid-area: nav; width: 100%; display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; overflow: visible; }
+  .header-tab { justify-content: center; white-space: nowrap; padding: 0 6px !important;
+    font-size: 12.5px !important; min-width: 0; }
+  .header-actions { grid-area: actions; width: auto !important; gap: 6px; flex-wrap: nowrap; }
+  .brand-badge-fintech, .brand-sub { display: none !important; }
+  .user-badge-capsule { display: none !important; }
+  .theme-btn-label { display: none; }
+
+  /* Overview: two stat cards per row, compact values. */
+  .overview-section .cards { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px; }
+  .overview-section .card { padding: 12px 14px; }
+  .overview-section .card .val { font-size: 22px; }
+  .overview-section .card .sub { font-size: 11px; }
+  .overview-section .card-icon-pill { display: none; }
+  .overview-section .veto-bar-row { display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 32px 86px; gap: 4px 10px; align-items: center; }
+  .overview-section .veto-bar-label { grid-column: 1 / -1; width: auto; white-space: normal;
+    font-size: 12.5px; }
+  .overview-section .veto-bar-track { width: auto; }
+  .overview-section .veto-bar-count, .overview-section .veto-bar-share { width: auto; flex: none; }
+
+  /* Catalog header: title above the segmented control. */
+  .catalog-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .catalog-head h1 { font-size: 20px; }
+  .seg-tabs { display: grid; grid-template-columns: 1fr 1fr; }
+  .seg-tabs button { justify-content: center; }
+  .tbl-toolbar { flex-direction: column; align-items: stretch !important; gap: 6px; }
+  .tbl-search-box { max-width: none; }
+  .tbl-note-action { display: none; }
+
+  /* Bot list + portfolio runs: every row becomes a card. The cells carry a
+     data-c role and, for the small facts, a data-label printed in front. */
+  .tab-bots .tblwrap { overflow: visible; }
+  .tab-bots table, .tab-bots tbody { display: block; width: 100%; }
+  .tab-bots thead { display: none; }
+  .tab-bots tbody tr {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
+  }
+  .tab-bots tbody td { display: block; padding: 0 !important; border: none !important;
+    text-align: left !important; white-space: nowrap; }
+  .tab-bots td[data-c="name"] { flex: 1 1 calc(100% - 44px); max-width: calc(100% - 44px) !important;
+    font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+  .tab-bots td[data-c="go"] { flex: 0 0 auto; margin-left: auto; }
+  .tab-bots td[data-c="members"] { flex: 1 1 100%; }
+  .tab-bots td[data-c="verdict"] { flex: 0 0 auto; }
+  .tab-bots td[data-c="risk"] { flex: 1 1 auto; }
+  .tab-bots td[data-c="risk"] > div { justify-content: flex-end !important; }
+  .tab-bots td[data-c="code"], .tab-bots td[data-c="pair"], .tab-bots td[data-c="meta"] {
+    flex: 0 0 auto; font-size: 11.5px !important; color: var(--ink-2); }
+  .tab-bots td[data-label]::before { content: attr(data-label) " "; color: var(--ink-3);
+    font-family: var(--sans); font-size: 10.5px; margin-right: 3px; }
+  .tab-bots tbody tr:last-child { border-bottom: none; }
+
+  /* Pager: one tidy row of controls, the size picker and count below. */
+  .pager { flex-direction: column; align-items: stretch; gap: 8px; }
+  .pager-controls { justify-content: space-between; flex-wrap: nowrap; gap: 6px; }
+  .pager-controls .btn { padding: 6px 10px; }
+
+  /* Analyze: stacked search + button, hint below. */
+  .tab-analyze .block-h { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .tab-analyze .block-h .note { font-size: 11.5px; }
+}
+@media (max-width: 768px) {
+  /* Card order: name + arrow, then verdict + risk, then the small facts. */
+  .tab-bots td[data-c="name"] { order: 0; }
+  .tab-bots td[data-c="go"] { order: 1; }
+  .tab-bots td[data-c="members"] { order: 2; }
+  .tab-bots td[data-c="verdict"] { order: 3; }
+  .tab-bots td[data-c="risk"] { order: 4; }
+  .tab-bots td[data-c="code"], .tab-bots td[data-c="pair"], .tab-bots td[data-c="meta"] { order: 5; }
+  .overview-section .veto-bar-share { white-space: nowrap; font-size: 11px; }
+  .overview-chart-grid > .block { display: block; }
+}
+@media (max-width: 768px) {
+  /* In the stacked (column) donut layout the legend's 240px flex-basis
+     became a fixed HEIGHT, leaving a blank band under five rows. */
+  .viz-legend { flex: none; }
+}
+
+/* ========================================================================= */
+/* Bot report: preview parity (header, scores, KPI strip, tabs, info icons)  */
+/* and the phone layout. Scoped to the SPA report container; appended last   */
+/* so it wins over the earlier report layers without touching them.          */
+/* ========================================================================= */
+:root .bot-report-spa-container .report-unified-head { margin-bottom: 18px; }
+:root .bot-report-spa-container .report-head-row { align-items: flex-start; }
+:root .bot-report-spa-container .report-title-group { align-items: center; gap: 10px; min-width: 0; }
+:root .bot-report-spa-container .report-title-group h1 {
+  font-size: 25px; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+:root .bot-report-spa-container .report-title-group .venue-symbol-badge,
+:root .bot-report-spa-container .report-title-group .report-code-pill {
+  font-family: var(--mono) !important; font-size: 12px !important; font-weight: 500 !important;
+  color: var(--ink-2) !important; background: var(--panel-2) !important; border: none !important;
+  border-radius: 6px !important; padding: 3px 8px !important; box-shadow: none !important;
+  letter-spacing: 0 !important; text-transform: none !important; }
+:root .bot-report-spa-container .report-snapshot-notice { margin-top: 6px; font-size: 12.5px; }
+:root .bot-report-spa-container .report-snapshot-notice .notice-icon { color: var(--ink-3); flex: none; }
+
+/* Verdict: one soft pill with a dot in the verdict's own colour. */
+:root .bot-report-spa-container .report-head-verdict .report-verdict-chip {
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  padding: 6px 13px !important; border: none !important; border-radius: 999px !important;
+  background: color-mix(in srgb, var(--vc, var(--ink-3)) 12%, transparent) !important;
+  color: color-mix(in srgb, var(--vc, var(--ink-3)) 78%, var(--ink)) !important; }
+:root .bot-report-spa-container .report-head-verdict .report-verdict-chip::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: var(--vc, var(--ink-3)); }
+:root .bot-report-spa-container .report-head-verdict .verdict-chip,
+:root .bot-report-spa-container .report-head-verdict .verdict-chip * {
+  font-family: var(--sans) !important; font-size: 12.5px !important; font-weight: 600 !important;
+  letter-spacing: 0 !important; text-transform: none !important; color: inherit !important;
+  background: none !important; border: none !important; padding: 0 !important; box-shadow: none !important; }
+
+/* Scores: one card, three gauges side by side. */
+:root .bot-report-spa-container #bot-report-body .report-hero-scores {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 12px !important;
+  background: var(--panel) !important; border: 1px solid var(--line) !important;
+  border-radius: 14px !important; padding: 22px 28px !important; margin: 0 0 12px !important;
+  box-shadow: none !important; }
+:root .bot-report-spa-container #bot-report-body .report-hero-scores .stat-tile-hero,
+:root .bot-report-spa-container #bot-report-body .report-hero-scores .stat-tile-hero:hover {
+  display: flex !important; align-items: center !important; gap: 16px !important;
+  background: none !important; border: none !important; box-shadow: none !important;
+  padding: 0 !important; border-radius: 0 !important; transform: none !important; min-height: 0 !important; }
+:root .bot-report-spa-container #bot-report-body .stat-tile-hero::before,
+:root .bot-report-spa-container #bot-report-body .stat-tile-hero::after { display: none !important; }
+:root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-gauge {
+  width: 76px !important; height: auto !important; flex: none !important; margin: 0 !important; }
+:root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-label {
+  font-family: var(--sans) !important; font-size: 12px !important; font-weight: 500 !important;
+  text-transform: none !important; letter-spacing: 0 !important; color: var(--ink-2) !important;
+  margin: 0 0 2px !important; }
+:root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-value {
+  font-family: var(--sans) !important; font-size: 24px !important; font-weight: 700 !important;
+  letter-spacing: -0.01em !important; line-height: 1.15 !important; }
+:root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-unit {
+  font-size: 13px !important; font-weight: 500 !important; color: var(--ink-3) !important; }
+
+/* General parameters: five equal tiles. */
+:root .bot-report-spa-container #bot-report-body .quick-risk-strip {
+  display: grid !important; grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 12px !important; margin: 0 0 20px !important; padding: 0 !important;
+  background: none !important; border: none !important; box-shadow: none !important; }
+:root .bot-report-spa-container #bot-report-body .qrs-item,
+:root .bot-report-spa-container #bot-report-body .qrs-item:hover {
+  display: flex !important; flex-direction: column !important; justify-content: flex-start !important;
+  gap: 6px !important; min-width: 0 !important; padding: 14px 16px !important;
+  background: var(--panel) !important; border: 1px solid var(--line) !important;
+  border-radius: 12px !important; box-shadow: none !important; transform: none !important; }
+:root .bot-report-spa-container #bot-report-body .qrs-label {
+  font-family: var(--sans) !important; font-size: 12px !important; font-weight: 500 !important;
+  text-transform: none !important; letter-spacing: 0 !important; color: var(--ink-3) !important; }
+:root .bot-report-spa-container #bot-report-body .qrs-value {
+  font-family: var(--mono) !important; font-size: 16px !important; font-weight: 700 !important;
+  line-height: 1.3 !important; color: var(--ink) !important; }
+:root .bot-report-spa-container #bot-report-body .qrs-safe .qrs-value { color: var(--up) !important; }
+:root .bot-report-spa-container #bot-report-body .qrs-warn .qrs-value { color: var(--amber) !important; }
+:root .bot-report-spa-container #bot-report-body .qrs-danger .qrs-value { color: var(--down) !important; }
+
+/* Label + info icon read as one unit in the summary tiles. */
+:root .bot-report-spa-container #bot-report-body :is(.report-key-metrics, .qe-chip, .mc-pcard, .mc-stat) .metric-label-row {
+  display: inline-flex !important; justify-content: flex-start !important; align-items: center !important; width: auto !important; }
+:root .bot-report-spa-container #bot-report-body :is(.report-key-metrics, .qe-chip, .mc-pcard, .mc-stat) .metric-label-row .param-label {
+  flex: 0 1 auto !important; }
+:root .bot-report-spa-container #bot-report-body :is(.report-key-metrics, .qe-chip, .mc-pcard, .mc-stat) .metric-label-row .formula-star-btn {
+  margin: 0 0 0 5px !important; }
+
+/* Formula buttons: the same small "i" circle the rest of the report uses. */
+:root .bot-report-spa-container #bot-report-body .formula-star-btn,
+:root .bot-report-spa-container #bot-report-body #monte-carlo .formula-star-btn {
+  width: 13px !important; height: 13px !important; flex: 0 0 13px !important;
+  border: 1px solid currentColor !important; border-radius: 50% !important;
+  background: none !important; color: var(--ink-3) !important; opacity: 0.8 !important;
+  font-size: 0 !important; line-height: 1 !important; top: 0 !important; padding: 0 !important; }
+:root .bot-report-spa-container #bot-report-body .formula-star-btn::before {
+  content: "i"; font-family: var(--mono); font-size: 8.5px; font-weight: 500; line-height: 1; }
+:root .bot-report-spa-container #bot-report-body .formula-star-btn:hover,
+:root .bot-report-spa-container #bot-report-body .formula-star-btn:focus-visible,
+:root .bot-report-spa-container #bot-report-body #monte-carlo .formula-star-btn:hover {
+  color: var(--ink) !important; opacity: 1 !important; background: none !important; }
+
+/* Report tabs: a quiet segmented control, like the admin one. */
+:root .bot-report-spa-container #bot-report-body .tabs-header-container {
+  margin: 4px 0 20px !important; padding: 0 !important; border: none !important; background: none !important; }
+:root .bot-report-spa-container #bot-report-body .tabs-header-container::before,
+:root .bot-report-spa-container #bot-report-body .tabs-header-container::after { display: none !important; }
+:root .bot-report-spa-container #bot-report-body .tabs-nav-bar {
+  display: inline-flex !important; gap: 2px !important; padding: 3px !important;
+  background: var(--panel-2) !important; border: 1px solid var(--line) !important;
+  border-radius: 10px !important; box-shadow: none !important; }
+:root .bot-report-spa-container #bot-report-body .tabs-nav-bar .tab-label {
+  padding: 7px 16px !important; border-radius: 8px !important; border: none !important;
+  background: none !important; box-shadow: none !important; color: var(--ink-2) !important;
+  font-family: var(--sans) !important; font-size: 13px !important; font-weight: 600 !important; }
+:root .bot-report-spa-container #bot-report-body .tabs-nav-bar .tab-label:hover { color: var(--ink) !important; }
+:root .bot-report-spa-container #bot-report-body .tabs-nav-bar .tab-label.active-tab-label,
+:root .bot-report-spa-container #bot-report-body #tab-nav-report:checked ~ .tabs-header-container .label-report,
+:root .bot-report-spa-container #bot-report-body #tab-nav-market:checked ~ .tabs-header-container .label-market,
+:root .bot-report-spa-container #bot-report-body #tab-nav-trades:checked ~ .tabs-header-container .label-trades {
+  background: var(--panel) !important; color: var(--ink) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 0 0 1px var(--line) !important; }
+
+@media (max-width: 900px) {
+  :root .bot-report-spa-container #bot-report-body .quick-risk-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+}
+
+/* ---- Phones ------------------------------------------------------------ */
+@media (max-width: 640px) {
+  :root .bot-report-spa-container .report-head-actions-top { margin-bottom: 12px; }
+  :root .bot-report-spa-container .report-head-actions-top .btn { padding: 6px 12px !important; font-size: 13px !important; }
+  :root .bot-report-spa-container .report-head-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+  :root .bot-report-spa-container .report-head-verdict { margin-left: 0; }
+  :root .bot-report-spa-container .report-title-group h1 { font-size: 20px; }
+  :root .bot-report-spa-container .report-snapshot-notice { font-size: 12px; }
+
+  /* Scores: still one row of three, gauge above the number. */
+  :root .bot-report-spa-container #bot-report-body .report-hero-scores {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 6px !important;
+    padding: 14px 8px !important; }
+  :root .bot-report-spa-container #bot-report-body .report-hero-scores .stat-tile-hero,
+  :root .bot-report-spa-container #bot-report-body .report-hero-scores .stat-tile-hero:hover {
+    flex-direction: column !important; gap: 6px !important; text-align: center !important; min-width: 0 !important; }
+  :root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-gauge { width: 58px !important; }
+  :root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-body { min-width: 0; }
+  :root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-label { font-size: 11px !important; line-height: 1.25 !important; }
+  :root .bot-report-spa-container #bot-report-body .stat-tile-hero .metric-label-row { justify-content: center !important; }
+  :root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-value { font-size: 20px !important; }
+  :root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-unit { font-size: 11px !important; }
+
+  /* General parameters: two per row, the fifth full width. */
+  :root .bot-report-spa-container #bot-report-body .quick-risk-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; margin-bottom: 16px !important; }
+  :root .bot-report-spa-container #bot-report-body .qrs-item,
+  :root .bot-report-spa-container #bot-report-body .qrs-item:hover { padding: 10px 12px !important; gap: 4px !important; }
+  :root .bot-report-spa-container #bot-report-body .qrs-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  :root .bot-report-spa-container #bot-report-body .qrs-label { font-size: 11px !important; }
+  :root .bot-report-spa-container #bot-report-body .qrs-value { font-size: 14px !important; }
+
+  /* Tabs: full width, three equal segments on one line. */
+  :root .bot-report-spa-container #bot-report-body .tabs-header-container { margin: 0 0 14px !important; }
+  :root .bot-report-spa-container #bot-report-body .tabs-nav-bar {
+    display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  :root .bot-report-spa-container #bot-report-body .tabs-nav-bar .tab-label {
+    justify-content: center !important; padding: 8px 4px !important; font-size: 12.5px !important;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  :root .bot-report-spa-container #bot-report-body .tabs-nav-bar .tab-title {
+    overflow: hidden; text-overflow: ellipsis; }
+
+  /* Section cards: tighter frame, same content. */
+  :root .bot-report-spa-container #bot-report-body .card {
+    padding: 16px 14px !important; margin-bottom: 14px !important; border-radius: 14px !important; }
+  :root .bot-report-spa-container #bot-report-body .notice {
+    font-size: 12.5px !important; line-height: 1.5 !important; padding: 10px 12px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-toggle-tags { display: none !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-toggle { justify-content: space-between; }
+  :root .bot-report-spa-container #bot-report-body :is(.gc-head, .mc-head, .mk-head, .why-head, .peer-head) {
+    flex-wrap: wrap; gap: 6px 10px; }
+
+  /* Conclusion: peers as a 2x2 grid, the revisit banner stacked. */
+  :root .bot-report-spa-container #bot-report-body .peer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+  :root .bot-report-spa-container #bot-report-body .peer-card { padding: 10px !important; min-width: 0; }
+  :root .bot-report-spa-container #bot-report-body .peer-card-label { font-size: 11.5px !important; }
+  :root .bot-report-spa-container #bot-report-body .peer-value { font-size: 17px !important; }
+  :root .bot-report-spa-container #bot-report-body .peer-median-text { font-size: 10.5px !important; }
+  :root .bot-report-spa-container #bot-report-body .peer-hist { height: 44px !important; }
+  :root .bot-report-spa-container #bot-report-body .peer-axis { font-size: 9.5px !important; }
+  :root .bot-report-spa-container #bot-report-body .qe-revisit-banner {
+    flex-direction: column; align-items: flex-start !important; gap: 4px !important; }
+
+  /* How it trades: tiles wrap their text, phases become small cards. */
+  :root .bot-report-spa-container #bot-report-body .st-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+  :root .bot-report-spa-container #bot-report-body .st-tile { padding: 10px 12px !important; min-width: 0; }
+  :root .bot-report-spa-container #bot-report-body .st-tile-v {
+    white-space: normal !important; overflow: visible !important; text-overflow: clip !important;
+    font-size: 13px !important; line-height: 1.3 !important; }
+  :root .bot-report-spa-container #bot-report-body .st-row { flex-direction: column; align-items: flex-start !important; gap: 6px !important; }
+  :root .bot-report-spa-container #bot-report-body .st-head { flex-direction: column; align-items: flex-start !important; gap: 6px !important; }
+  :root .bot-report-spa-container #bot-report-body .st-phase .table-scroll { overflow: visible !important; }
+  :root .bot-report-spa-container #bot-report-body .st-phase table,
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody { display: block !important; width: 100% !important; min-width: 0 !important; }
+  :root .bot-report-spa-container #bot-report-body .st-phase thead { display: none !important; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody tr {
+    display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px;
+    padding: 10px 0 !important; border-bottom: 1px solid var(--line) !important; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody tr:last-child { border-bottom: none !important; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td {
+    display: block !important; padding: 0 !important; border: none !important; text-align: left !important;
+    font-size: 12.5px !important; min-width: 0; white-space: nowrap; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td:first-child {
+    grid-column: 1 / -1; font-size: 13.5px !important; font-weight: 600; white-space: normal; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td:not(:first-child)::before {
+    display: block; font-family: var(--sans); font-size: 10.5px; font-weight: 500; color: var(--ink-3);
+    margin-bottom: 2px; letter-spacing: 0; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td:nth-child(2)::before { content: "Trades"; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td:nth-child(3)::before { content: "Win rate"; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td:nth-child(4)::before { content: "PnL (USDT)"; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td:nth-child(5)::before { content: "Bias"; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td:nth-child(6)::before { content: "Avg lev."; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td:nth-child(7)::before { content: "Hold (med.)"; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td:nth-child(8)::before { content: "Share of profit"; }
+  :root .bot-report-spa-container #bot-report-body .st-phase tbody td:nth-child(8) { grid-column: span 2; }
+
+  /* Monte Carlo: chips on one wrapping line, stats three across, bigger
+     chart labels (the end tags repeat the ladder beside it, so they go). */
+  :root .bot-report-spa-container #bot-report-body .mc-head { flex-direction: column; align-items: flex-start !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-chips { display: flex !important; flex-wrap: wrap; gap: 6px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-chip { font-size: 11px !important; padding: 3px 8px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-pcards { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-pcard { padding: 10px 12px !important; min-width: 0; }
+  :root .bot-report-spa-container #bot-report-body .mc-pcard-v { font-size: 20px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-strip {
+    display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 10px 8px !important;
+    padding: 12px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-stat { border: none !important; padding: 0 !important; min-width: 0; }
+  :root .bot-report-spa-container #bot-report-body .mc-stat-v { font-size: 14px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-chart-bar { flex-direction: column; align-items: stretch !important; gap: 8px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-vtabs { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  :root .bot-report-spa-container #bot-report-body .mc-legend { flex-wrap: wrap; gap: 4px 10px !important; font-size: 11px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-svg { overflow: visible; }
+  :root .bot-report-spa-container #bot-report-body .mc-chart-body { padding: 0 0 14px 20px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-vtabs > * { white-space: nowrap; font-size: 12px !important; padding-left: 4px !important; padding-right: 4px !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-svg :is(.mc-tag, .mc-tag-text, .mc-cvar-lbl, .mc-median-lbl) { display: none; }
+
+  /* Traded markets: the pair table becomes one small card per pair. */
+  :root .bot-report-spa-container #bot-report-body .mk-head { flex-direction: column; align-items: stretch !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-ftabs {
+    display: flex !important; flex-wrap: nowrap !important; overflow-x: auto; max-width: 100%;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  :root .bot-report-spa-container #bot-report-body .mk-ftabs::-webkit-scrollbar { display: none; }
+  :root .bot-report-spa-container #bot-report-body .mk-ftab { flex: none; white-space: nowrap; }
+  :root .bot-report-spa-container #bot-report-body .mk-legend { flex-wrap: wrap; gap: 4px 12px !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-legend > span { white-space: normal; }
+  :root .bot-report-spa-container #bot-report-body .mk-table,
+  :root .bot-report-spa-container #bot-report-body .mk-table tbody { display: block !important; width: 100% !important; min-width: 0 !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-table :is(thead, colgroup) { display: none !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-table tbody tr {
+    display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: center;
+    padding: 12px 0 !important; border-bottom: 1px solid var(--line) !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-table tbody tr:last-child { border-bottom: none !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-table td {
+    display: block !important; padding: 0 !important; border: none !important; text-align: left !important;
+    white-space: nowrap; min-width: 0; font-size: 12.5px !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-table td:nth-child(1) { order: 0; }
+  :root .bot-report-spa-container #bot-report-body .mk-table td:nth-child(6) { order: 1; text-align: right !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-table td:nth-child(2) { order: 2; }
+  :root .bot-report-spa-container #bot-report-body .mk-table td:nth-child(3) { order: 3; text-align: right !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-table td:nth-child(5) { order: 4; white-space: normal; }
+  :root .bot-report-spa-container #bot-report-body .mk-table td:nth-child(4) { order: 5; text-align: right !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-table td:nth-child(3)::before {
+    content: "Trades "; font-family: var(--sans); font-size: 10.5px; color: var(--ink-3); }
+  :root .bot-report-spa-container #bot-report-body .mk-pair { flex-wrap: wrap; gap: 6px !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-pair .mk-right { margin-left: 0 !important; }
+  :root .bot-report-spa-container #bot-report-body .mk-specs { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+
+  /* Market compatibility + coverage. */
+  :root .bot-report-spa-container #bot-report-body .rg-chips { flex-wrap: wrap; }
+  :root .bot-report-spa-container #bot-report-body .rg-chip { white-space: normal !important; max-width: 100%; }
+  :root .bot-report-spa-container #bot-report-body .cv-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 8px !important; }
+  :root .bot-report-spa-container #bot-report-body .cv-tile { padding: 10px !important; min-width: 0; }
+  :root .bot-report-spa-container #bot-report-body .cv-tile :is(.st-label, .cv-tile-l) { font-size: 10.5px !important; letter-spacing: 0 !important; }
+  :root .bot-report-spa-container #bot-report-body .cv-big { font-size: 22px !important; }
+  :root .bot-report-spa-container #bot-report-body .cv-mid { font-size: 16px !important; }
+  :root .bot-report-spa-container #bot-report-body .cov-sublabel-row { flex-direction: column; gap: 6px !important; }
+
+  /* Robustness / audit / inference / scenario tiles: three across. */
+  :root .bot-report-spa-container #bot-report-body .rb-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 8px !important; }
+  :root .bot-report-spa-container #bot-report-body .rb-tile { padding: 10px !important; min-width: 0; }
+  :root .bot-report-spa-container #bot-report-body .rb-tile .pv-tile-l { font-size: 10.5px !important; }
+  :root .bot-report-spa-container #bot-report-body .rb-tile .pv-tile-v { font-size: 16px !important; overflow-wrap: anywhere; }
+  :root .bot-report-spa-container #bot-report-body .rb-tile .pv-tile-s { font-size: 10px !important; }
+
+  /* Traded assets: one card per asset, all five facts kept. */
+  :root .bot-report-spa-container #bot-report-body .as-list { overflow: visible !important; }
+  :root .bot-report-spa-container #bot-report-body .as-row {
+    min-width: 0 !important; grid-template-columns: minmax(0, 1fr) auto !important; gap: 6px 12px !important; padding: 10px 0 !important; }
+  :root .bot-report-spa-container #bot-report-body .as-row.as-head { display: none !important; }
+  :root .bot-report-spa-container #bot-report-body .as-row > :nth-child(3)::before { content: "Open "; }
+  :root .bot-report-spa-container #bot-report-body .as-row > :nth-child(5)::before { content: "Last closed "; }
+  :root .bot-report-spa-container #bot-report-body .as-row > :is(:nth-child(3), :nth-child(5))::before {
+    font-family: var(--sans); font-size: 10.5px; color: var(--ink-3); }
+  :root .bot-report-spa-container #bot-report-body .as-row > :nth-child(3) { text-align: left !important; }
+  :root .bot-report-spa-container #bot-report-body .as-row > :nth-child(4) { grid-column: 1 / -1; order: 5; }
+  :root .bot-report-spa-container #bot-report-body .as-row > :nth-child(5) { order: 4; }
+
+  /* Ledger: pair + time on top, P/L bar, cumulative and result below. */
+  :root .bot-report-spa-container #bot-report-body .lg-scroll { overflow: visible !important; }
+  :root .bot-report-spa-container #bot-report-body .lg-row {
+    min-width: 0 !important; grid-template-columns: auto minmax(0, 1fr) auto !important; gap: 6px 10px !important; padding: 10px 4px !important; }
+  :root .bot-report-spa-container #bot-report-body .lg-row.lg-head { display: none !important; }
+  :root .bot-report-spa-container #bot-report-body .lg-row > :nth-child(3) { text-align: right; }
+  :root .bot-report-spa-container #bot-report-body .lg-row > :nth-child(4) { grid-column: 1 / 3; }
+  :root .bot-report-spa-container #bot-report-body .lg-row > :nth-child(5) { grid-column: 1 / 3; order: 6; font-size: 11.5px; }
+  :root .bot-report-spa-container #bot-report-body .lg-row > :nth-child(5)::before {
+    content: "Cumulative "; font-family: var(--sans); font-size: 10.5px; color: var(--ink-3); }
+  :root .bot-report-spa-container #bot-report-body .lg-row > :nth-child(5) { text-align: left !important; }
+  :root .bot-report-spa-container #bot-report-body .lg-foot { flex-direction: column; align-items: stretch !important; gap: 8px !important; }
+  :root .bot-report-spa-container #bot-report-body .lg-pager { justify-content: center; flex-wrap: wrap; }
+}
+
+@media (max-width: 640px) {
+  /* Section heads: title first, its chip wraps under it instead of
+     squeezing the title into two lines. */
+  :root .bot-report-spa-container #bot-report-body .pv-head { flex-wrap: wrap !important; gap: 6px 10px !important; }
+  :root .bot-report-spa-container #bot-report-body .pv-head .mc-title { flex: 1 1 auto; white-space: nowrap; }
+  :root .bot-report-spa-container #bot-report-body .pv-head .mc-chip { white-space: normal; }
+  :root .bot-report-spa-container #bot-report-body .gc-note.mk-head { display: inline-flex; align-items: center; }
+
+  /* Value rows: value and pill take what they need, the label the rest. */
+  :root .bot-report-spa-container #bot-report-body .rb-row { grid-template-columns: minmax(0, 1fr) auto 64px !important; gap: 8px !important; }
+  :root .bot-report-spa-container #bot-report-body .rb-row .rb-c { justify-self: end; }
+  :root .bot-report-spa-container #bot-report-body .rb-row .ev-pill { font-size: 10.5px !important; padding: 2px 6px !important; }
+  :root .bot-report-spa-container #bot-report-body .rb-tile { padding: 8px 10px !important; }
+  :root .bot-report-spa-container #bot-report-body .rb-tile .pv-tile-v { font-size: 14px !important; white-space: nowrap; overflow-wrap: normal; }
+
+  /* Coverage: the benchmark full width, target and resolved under it. */
+  :root .bot-report-spa-container #bot-report-body .cv-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  :root .bot-report-spa-container #bot-report-body .cv-tile-main { grid-column: 1 / -1; }
+
+  /* Regime rows: a narrower name column that never breaks the pair. */
+  :root .bot-report-spa-container #bot-report-body .rg-l b { font-size: 11.5px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  :root .bot-report-spa-container #bot-report-body .rg-l span { font-size: 10px !important; }
+
+  /* Traded assets: status and last-closed sit on the right edge. */
+  :root .bot-report-spa-container #bot-report-body .as-row > :is(:nth-child(2), :nth-child(5)) { justify-self: end; text-align: right !important; }
+}
+@media (max-width: 640px) {
+  :root .bot-report-spa-container #bot-report-body .lg-pl { justify-content: flex-start !important; }
+  :root .bot-report-spa-container #bot-report-body .gc-note.mk-head { display: block !important; }
+  :root .bot-report-spa-container #bot-report-body .gc-note.mk-head .info-ic { vertical-align: -2px; }
+}
+/* Score values in ink; the gauge arc already carries the tone (preview). */
+:root .bot-report-spa-container #bot-report-body .report-hero-scores .stat-tile-hero .stat-value { color: var(--ink) !important; }
+@media (max-width: 640px) {
+  /* Equal label height so the three score values sit on one line. */
+  :root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-label {
+    min-height: 2.6em; display: flex !important; align-items: flex-end; justify-content: center; }
+}
+/* Monte Carlo axis text at a steady ~10px on screen whatever the chart's
+   drawn width (--mc-k is set by BotDetailView from the live size). The
+   x-axis labels drop most of a line so the lowest y label never meets them. */
+@media (max-width: 900px) {
+  :root .bot-report-spa-container #bot-report-body .mc-svg { overflow: visible; }
+  :root .bot-report-spa-container #bot-report-body .mc-svg .mc-tick { font-size: calc(10px * var(--mc-k, 2.6)) !important; }
+  :root .bot-report-spa-container #bot-report-body .mc-svg .mc-tick-x { transform: translateY(0.8em); }
+}
+@media (max-width: 640px) {
+  /* "Trade 0" -> "0" and no "Breakeven" note (the 0% tick already marks
+     that line): both collide with their neighbours at phone width. */
+  :root .bot-report-spa-container #bot-report-body .mc-svg :is(.mc-x0, .mc-tick-note) { display: none; }
+  :root .bot-report-spa-container #bot-report-body .mc-vtabs { grid-template-columns: repeat(3, auto) !important; }
+}
+
+/* Portfolio report header: member chips and the "merged book" line the
+   server renders in place of a bot's market badge. */
+.bot-report-spa-container .report-head-members .report-members { margin-top: 8px; }
+.bot-report-spa-container .report-head-subline { margin-top: 6px; font-size: 12.5px; color: var(--ink-3); }
+@media (max-width: 640px) {
+  .bot-report-spa-container .report-head-members .pf-mchip { max-width: 160px; font-size: 11.5px; }
+}
+
+/* ========================================================================= */
+/* Admin shell: preview parity (header, content width, card heads, filter    */
+/* chips, analyze box). Appended last; `:root` + !important only where an   */
+/* earlier layer already uses them.                                          */
+/* ========================================================================= */
+/* Header: sans brand, quiet badge, green Admin pill, icon-only theme button,
+   neutral Log out. */
+:root .top-header .brand-name { font-family: var(--sans) !important; font-size: 14px !important; font-weight: 700 !important; letter-spacing: 0.02em !important; }
+:root .top-header .brand-badge-fintech { font-family: var(--sans) !important; font-size: 10.5px !important; font-weight: 600 !important;
+  letter-spacing: 0 !important; text-transform: none !important; color: var(--ink-2) !important;
+  background: var(--panel-2) !important; border: none !important; border-radius: 999px !important; padding: 1px 7px !important; box-shadow: none !important; }
+:root .top-header .brand-sub { font-family: var(--sans) !important; font-size: 11px !important; letter-spacing: 0.02em !important;
+  text-transform: none !important; color: var(--ink-3) !important; }
+:root .top-header .user-badge-admin { height: auto !important; padding: 3px 10px !important; border: none !important; border-radius: 999px !important;
+  background: color-mix(in srgb, var(--up) 14%, transparent) !important; box-shadow: none !important; }
+:root .top-header .user-badge-admin .user-badge-label { font-family: var(--sans) !important; font-size: 12px !important; font-weight: 600 !important;
+  letter-spacing: 0 !important; text-transform: none !important; color: color-mix(in srgb, var(--up) 80%, var(--ink)) !important; }
+:root .top-header .user-badge-admin .user-badge-pulse { background: var(--up) !important; box-shadow: none !important; animation: none !important; }
+:root .top-header .theme-btn { width: 34px !important; height: 34px !important; padding: 0 !important; justify-content: center !important;
+  border-radius: 10px !important; background: var(--panel) !important; border: 1px solid var(--line) !important; color: var(--ink-2) !important; box-shadow: none !important; }
+:root .top-header .theme-btn .theme-btn-label { display: none !important; }
+:root .top-header .btn-logout { background: var(--panel) !important; border: 1px solid var(--line) !important; color: var(--ink) !important;
+  border-radius: 10px !important; box-shadow: none !important; font-family: var(--sans) !important; }
+:root .top-header .btn-logout:hover { border-color: var(--ink-3) !important; }
+
+/* Content: one centred column, like the preview. */
+:root .admin-page { max-width: 1120px; margin-left: auto !important; margin-right: auto !important; }
+
+/* Card heads: title on the card itself, no grey band. */
+:root .admin-page .block > .block-h { background: transparent !important; border-bottom: none !important; padding-bottom: 4px !important; }
+:root .admin-page .block > .block-h h2 { font-size: 14px !important; font-weight: 700 !important; }
+:root .admin-page .block > .block-h .note { font-style: normal !important; color: var(--ink-3) !important; }
+:root .admin-page .tbl-toolbar .tbl-note-action,
+:root .admin-page .tbl-toolbar .note { font-style: normal !important; }
+
+/* Verdict filter chips: active = filled ink, others outlined. */
+:root .admin-page .filter-chip { background: var(--panel) !important; border: 1px solid var(--line) !important; color: var(--ink) !important;
+  border-radius: 999px !important; box-shadow: none !important; }
+:root .admin-page .filter-chip.active { background: var(--ink) !important; border-color: var(--ink) !important; color: var(--panel) !important; }
+:root .admin-page .filter-chip.active * { color: inherit !important; }
+:root .admin-page .filter-chip.active .chip-count,
+:root .admin-page .filter-chip.active [class*="count"] { background: color-mix(in srgb, var(--panel) 22%, transparent) !important; color: var(--panel) !important; }
+
+/* Analyze: sans input on the card, dark primary button, grey hint pill. */
+:root .analyze-search-input { font-family: var(--sans) !important; font-size: 13.5px !important; background: var(--panel) !important;
+  border: 1px solid var(--line) !important; border-radius: 12px !important; box-shadow: none !important; }
+:root .analyze-search-input:focus { border-color: var(--ink-3) !important; }
+:root .btn.pri.analyze-search-btn { background: var(--ink) !important; color: var(--panel) !important; border: none !important;
+  border-radius: 12px !important; box-shadow: none !important; background-image: none !important; }
+:root .btn.pri.analyze-search-btn:disabled { background: var(--ink-3) !important; opacity: 0.7 !important; }
+:root .analyze-hint-pill { font-family: var(--sans) !important; font-size: 11.5px !important; font-weight: 600 !important; letter-spacing: 0 !important;
+  text-transform: none !important; background: var(--panel-2) !important; color: var(--ink-2) !important; border: none !important; border-radius: 999px !important; }
+
+/* Portfolio runs: id in mono, like the preview. */
+:root .admin-page .tab-bots td[data-c="name"] .prun-id,
+:root .admin-page .tab-bots td[data-c="name"] .mono { font-family: var(--mono) !important; font-size: 12.5px !important; }
+/* Analyze: the wrapper, not the input, is the field -- one white box. */
+:root .analyze-search-input-wrap { background: var(--panel) !important; border: 1px solid var(--line) !important; border-radius: 12px !important; box-shadow: none !important; }
+:root .analyze-search-input-wrap:focus-within { border-color: var(--ink-3) !important; }
+:root .analyze-search-input-wrap .analyze-search-input { border: none !important; background: transparent !important; }
+/* Tables: header row on the card, a hairline under it. */
+:root .admin-page .tab-bots table thead th { background: transparent !important; border-bottom: 1px solid var(--line) !important; }
+
+/* Report short answer + tab answers inside the SPA: same frame as the cards. */
+:root .bot-report-spa-container #bot-report-body .short-answer { margin: 0 0 12px !important; }
+:root .bot-report-spa-container #bot-report-body .tab-answer { margin: 0 0 14px !important; }
+:root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-hint { margin-top: 1px; }
+:root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-label { flex-wrap: wrap !important; }
+:root .bot-report-spa-container #bot-report-body .stat-tile-hero .stat-hint { flex-basis: 100%; }

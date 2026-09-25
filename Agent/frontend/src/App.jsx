@@ -51,7 +51,12 @@ function RootRoute() {
     return <Navigate to="/admin" replace />;
   }
 
-  return <Navigate to="/login" replace />;
+  // A brand-new visitor with no bot code and no admin session used to land
+  // here, on `/login` -- an admin-only screen with no link back to the
+  // free "look up & analyze your own bot" tool. `/user` (UserHome) needs
+  // no login at all, so that is the correct default landing spot, not a
+  // dead end that only an admin can pass through.
+  return <Navigate to="/user" replace />;
 }
 
 function AppHeader() {
@@ -147,10 +152,10 @@ function AppHeader() {
             <div className="brand-name-row">
               <span className="brand-name">NORABT</span>
               <span className="brand-badge-fintech">
-                {isLoginPage ? "ADMIN PORTAL" : "AI ENGINE"}
+                {isLoginPage ? "Admin portal" : "AI Engine"}
               </span>
             </div>
-            <span className="brand-sub">OKX QUANT RISK PROTOCOL</span>
+            <span className="brand-sub">OKX quant risk protocol</span>
           </div>
         </div>
 
@@ -222,7 +227,7 @@ function AppHeader() {
         ) : isAdmin ? (
           <div className="user-badge-capsule user-badge-admin">
             <span className="user-badge-pulse" />
-            <span className="user-badge-label">ADMIN</span>
+            <span className="user-badge-label">Admin</span>
           </div>
         ) : null}
 

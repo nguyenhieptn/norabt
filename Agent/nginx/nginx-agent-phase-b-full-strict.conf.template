@@ -228,6 +228,18 @@ server {
         proxy_pass http://127.0.0.1:8770;
     }
 
+    # GET /portfolio/<PORT_...> -- trang báo cáo TỔ HỢP nhiều bot
+    # (Agent/backend/web/app.py's `portfolio_report`). Cùng mức giới hạn với
+    # /bot/ vì nó cũng chỉ ĐỌC một tài liệu đã ghi sẵn trên đĩa
+    # (data/report/multi/<id>/latest.json) rồi render -- nó KHÔNG BAO GIỜ
+    # chạy lại phân tích khi trượt, nên một lượt mở trang không thể biến
+    # thành N lượt gọi OKX. Việc chạy phân tích nằm ở POST
+    # /api/portfolio/analyze, đã thuộc `location /api/` bên dưới.
+    location /portfolio/ {
+        limit_req zone=agent_general burst=50 nodelay;
+        proxy_pass http://127.0.0.1:8770;
+    }
+
     # GET /admin -- xem giải thích đầy đủ trong nginx-agent.conf.template
     # (khối 80, location = /admin). Copy nguyên văn ở đây vì đây là một
     # server{} riêng, không kế thừa gì từ file kia.

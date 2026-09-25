@@ -14,7 +14,7 @@ a consumer is holding.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 

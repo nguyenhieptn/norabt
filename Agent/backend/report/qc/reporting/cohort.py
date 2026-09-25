@@ -30,6 +30,7 @@ from Agent.backend.report.qc.schemas.risk_assessment import (
 )
 from Agent.backend.report.qc.history.store import AssessmentHistoryStore
 from Agent.backend.report.qc.reporting.gaps import EvidenceGap, build_gaps
+from Agent.backend.report.qc.reporting.reasons import risk_level_text
 from Agent.backend.report.qc.scoring.fusion import DIMENSION_LABEL_VI
 from Agent.backend.report.qc.service import QCCoreService
 from Agent.backend.market.universe.registry import UniverseRegistry
@@ -231,6 +232,15 @@ class BotEvaluationRow(BaseModel):
     pnl_kurtosis: Optional[float] = None
     ledger_coverage_days: Optional[float] = None
     declared_lead_days: Optional[int] = None
+    # Distinguishes PARTIAL_LEDGER's two non-overlapping causes -- see
+    # service.py's `elif truncated or short_coverage:` branch. Boss's own
+    # correction on a real bot (58D7D205FB591484, 2026-09-23): an earlier
+    # report of mine attributed this bot's PARTIAL_LEDGER to hitting the
+    # 5-page fetch cap, when `ledger_truncated=False` here would have shown
+    # the real cause was `short_coverage` (its fetched trades cover only
+    # 90 of its 325 days as lead trader).
+    ledger_truncated: Optional[bool] = None
+    reconciliation_warnings: List[str] = Field(default_factory=list)
     positions_without_instrument: int = 0
     stress_verdict: Optional[str] = None
     quality_components: Dict[str, float] = Field(default_factory=dict)
@@ -564,7 +574,7 @@ class CohortAssessmentService:
         parts.append(
             f"Conclusion: {assessment.risk_tier.value} "
             f"({assessment.risk_score:.1f}/100, confidence {assessment.confidence:.0f}%) "
-            f"→ recommended action {assessment.recommended_action}."
+            f"→ risk level {risk_level_text(assessment.recommended_action)}."
         )
         if bot.drawdown_analysis.wiped_out:
             parts.append(
@@ -919,6 +929,8 @@ class CohortAssessmentService:
                     pnl_kurtosis=bot.trade_statistics.pnl_kurtosis,
                     ledger_coverage_days=bot.reconciliation.ledger_coverage_days,
                     declared_lead_days=bot.reconciliation.declared_lead_days,
+                    ledger_truncated=bot.reconciliation.ledger_truncated,
+                    reconciliation_warnings=list(bot.reconciliation.warnings or []),
                     positions_without_instrument=(
                         bot.current_state.unknown_positions_count
                     ),

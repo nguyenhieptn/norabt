@@ -325,6 +325,18 @@ class PairedBotReportService:
                 "capital_basis": bot.capital.basis,
                 "ledger_coverage_days": bot.reconciliation.ledger_coverage_days,
                 "declared_lead_days": bot.reconciliation.declared_lead_days,
+                # Separates PARTIAL_LEDGER's two distinct causes -- boss's
+                # own correction on a real bot (58D7D205FB591484, 2026-09-23):
+                # `service.py`'s `elif truncated or short_coverage:` branch
+                # collapses both into one status/one message, so a reader
+                # (and an earlier report of mine) could not tell "hit the
+                # 5-page fetch limit" apart from "this bot's own recent
+                # trading only covers part of its time as lead trader" --
+                # two different, non-overlapping explanations for the same
+                # status. `warnings` carries service.py's own already-
+                # written detail sentence for whichever one applied.
+                "ledger_truncated": bot.reconciliation.ledger_truncated,
+                "reconciliation_warnings": list(bot.reconciliation.warnings or []),
                 "stress_volatility_2x": stress.volatility_2x_pnl_impact,
                 "stress_spread_3x": stress.spread_3x_slippage_impact,
                 "stress_liquidity_half": stress.liquidity_half_exit_impact,
